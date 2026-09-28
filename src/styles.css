@@ -1,0 +1,195 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/*
+ * Design tokens. Dark is the primary theme; light mirrors it.
+ * Surfaces step up in lightness by small increments — borders do the separating, not shadows.
+ */
+:root {
+  color-scheme: dark;
+
+  --bg: oklch(0.178 0.004 270);
+  --bg-sidebar: oklch(0.155 0.004 270);
+  --bg-raised: oklch(0.2 0.005 270);
+  --bg-hover: oklch(0.235 0.006 270);
+  --bg-active: oklch(0.265 0.008 270);
+  --bg-inset: oklch(0.155 0.004 270);
+
+  --border: oklch(0.275 0.006 270);
+  --border-subtle: oklch(0.225 0.005 270);
+  --border-strong: oklch(0.34 0.008 270);
+
+  --fg: oklch(0.94 0.004 270);
+  --fg-muted: oklch(0.72 0.01 270);
+  --fg-subtle: oklch(0.56 0.012 270);
+  --fg-faint: oklch(0.44 0.01 270);
+
+  --accent: oklch(0.64 0.16 277);
+  --accent-fg: oklch(0.98 0.01 277);
+  --accent-soft: oklch(0.64 0.16 277 / 0.16);
+
+  --add: oklch(0.74 0.14 152);
+  --add-bg: oklch(0.72 0.14 152 / 0.1);
+  --add-gutter: oklch(0.72 0.14 152 / 0.16);
+  --del: oklch(0.7 0.16 22);
+  --del-bg: oklch(0.68 0.17 22 / 0.1);
+  --del-gutter: oklch(0.68 0.17 22 / 0.16);
+  --mod: oklch(0.8 0.13 78);
+  --ren: oklch(0.72 0.11 245);
+
+  --hunk-bg: oklch(0.64 0.16 277 / 0.07);
+  --hunk-fg: oklch(0.68 0.06 277);
+
+  --ring: oklch(0.64 0.16 277 / 0.55);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --bg: oklch(1 0 0);
+    --bg-sidebar: oklch(0.975 0.002 270);
+    --bg-raised: oklch(0.985 0.002 270);
+    --bg-hover: oklch(0.96 0.003 270);
+    --bg-active: oklch(0.935 0.005 270);
+    --bg-inset: oklch(0.975 0.002 270);
+
+    --border: oklch(0.91 0.004 270);
+    --border-subtle: oklch(0.94 0.003 270);
+    --border-strong: oklch(0.85 0.006 270);
+
+    --fg: oklch(0.22 0.01 270);
+    --fg-muted: oklch(0.42 0.012 270);
+    --fg-subtle: oklch(0.56 0.012 270);
+    --fg-faint: oklch(0.7 0.01 270);
+
+    --accent: oklch(0.55 0.19 277);
+    --accent-fg: oklch(0.99 0.005 277);
+    --accent-soft: oklch(0.55 0.19 277 / 0.1);
+
+    --add: oklch(0.56 0.15 152);
+    --add-bg: oklch(0.72 0.15 152 / 0.12);
+    --add-gutter: oklch(0.72 0.15 152 / 0.22);
+    --del: oklch(0.56 0.19 25);
+    --del-bg: oklch(0.7 0.17 22 / 0.1);
+    --del-gutter: oklch(0.7 0.17 22 / 0.2);
+    --mod: oklch(0.62 0.14 70);
+    --ren: oklch(0.55 0.13 245);
+
+    --hunk-bg: oklch(0.55 0.19 277 / 0.06);
+    --hunk-fg: oklch(0.5 0.08 277);
+
+    --ring: oklch(0.55 0.19 277 / 0.45);
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-bg: var(--bg);
+  --color-bg-sidebar: var(--bg-sidebar);
+  --color-bg-raised: var(--bg-raised);
+  --color-bg-hover: var(--bg-hover);
+  --color-bg-active: var(--bg-active);
+  --color-bg-inset: var(--bg-inset);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-faint: var(--fg-faint);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-add: var(--add);
+  --color-add-bg: var(--add-bg);
+  --color-add-gutter: var(--add-gutter);
+  --color-del: var(--del);
+  --color-del-bg: var(--del-bg);
+  --color-del-gutter: var(--del-gutter);
+  --color-mod: var(--mod);
+  --color-ren: var(--ren);
+  --color-hunk-bg: var(--hunk-bg);
+  --color-hunk-fg: var(--hunk-fg);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg-sidebar);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+    font-feature-settings: "cv11", "ss03";
+    -webkit-font-smoothing: antialiased;
+    /* App chrome is not a document: no text selection or I-beam except where opted in. */
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+    overflow: hidden;
+  }
+
+  /* In the desktop app the window itself provides a native translucent sidebar material. */
+  html[data-tauri] body {
+    background: transparent;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
+
+  button {
+    cursor: default;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--border-strong);
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@utility sidebar-surface {
+  background: var(--bg-sidebar);
+  html[data-tauri] & {
+    background: transparent;
+  }
+}
+
+@utility selectable {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
