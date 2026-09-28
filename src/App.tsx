@@ -1,23 +1,37 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { FilePanel } from "./components/FilePanel";
-import { fileAnchorId, ReviewPane } from "./components/ReviewPane";
+import { fileAnchorId, ReviewPane, Welcome } from "./components/ReviewPane";
 import { Sidebar } from "./components/Sidebar";
+import { useChangedFiles, useLiveGitData, useRepos } from "./lib/queries";
 import { buildTree, treeOrder } from "./lib/utils";
-import { changedFiles } from "./mock";
-import { useSelectedWorktree, useStore } from "./store";
+import { orderedWorktrees, resolveSelection, useStore } from "./store";
+import type { Worktree } from "./types";
 
 export default function App() {
-  const { repo, worktree } = useSelectedWorktree();
-  const viewed = useStore((s) => s.viewed[worktree.id]);
+  useLiveGitData();
+  const repos = useRepos();
+  const selectedId = useStore((s) => s.selectedWorktreeId);
+  const collapsedRepos = useStore((s) => s.collapsedRepos);
+  const scope = useStore((s) => s.scope);
   const setActivePath = useStore((s) => s.setActivePath);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const selection = repos.data ? resolveSelection(repos.data, selectedId) : undefined;
+  const worktree = selection?.worktree;
+  const base = selection?.repo.defaultBranch ?? null;
+
+  const ordered = useMemo(() => orderedWorktrees(repos.data ?? [], collapsedRepos), [repos.data, collapsedRepos]);
+  const shortcuts = useMemo(() => new Map(ordered.slice(0, 9).map((w, i) => [w.id, i + 1])), [ordered]);
+  useWorktreeHotkeys(ordered, worktree?.id);
+
+  const filesQuery = useChangedFiles(worktree, base, scope);
   const { tree, files } = useMemo(() => {
-    const tree = buildTree(changedFiles(worktree.id));
+    const tree = buildTree(filesQuery.data ?? []);
     return { tree, files: treeOrder(tree) };
-  }, [worktree.id]);
+  }, [filesQuery.data]);
+  const viewed = useStore((s) => (worktree ? s.viewed[worktree.id] : undefined));
   const viewedCount = files.filter((f) => viewed?.[f.path]).length;
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: "main-layout", storage: localStorage });
@@ -35,25 +49,62 @@ export default function App() {
     <TooltipPrimitive.Provider delayDuration={500} skipDelayDuration={200}>
       <Group orientation="horizontal" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged} className="h-full">
         <Panel id="sidebar" defaultSize={248} minSize={200} maxSize={420} groupResizeBehavior="preserve-pixel-size">
-          <Sidebar />
+          <Sidebar selectedId={worktree?.id ?? null} shortcuts={shortcuts} />
         </Panel>
         <ResizeHandle />
         <Panel id="files" defaultSize={272} minSize={220} maxSize={520} groupResizeBehavior="preserve-pixel-size">
           <FilePanel
-            worktreeId={worktree.id}
+            worktreeId={worktree?.id ?? ""}
             tree={tree}
             fileCount={files.length}
             viewedCount={viewedCount}
+            loading={!!worktree && filesQuery.isPending}
             onSelect={jumpTo}
           />
         </Panel>
         <ResizeHandle />
         <Panel id="diff" minSize={400}>
-          <ReviewPane repo={repo} worktree={worktree} files={files} scrollRef={scrollRef} />
+          {selection ? (
+            <ReviewPane
+              repo={selection.repo}
+              worktree={selection.worktree}
+              files={files}
+              query={filesQuery}
+              scrollRef={scrollRef}
+            />
+          ) : (
+            <Welcome loading={repos.isPending} />
+          )}
         </Panel>
       </Group>
     </TooltipPrimitive.Provider>
   );
+}
+
+/** ⌘1–⌘9 jump to a worktree in sidebar order; ⌥↑ / ⌥↓ step through them. */
+function useWorktreeHotkeys(ordered: Worktree[], selectedId: string | undefined) {
+  const selectWorktree = useStore((s) => s.selectWorktree);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && e.target.closest("input, textarea, [contenteditable]")) return;
+      if (e.metaKey && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+        const target = ordered[Number(e.key) - 1];
+        if (target) {
+          e.preventDefault();
+          selectWorktree(target.id);
+        }
+      } else if (e.altKey && !e.metaKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        if (ordered.length === 0) return;
+        e.preventDefault();
+        const index = ordered.findIndex((w) => w.id === selectedId);
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        const next = index === -1 ? 0 : (index + step + ordered.length) % ordered.length;
+        selectWorktree(ordered[next].id);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [ordered, selectedId, selectWorktree]);
 }
 
 function ResizeHandle() {

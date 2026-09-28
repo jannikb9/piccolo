@@ -1,132 +1,97 @@
-// Placeholder data for milestone 1 (layout and chrome). Replaced by real git data in milestone 2.
-import type { ChangedFile, Repo } from "./types";
+// Placeholder data used when the UI runs in a plain browser (`pnpm dev`) instead of the desktop app.
+import type { ChangedFile, DiffScope, Repo, WorktreeStats } from "./types";
 
 const minutesAgo = (m: number) => Date.now() - m * 60_000;
 
-export const repos: Repo[] = [
+const worktree = (repoId: string, name: string, branch: string, fields: { dirty?: boolean; minutes: number; isMain?: boolean }) => ({
+  id: `${repoId}/${name}`,
+  repoId,
+  path: `${repoId}/${name}`,
+  name,
+  branch,
+  head: "a41c9e2",
+  isMain: fields.isMain ?? false,
+  dirty: fields.dirty ?? false,
+  updatedAt: minutesAgo(fields.minutes),
+});
+
+export const mockRepos: Repo[] = [
   {
-    id: "spoke-app",
+    id: "~/projects/spoke-app",
     name: "spoke-app",
     path: "~/projects/spoke-app",
     defaultBranch: "main",
+    error: null,
     worktrees: [
-      {
-        id: "spoke-app/auth-session",
-        repoId: "spoke-app",
-        path: "~/projects/spoke-app-worktrees/auth-session",
-        name: "auth-session",
-        branch: "feat/auth-session-refresh",
-        head: "a41c9e2",
-        isMain: false,
-        dirty: true,
-        ahead: 3,
-        behind: 0,
-        additions: 312,
-        deletions: 84,
-        updatedAt: minutesAgo(2),
-      },
-      {
-        id: "spoke-app/billing",
-        repoId: "spoke-app",
-        path: "~/projects/spoke-app-worktrees/billing",
-        name: "billing",
-        branch: "agent/refactor-billing-webhooks",
-        head: "9be0f11",
-        isMain: false,
-        dirty: false,
-        ahead: 7,
-        behind: 2,
-        additions: 1204,
-        deletions: 967,
-        updatedAt: minutesAgo(38),
-      },
-      {
-        id: "spoke-app/nav",
-        repoId: "spoke-app",
-        path: "~/projects/spoke-app-worktrees/nav",
-        name: "nav",
-        branch: "fix/nav-overflow",
-        head: "31d7a08",
-        isMain: false,
-        dirty: false,
-        ahead: 1,
-        behind: 12,
-        additions: 18,
-        deletions: 6,
-        updatedAt: minutesAgo(60 * 26),
-      },
-      {
-        id: "spoke-app/main",
-        repoId: "spoke-app",
-        path: "~/projects/spoke-app",
-        name: "spoke-app",
-        branch: "main",
-        head: "e0a2b54",
-        isMain: true,
-        dirty: false,
-        ahead: 0,
-        behind: 0,
-        additions: 0,
-        deletions: 0,
-        updatedAt: minutesAgo(60 * 50),
-      },
+      worktree("~/projects/spoke-app", "spoke-app", "main", { minutes: 60 * 50, isMain: true }),
+      worktree("~/projects/spoke-app", "auth-session", "feat/auth-session-refresh", { dirty: true, minutes: 2 }),
+      worktree("~/projects/spoke-app", "billing", "agent/refactor-billing-webhooks", { minutes: 38 }),
+      worktree("~/projects/spoke-app", "nav", "fix/nav-overflow", { minutes: 60 * 26 }),
     ],
   },
   {
-    id: "infra",
+    id: "~/projects/infra",
     name: "infra",
     path: "~/projects/infra",
     defaultBranch: "main",
-    worktrees: [
-      {
-        id: "infra/main",
-        repoId: "infra",
-        path: "~/projects/infra",
-        name: "infra",
-        branch: "main",
-        head: "77c1d3e",
-        isMain: true,
-        dirty: true,
-        ahead: 0,
-        behind: 0,
-        additions: 22,
-        deletions: 4,
-        updatedAt: minutesAgo(9),
-      },
-    ],
+    error: null,
+    worktrees: [worktree("~/projects/infra", "infra", "main", { dirty: true, minutes: 9, isMain: true })],
   },
 ];
 
-const files: Record<string, ChangedFile[]> = {
-  "spoke-app/auth-session": [
-    { path: "src/auth/session.ts", status: "modified", additions: 42, deletions: 8 },
-    { path: "src/auth/tokens.ts", status: "added", additions: 61, deletions: 0 },
-    { path: "src/auth/refresh.ts", status: "added", additions: 88, deletions: 0 },
-    { path: "src/auth/legacy-cookie.ts", status: "deleted", additions: 0, deletions: 47 },
-    { path: "src/api/client.ts", status: "modified", additions: 23, deletions: 11 },
-    { path: "src/api/interceptors/retry.ts", oldPath: "src/api/retry.ts", status: "renamed", additions: 4, deletions: 2 },
-    { path: "src/ui/components/Nav.tsx", status: "modified", additions: 9, deletions: 3 },
-    { path: "src/ui/components/SessionBanner.tsx", status: "added", additions: 37, deletions: 0 },
-    { path: "src/ui/hooks/useSession.ts", status: "modified", additions: 14, deletions: 6 },
-    { path: "tests/auth/refresh.test.ts", status: "added", additions: 29, deletions: 0 },
-    { path: "package.json", status: "modified", additions: 2, deletions: 1 },
-    { path: "public/logo.png", status: "modified", additions: 0, deletions: 0, binary: true },
+const committed = (f: Omit<ChangedFile, "binary"> & { binary?: boolean }) => ({ binary: false, ...f, committed: true });
+const uncommitted = (f: Omit<ChangedFile, "binary"> & { binary?: boolean }) => ({ binary: false, ...f, committed: false });
+
+const files: Record<string, (ChangedFile & { committed: boolean })[]> = {
+  "~/projects/spoke-app/auth-session": [
+    committed({ path: "src/auth/session.ts", status: "modified", additions: 42, deletions: 8 }),
+    committed({ path: "src/auth/tokens.ts", status: "added", additions: 61, deletions: 0 }),
+    committed({ path: "src/auth/refresh.ts", status: "added", additions: 88, deletions: 0 }),
+    committed({ path: "src/auth/legacy-cookie.ts", status: "deleted", additions: 0, deletions: 47 }),
+    committed({ path: "src/api/client.ts", status: "modified", additions: 23, deletions: 11 }),
+    committed({ path: "src/api/interceptors/retry.ts", oldPath: "src/api/retry.ts", status: "renamed", additions: 4, deletions: 2 }),
+    uncommitted({ path: "src/ui/components/Nav.tsx", status: "modified", additions: 9, deletions: 3 }),
+    uncommitted({ path: "src/ui/components/SessionBanner.tsx", status: "added", additions: 37, deletions: 0 }),
+    committed({ path: "src/ui/hooks/useSession.ts", status: "modified", additions: 14, deletions: 6 }),
+    uncommitted({ path: "tests/auth/refresh.test.ts", status: "added", additions: 29, deletions: 0 }),
+    committed({ path: "package.json", status: "modified", additions: 2, deletions: 1 }),
+    committed({ path: "public/logo.png", status: "modified", additions: 0, deletions: 0, binary: true }),
   ],
-  "spoke-app/billing": [
-    { path: "services/billing/webhooks/handler.ts", status: "modified", additions: 210, deletions: 344 },
-    { path: "services/billing/webhooks/events.ts", status: "added", additions: 402, deletions: 0 },
-    { path: "services/billing/stripe.ts", status: "modified", additions: 88, deletions: 120 },
+  "~/projects/spoke-app/billing": [
+    committed({ path: "services/billing/webhooks/handler.ts", status: "modified", additions: 210, deletions: 344 }),
+    committed({ path: "services/billing/webhooks/events.ts", status: "added", additions: 402, deletions: 0 }),
+    committed({ path: "services/billing/stripe.ts", status: "modified", additions: 88, deletions: 120 }),
   ],
-  "spoke-app/nav": [
-    { path: "src/ui/components/Nav.tsx", status: "modified", additions: 12, deletions: 4 },
-    { path: "src/ui/styles/nav.css", status: "modified", additions: 6, deletions: 2 },
+  "~/projects/spoke-app/nav": [
+    committed({ path: "src/ui/components/Nav.tsx", status: "modified", additions: 12, deletions: 4 }),
+    committed({ path: "src/ui/styles/nav.css", status: "modified", additions: 6, deletions: 2 }),
   ],
-  "spoke-app/main": [],
-  "infra/main": [{ path: "terraform/modules/db/main.tf", status: "modified", additions: 22, deletions: 4 }],
+  "~/projects/infra/infra": [uncommitted({ path: "terraform/modules/db/main.tf", status: "modified", additions: 22, deletions: 4 })],
 };
 
-export function changedFiles(worktreeId: string): ChangedFile[] {
-  return files[worktreeId] ?? [];
+const aheadBehind: Record<string, [number, number]> = {
+  "~/projects/spoke-app/auth-session": [3, 0],
+  "~/projects/spoke-app/billing": [7, 2],
+  "~/projects/spoke-app/nav": [1, 12],
+};
+
+const delay = <T>(value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), 150));
+
+export function mockChangedFiles(worktreePath: string, scope: DiffScope): Promise<ChangedFile[]> {
+  const all = files[worktreePath] ?? [];
+  const inScope = all.filter((f) => scope === "all" || f.committed === (scope === "committed"));
+  return delay(inScope.map(({ committed: _, ...f }) => f));
+}
+
+export function mockWorktreeStats(worktreePath: string): Promise<WorktreeStats> {
+  const all = files[worktreePath] ?? [];
+  const [ahead, behind] = aheadBehind[worktreePath] ?? [0, 0];
+  return delay({
+    ahead,
+    behind,
+    additions: all.reduce((n, f) => n + f.additions, 0),
+    deletions: all.reduce((n, f) => n + f.deletions, 0),
+  });
 }
 
 export type MockLine =
@@ -135,6 +100,7 @@ export type MockLine =
   | { kind: "add"; new: number; text: string }
   | { kind: "del"; old: number; text: string };
 
+// Stand-in diff body until real diffs are rendered in milestone 3.
 export const sampleHunk: MockLine[] = [
   { kind: "hunk", text: "@@ -18,14 +18,22 @@ export async function getSession(req: Request) {" },
   { kind: "ctx", old: 18, new: 18, text: "  const cookie = req.headers.get(\"cookie\");" },

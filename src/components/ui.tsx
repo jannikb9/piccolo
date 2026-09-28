@@ -1,7 +1,7 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { Check } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { cn } from "../lib/utils";
 import type { FileStatus } from "../types";
 
@@ -148,6 +148,10 @@ export function DiffBlocks({ additions, deletions }: { additions: number; deleti
       ))}
     </span>
   );
+}
+
+export function Skeleton({ className, style }: { className?: string; style?: CSSProperties }) {
+  return <span className={cn("block animate-pulse rounded bg-bg-hover", className)} style={style} />;
 }
 
 export function ViewedToggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {

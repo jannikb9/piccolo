@@ -2,19 +2,21 @@ import { Check, ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { cn, type TreeNode } from "../lib/utils";
 import { useStore } from "../store";
-import { DiffCount, StatusLetter } from "./ui";
+import { DiffCount, Skeleton, StatusLetter } from "./ui";
 
 export function FilePanel({
   worktreeId,
   tree,
   fileCount,
   viewedCount,
+  loading,
   onSelect,
 }: {
   worktreeId: string;
   tree: TreeNode[];
   fileCount: number;
   viewedCount: number;
+  loading: boolean;
   onSelect: (path: string) => void;
 }) {
   const progress = fileCount === 0 ? 0 : viewedCount / fileCount;
@@ -35,8 +37,14 @@ export function FilePanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {fileCount === 0 ? (
-          <p className="px-2 py-6 text-center text-[12px] text-fg-subtle">No changed files</p>
+        {loading ? (
+          <div className="space-y-3 px-2 pt-2">
+            {[28, 20, 32, 24, 18].map((w, i) => (
+              <Skeleton key={i} className="h-3" style={{ width: `${w * 4}px` }} />
+            ))}
+          </div>
+        ) : fileCount === 0 ? (
+          worktreeId && <p className="px-2 py-6 text-center text-[12px] text-fg-subtle">No changed files</p>
         ) : (
           <TreeList nodes={tree} depth={0} worktreeId={worktreeId} onSelect={onSelect} />
         )}
