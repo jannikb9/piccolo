@@ -1,4 +1,5 @@
 mod git;
+mod menu;
 mod repos;
 mod watch;
 
@@ -13,6 +14,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
+            menu::install(app)?;
             let handle = app.handle();
             let repos = Repos::load(handle);
             let watchers = Watchers::default();

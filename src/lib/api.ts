@@ -49,6 +49,13 @@ export function onRepoChanged(callback: (repoId: string) => void): () => void {
   return () => void unlisten.then((fn) => fn());
 }
 
+/** Fires when "Settings…" is chosen from the app menu (⌘,). */
+export function onOpenSettings(callback: () => void): () => void {
+  if (!isTauri) return () => {};
+  const unlisten = listen("open-settings", () => callback());
+  return () => void unlisten.then((fn) => fn());
+}
+
 export function onWindowFocusChanged(callback: (focused: boolean) => void): () => void {
   if (!isTauri) return () => {};
   const unlisten = getCurrentWindow().onFocusChanged((e) => callback(e.payload));

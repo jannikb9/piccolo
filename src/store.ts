@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { CodeThemeId } from "./lib/codeThemes";
 import type { DiffLayout, DiffScope, Repo, Worktree } from "./types";
 
 type PathSet = Record<string, true>;
@@ -10,6 +11,7 @@ type State = {
   layout: DiffLayout;
   scope: DiffScope;
   hideWhitespace: boolean;
+  codeTheme: CodeThemeId;
   /** worktreeId → set of viewed file paths */
   viewed: Record<string, PathSet>;
   /**
@@ -26,6 +28,7 @@ type State = {
   setLayout: (layout: DiffLayout) => void;
   setScope: (scope: DiffScope) => void;
   toggleHideWhitespace: () => void;
+  setCodeTheme: (theme: CodeThemeId) => void;
   toggleViewed: (worktreeId: string, path: string) => void;
   setCollapsed: (worktreeId: string, path: string, collapsed: boolean) => void;
   setActivePath: (path: string | null) => void;
@@ -47,6 +50,7 @@ export const useStore = create<State>()(
       layout: "split",
       scope: "all",
       hideWhitespace: false,
+      codeTheme: "github",
       viewed: {},
       collapsed: {},
       activePath: null,
@@ -57,6 +61,7 @@ export const useStore = create<State>()(
       setLayout: (layout) => set({ layout }),
       setScope: (scope) => set({ scope }),
       toggleHideWhitespace: () => set((s) => ({ hideWhitespace: !s.hideWhitespace })),
+      setCodeTheme: (codeTheme) => set({ codeTheme }),
       // Like GitHub: marking a file viewed collapses it, un-marking expands it again.
       toggleViewed: (wt, path) =>
         set((s) => {
@@ -80,6 +85,7 @@ export const useStore = create<State>()(
         layout: s.layout,
         scope: s.scope,
         hideWhitespace: s.hideWhitespace,
+        codeTheme: s.codeTheme,
       }),
     },
   ),

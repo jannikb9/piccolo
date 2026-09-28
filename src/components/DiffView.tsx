@@ -25,6 +25,17 @@ const unsafeCSS = /* css */ `
   :host {
     --diffs-dark-bg: var(--bg);
     --diffs-light-bg: var(--bg);
+
+    /* Quieter row tints than the theme defaults so syntax colours stay readable on changed
+       lines; the changed words themselves get the stronger tint. */
+    --diffs-addition-color-override: var(--add);
+    --diffs-deletion-color-override: var(--del);
+    --diffs-bg-addition-override: color-mix(in oklab, var(--add) 8%, var(--bg));
+    --diffs-bg-addition-number-override: color-mix(in oklab, var(--add) 14%, var(--bg));
+    --diffs-bg-addition-emphasis-override: color-mix(in oklab, var(--add) 28%, transparent);
+    --diffs-bg-deletion-override: color-mix(in oklab, var(--del) 8%, var(--bg));
+    --diffs-bg-deletion-number-override: color-mix(in oklab, var(--del) 14%, var(--bg));
+    --diffs-bg-deletion-emphasis-override: color-mix(in oklab, var(--del) 28%, transparent);
   }
   [data-diffs-header] {
     background: var(--bg);

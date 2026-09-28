@@ -1,10 +1,13 @@
+import { useWorkerPool } from "@pierre/diffs/react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { useEffect, useMemo, useRef } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { FilePanel } from "./components/FilePanel";
 import type { DiffViewHandle } from "./components/DiffView";
 import { ReviewPane, Welcome } from "./components/ReviewPane";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
+import { shikiThemes } from "./lib/codeThemes";
 import { useChangedFiles, useDiffPatch, useLiveGitData, useRepos } from "./lib/queries";
 import { buildTree, treeOrder } from "./lib/utils";
 import { orderedWorktrees, resolveSelection, useStore } from "./store";
@@ -12,6 +15,7 @@ import type { Worktree } from "./types";
 
 export default function App() {
   useLiveGitData();
+  useCodeThemeSync();
   const repos = useRepos();
   const selectedId = useStore((s) => s.selectedWorktreeId);
   const collapsedRepos = useStore((s) => s.collapsedRepos);
@@ -77,8 +81,18 @@ export default function App() {
           )}
         </Panel>
       </Group>
+      <SettingsDialog />
     </TooltipPrimitive.Provider>
   );
+}
+
+/** Applies the chosen syntax theme to the highlighter workers, which re-render mounted diffs. */
+function useCodeThemeSync() {
+  const pool = useWorkerPool();
+  const codeTheme = useStore((s) => s.codeTheme);
+  useEffect(() => {
+    pool?.setRenderOptions({ theme: shikiThemes(codeTheme) });
+  }, [pool, codeTheme]);
 }
 
 /** ⌘1–⌘9 jump to a worktree in sidebar order; ⌥↑ / ⌥↓ step through them. */

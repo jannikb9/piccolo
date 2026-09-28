@@ -1,0 +1,83 @@
+import * as Dialog from "@radix-ui/react-dialog";
+import * as RadioGroup from "@radix-ui/react-radio-group";
+import { X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { isTauri, onOpenSettings } from "../lib/api";
+import { codeThemes, type CodeThemeId } from "../lib/codeThemes";
+import { useStore } from "../store";
+
+/** App settings, opened from the app menu or with ⌘,. */
+export function SettingsDialog() {
+  const [open, setOpen] = useState(false);
+  const codeTheme = useStore((s) => s.codeTheme);
+  const setCodeTheme = useStore((s) => s.setCodeTheme);
+
+  useEffect(() => onOpenSettings(() => setOpen(true)), []);
+
+  // In the desktop app the menu's ⌘, accelerator handles this; the browser build needs a key handler.
+  useEffect(() => {
+    if (isTauri) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === ",") {
+        e.preventDefault();
+        setOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  return (
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
+        <Dialog.Content
+          aria-describedby={undefined}
+          // Start on the selected theme so arrow keys change it right away.
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).querySelector<HTMLElement>("[role=radio][data-state=checked]")?.focus();
+          }}
+          className="fixed top-1/2 left-1/2 z-50 w-[440px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-bg-raised shadow-2xl shadow-black/40 outline-none"
+        >
+          <header className="flex h-12 items-center border-b border-border-subtle pr-2 pl-4">
+            <Dialog.Title className="text-[13px] font-medium">Settings</Dialog.Title>
+            <Dialog.Close
+              aria-label="Close"
+              className="ml-auto grid size-7 place-items-center rounded-md text-fg-subtle hover:bg-bg-hover hover:text-fg"
+            >
+              <X className="size-4" />
+            </Dialog.Close>
+          </header>
+
+          <section className="p-4">
+            <h3 className="mb-2 text-[12px] font-medium text-fg-subtle">Syntax theme</h3>
+            <RadioGroup.Root
+              value={codeTheme}
+              onValueChange={(v) => setCodeTheme(v as CodeThemeId)}
+              aria-label="Syntax theme"
+              className="overflow-hidden rounded-lg border border-border"
+            >
+              {codeThemes.map((theme) => (
+                <RadioGroup.Item
+                  key={theme.id}
+                  value={theme.id}
+                  className="group flex w-full items-center gap-3 border-b border-border-subtle px-3 py-2.5 text-left outline-none last:border-b-0 hover:bg-bg-hover focus-visible:bg-bg-hover data-[state=checked]:bg-accent-soft"
+                >
+                  <span className="grid size-4 shrink-0 place-items-center rounded-full border border-border-strong group-data-[state=checked]:border-accent">
+                    <RadioGroup.Indicator className="size-2 rounded-full bg-accent" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-medium text-fg">{theme.label}</span>
+                    <span className="block text-[12px] text-fg-subtle">{theme.description}</span>
+                  </span>
+                </RadioGroup.Item>
+              ))}
+            </RadioGroup.Root>
+            <p className="mt-2 text-[12px] text-fg-faint">Light and dark variants follow your system appearance.</p>
+          </section>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
