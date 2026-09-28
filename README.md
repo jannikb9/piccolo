@@ -17,7 +17,7 @@ cd src-tauri && cargo test
 
 - [x] M1 — App shell: window chrome, design tokens (dark/light), resizable three-column layout
 - [x] M2 — Repos & worktrees from git, changed-file lists, switching (⌘1–9, ⌥↑/↓), auto-discovery
-- [ ] M3 — Real diffs: changed-file tree, `@pierre/diffs` + Shiki, split/unified, renames/binary
+- [x] M3 — Real diffs: `@pierre/diffs` CodeView (virtualized, worker-highlighted), split/unified, expandable context, hide whitespace
 - [ ] M4 — Review flow: viewed state with content fingerprints, keyboard nav, expand context, live refresh
 - [ ] M5 — Polish: empty/loading/error states, large-diff performance, transitions
 
@@ -29,18 +29,19 @@ src/
   components/
     Sidebar.tsx         repos → worktrees
     FilePanel.tsx       changed-file tree + viewed progress
-    ReviewPane.tsx      toolbar + diff stream with sticky file headers
-    MockDiff.tsx        placeholder diff body (replaced in M3)
+    ReviewPane.tsx      toolbar + loading/error/empty states around the diff
+    DiffView.tsx        CodeView from @pierre/diffs with our file headers
     ui.tsx              primitives: Tooltip, Segmented, badges, Viewed toggle
   lib/
     api.ts              typed wrappers around Tauri commands and events
+    diff.ts             patch parsing, default-collapsed files (lockfiles, generated)
     queries.ts          TanStack Query hooks, live refresh on focus / repo changes
   styles.css            design tokens (OKLCH) + Tailwind theme
   store.ts              UI state (Zustand, persisted), worktree ordering
   types.ts              shapes returned by the Rust backend
   mock.ts               placeholder data used when running in a plain browser
 src-tauri/src/
-  git.rs                git CLI wrapper: worktrees, status, changed files (+ tests)
+  git.rs                git CLI wrapper: worktrees, status, changed files, patches, file contents (+ tests)
   repos.rs              saved repo list and the Tauri commands
   watch.rs              watches .git for added/removed worktrees and branch switches
 ```

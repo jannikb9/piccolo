@@ -9,19 +9,27 @@ type State = {
   collapsedRepos: PathSet;
   layout: DiffLayout;
   scope: DiffScope;
+  hideWhitespace: boolean;
   /** worktreeId → set of viewed file paths */
   viewed: Record<string, PathSet>;
-  /** worktreeId → set of collapsed file paths */
-  collapsed: Record<string, PathSet>;
+  /**
+   * worktreeId → path → collapsed. Only explicit choices are stored; files without an entry use
+   * their default (generated files start collapsed).
+   */
+  collapsed: Record<string, Record<string, boolean>>;
   activePath: string | null;
+  /** Scroll tracking leaves `activePath` alone until then, so an explicit jump keeps its target. */
+  activePinnedUntil: number;
 
   selectWorktree: (id: string) => void;
   toggleRepo: (id: string) => void;
   setLayout: (layout: DiffLayout) => void;
   setScope: (scope: DiffScope) => void;
+  toggleHideWhitespace: () => void;
   toggleViewed: (worktreeId: string, path: string) => void;
-  toggleCollapsed: (worktreeId: string, path: string) => void;
+  setCollapsed: (worktreeId: string, path: string, collapsed: boolean) => void;
   setActivePath: (path: string | null) => void;
+  pinActivePath: (path: string) => void;
 };
 
 function toggle(set: PathSet | undefined, key: string, on: boolean): PathSet {
@@ -38,28 +46,30 @@ export const useStore = create<State>()(
       collapsedRepos: {},
       layout: "split",
       scope: "all",
+      hideWhitespace: false,
       viewed: {},
       collapsed: {},
       activePath: null,
+      activePinnedUntil: 0,
 
       selectWorktree: (id) => set({ selectedWorktreeId: id, activePath: null }),
       toggleRepo: (id) => set((s) => ({ collapsedRepos: toggle(s.collapsedRepos, id, !s.collapsedRepos[id]) })),
       setLayout: (layout) => set({ layout }),
       setScope: (scope) => set({ scope }),
+      toggleHideWhitespace: () => set((s) => ({ hideWhitespace: !s.hideWhitespace })),
       // Like GitHub: marking a file viewed collapses it, un-marking expands it again.
       toggleViewed: (wt, path) =>
         set((s) => {
           const on = !s.viewed[wt]?.[path];
           return {
             viewed: { ...s.viewed, [wt]: toggle(s.viewed[wt], path, on) },
-            collapsed: { ...s.collapsed, [wt]: toggle(s.collapsed[wt], path, on) },
+            collapsed: { ...s.collapsed, [wt]: { ...s.collapsed[wt], [path]: on } },
           };
         }),
-      toggleCollapsed: (wt, path) =>
-        set((s) => ({
-          collapsed: { ...s.collapsed, [wt]: toggle(s.collapsed[wt], path, !s.collapsed[wt]?.[path]) },
-        })),
-      setActivePath: (activePath) => set({ activePath }),
+      setCollapsed: (wt, path, collapsed) =>
+        set((s) => ({ collapsed: { ...s.collapsed, [wt]: { ...s.collapsed[wt], [path]: collapsed } } })),
+      setActivePath: (activePath) => set((s) => (Date.now() < s.activePinnedUntil ? {} : { activePath })),
+      pinActivePath: (activePath) => set({ activePath, activePinnedUntil: Date.now() + 400 }),
     }),
     {
       name: "review-ui",
@@ -69,6 +79,7 @@ export const useStore = create<State>()(
         collapsedRepos: s.collapsedRepos,
         layout: s.layout,
         scope: s.scope,
+        hideWhitespace: s.hideWhitespace,
       }),
     },
   ),

@@ -2,8 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { mockChangedFiles, mockRepos, mockWorktreeStats } from "../mock";
-import type { ChangedFile, DiffScope, Repo, WorktreeStats } from "../types";
+import { mockChangedFiles, mockDiffPatch, mockFileVersions, mockRepos, mockWorktreeStats } from "../mock";
+import type { ChangedFile, DiffPatch, DiffScope, FileVersions, Repo, WorktreeStats } from "../types";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -19,8 +19,21 @@ export const api = {
   worktreeStats: (path: string, base: string | null): Promise<WorktreeStats> =>
     isTauri ? invoke("worktree_stats", { path, base }) : mockWorktreeStats(path),
 
-  changedFiles: (path: string, base: string | null, scope: DiffScope): Promise<ChangedFile[]> =>
-    isTauri ? invoke("changed_files", { path, base, scope }) : mockChangedFiles(path, scope),
+  changedFiles: (path: string, base: string | null, scope: DiffScope, ignoreWhitespace: boolean): Promise<ChangedFile[]> =>
+    isTauri ? invoke("changed_files", { path, base, scope, ignoreWhitespace }) : mockChangedFiles(path, scope),
+
+  diffPatch: (path: string, base: string | null, scope: DiffScope, ignoreWhitespace: boolean): Promise<DiffPatch> =>
+    isTauri ? invoke("diff_patch", { path, base, scope, ignoreWhitespace }) : mockDiffPatch(path, scope),
+
+  fileVersions: (
+    path: string,
+    range: Pick<DiffPatch, "oldRev" | "newRev">,
+    oldPath: string,
+    newPath: string,
+  ): Promise<FileVersions> =>
+    isTauri
+      ? invoke("file_versions", { path, oldRev: range.oldRev, newRev: range.newRev, oldPath, newPath })
+      : mockFileVersions(),
 };
 
 export async function pickRepoFolder(): Promise<string | null> {

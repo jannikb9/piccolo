@@ -45,6 +45,22 @@ export type ChangedFile = {
   additions: number;
   deletions: number;
   binary: boolean;
+  /** Marked `linguist-generated` in `.gitattributes`. */
+  generated: boolean;
+};
+
+/** A unified patch of all changes, and the two sides it compares. */
+export type DiffPatch = {
+  oldRev: string;
+  /** `null` means the working tree. */
+  newRev: string | null;
+  patch: string;
+};
+
+/** Full contents of one file on both sides; `null` where it doesn't exist or isn't text. */
+export type FileVersions = {
+  old: string | null;
+  new: string | null;
 };
 
 export type DiffScope = "all" | "committed" | "uncommitted";

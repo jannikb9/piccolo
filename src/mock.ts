@@ -1,5 +1,5 @@
 // Placeholder data used when the UI runs in a plain browser (`pnpm dev`) instead of the desktop app.
-import type { ChangedFile, DiffScope, Repo, WorktreeStats } from "./types";
+import type { ChangedFile, DiffPatch, DiffScope, FileVersions, Repo, WorktreeStats } from "./types";
 
 const minutesAgo = (m: number) => Date.now() - m * 60_000;
 
@@ -27,6 +27,7 @@ export const mockRepos: Repo[] = [
       worktree("~/projects/spoke-app", "auth-session", "feat/auth-session-refresh", { dirty: true, minutes: 2 }),
       worktree("~/projects/spoke-app", "billing", "agent/refactor-billing-webhooks", { minutes: 38 }),
       worktree("~/projects/spoke-app", "nav", "fix/nav-overflow", { minutes: 60 * 26 }),
+      worktree("~/projects/spoke-app", "codemod", "agent/migrate-logger", { minutes: 60 * 3 }),
     ],
   },
   {
@@ -39,34 +40,43 @@ export const mockRepos: Repo[] = [
   },
 ];
 
-const committed = (f: Omit<ChangedFile, "binary"> & { binary?: boolean }) => ({ binary: false, ...f, committed: true });
-const uncommitted = (f: Omit<ChangedFile, "binary"> & { binary?: boolean }) => ({ binary: false, ...f, committed: false });
+type MockFile = ChangedFile & { committed: boolean };
+type FileInit = Omit<ChangedFile, "binary" | "generated"> & { binary?: boolean; generated?: boolean };
 
-const files: Record<string, (ChangedFile & { committed: boolean })[]> = {
+const committed = (f: FileInit): MockFile => ({ binary: false, generated: false, ...f, committed: true });
+const uncommitted = (f: FileInit): MockFile => ({ binary: false, generated: false, ...f, committed: false });
+
+const files: Record<string, MockFile[]> = {
   "~/projects/spoke-app/auth-session": [
-    committed({ path: "src/auth/session.ts", status: "modified", additions: 42, deletions: 8 }),
-    committed({ path: "src/auth/tokens.ts", status: "added", additions: 61, deletions: 0 }),
-    committed({ path: "src/auth/refresh.ts", status: "added", additions: 88, deletions: 0 }),
-    committed({ path: "src/auth/legacy-cookie.ts", status: "deleted", additions: 0, deletions: 47 }),
-    committed({ path: "src/api/client.ts", status: "modified", additions: 23, deletions: 11 }),
-    committed({ path: "src/api/interceptors/retry.ts", oldPath: "src/api/retry.ts", status: "renamed", additions: 4, deletions: 2 }),
-    uncommitted({ path: "src/ui/components/Nav.tsx", status: "modified", additions: 9, deletions: 3 }),
-    uncommitted({ path: "src/ui/components/SessionBanner.tsx", status: "added", additions: 37, deletions: 0 }),
-    committed({ path: "src/ui/hooks/useSession.ts", status: "modified", additions: 14, deletions: 6 }),
-    uncommitted({ path: "tests/auth/refresh.test.ts", status: "added", additions: 29, deletions: 0 }),
-    committed({ path: "package.json", status: "modified", additions: 2, deletions: 1 }),
+    committed({ path: "src/auth/session.ts", status: "modified", additions: 8, deletions: 3 }),
+    committed({ path: "src/auth/tokens.ts", status: "added", additions: 44, deletions: 0 }),
+    committed({ path: "src/auth/refresh.ts", status: "added", additions: 44, deletions: 0 }),
+    committed({ path: "src/auth/legacy-cookie.ts", status: "deleted", additions: 0, deletions: 11 }),
+    committed({ path: "src/api/client.ts", status: "modified", additions: 8, deletions: 3 }),
+    committed({ path: "src/api/interceptors/retry.ts", oldPath: "src/api/retry.ts", status: "renamed", additions: 8, deletions: 3 }),
+    uncommitted({ path: "src/ui/components/Nav.tsx", status: "modified", additions: 8, deletions: 3 }),
+    uncommitted({ path: "src/ui/components/SessionBanner.tsx", status: "added", additions: 44, deletions: 0 }),
+    committed({ path: "src/ui/hooks/useSession.ts", status: "modified", additions: 8, deletions: 3 }),
+    uncommitted({ path: "tests/auth/refresh.test.ts", status: "added", additions: 44, deletions: 0 }),
+    committed({ path: "package.json", status: "modified", additions: 8, deletions: 3 }),
+    committed({ path: "pnpm-lock.yaml", status: "modified", additions: 8, deletions: 3 }),
     committed({ path: "public/logo.png", status: "modified", additions: 0, deletions: 0, binary: true }),
   ],
   "~/projects/spoke-app/billing": [
-    committed({ path: "services/billing/webhooks/handler.ts", status: "modified", additions: 210, deletions: 344 }),
-    committed({ path: "services/billing/webhooks/events.ts", status: "added", additions: 402, deletions: 0 }),
-    committed({ path: "services/billing/stripe.ts", status: "modified", additions: 88, deletions: 120 }),
+    committed({ path: "services/billing/webhooks/handler.ts", status: "modified", additions: 8, deletions: 3 }),
+    committed({ path: "services/billing/webhooks/events.ts", status: "added", additions: 44, deletions: 0 }),
+    committed({ path: "services/billing/stripe.ts", status: "modified", additions: 8, deletions: 3 }),
+    committed({ path: "services/billing/generated/schema.ts", status: "modified", additions: 8, deletions: 3, generated: true }),
   ],
   "~/projects/spoke-app/nav": [
-    committed({ path: "src/ui/components/Nav.tsx", status: "modified", additions: 12, deletions: 4 }),
-    committed({ path: "src/ui/styles/nav.css", status: "modified", additions: 6, deletions: 2 }),
+    committed({ path: "src/ui/components/Nav.tsx", status: "modified", additions: 8, deletions: 3 }),
+    committed({ path: "src/ui/styles/nav.css", status: "modified", additions: 8, deletions: 3 }),
   ],
-  "~/projects/infra/infra": [uncommitted({ path: "terraform/modules/db/main.tf", status: "modified", additions: 22, deletions: 4 })],
+  // A large change for checking scroll performance.
+  "~/projects/spoke-app/codemod": Array.from({ length: 240 }, (_, i) =>
+    committed({ path: `src/modules/m${Math.floor(i / 12)}/file${i}.ts`, status: "modified", additions: 8, deletions: 3 }),
+  ),
+  "~/projects/infra/infra": [uncommitted({ path: "terraform/modules/db/main.tf", status: "modified", additions: 8, deletions: 3 })],
 };
 
 const aheadBehind: Record<string, [number, number]> = {
@@ -77,10 +87,11 @@ const aheadBehind: Record<string, [number, number]> = {
 
 const delay = <T>(value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), 150));
 
+const inScope = (worktreePath: string, scope: DiffScope) =>
+  (files[worktreePath] ?? []).filter((f) => scope === "all" || f.committed === (scope === "committed"));
+
 export function mockChangedFiles(worktreePath: string, scope: DiffScope): Promise<ChangedFile[]> {
-  const all = files[worktreePath] ?? [];
-  const inScope = all.filter((f) => scope === "all" || f.committed === (scope === "committed"));
-  return delay(inScope.map(({ committed: _, ...f }) => f));
+  return delay(inScope(worktreePath, scope).map(({ committed: _, ...f }) => f));
 }
 
 export function mockWorktreeStats(worktreePath: string): Promise<WorktreeStats> {
@@ -94,31 +105,113 @@ export function mockWorktreeStats(worktreePath: string): Promise<WorktreeStats> 
   });
 }
 
-export type MockLine =
-  | { kind: "hunk"; text: string }
-  | { kind: "ctx"; old: number; new: number; text: string }
-  | { kind: "add"; new: number; text: string }
-  | { kind: "del"; old: number; text: string };
+// --- Synthetic file contents and patches -------------------------------------------------------
 
-// Stand-in diff body until real diffs are rendered in milestone 3.
-export const sampleHunk: MockLine[] = [
-  { kind: "hunk", text: "@@ -18,14 +18,22 @@ export async function getSession(req: Request) {" },
-  { kind: "ctx", old: 18, new: 18, text: "  const cookie = req.headers.get(\"cookie\");" },
-  { kind: "ctx", old: 19, new: 19, text: "  if (!cookie) return null;" },
-  { kind: "ctx", old: 20, new: 20, text: "" },
-  { kind: "del", old: 21, text: "  const token = parseLegacyCookie(cookie);" },
-  { kind: "del", old: 22, text: "  if (!token || token.expiresAt < Date.now()) return null;" },
-  { kind: "add", new: 21, text: "  const token = readSessionToken(cookie);" },
-  { kind: "add", new: 22, text: "  if (!token) return null;" },
-  { kind: "add", new: 23, text: "" },
-  { kind: "add", new: 24, text: "  if (isExpiringSoon(token, REFRESH_WINDOW_MS)) {" },
-  { kind: "add", new: 25, text: "    return refreshSession(token);" },
-  { kind: "add", new: 26, text: "  }" },
-  { kind: "ctx", old: 23, new: 27, text: "" },
-  { kind: "ctx", old: 24, new: 28, text: "  return db.session.findUnique({" },
-  { kind: "del", old: 25, text: "    where: { id: token.sid }," },
-  { kind: "add", new: 29, text: "    where: { id: token.sessionId }," },
-  { kind: "ctx", old: 26, new: 30, text: "    include: { user: true }," },
-  { kind: "ctx", old: 27, new: 31, text: "  });" },
-  { kind: "ctx", old: 28, new: 32, text: "}" },
+const before = (n: number) =>
+  [
+    'import { db } from "../db";',
+    'import { parseLegacyCookie } from "./legacy-cookie";',
+    'import type { Session } from "./types";',
+    "",
+    "const SESSION_COOKIE = \"sid\";",
+    "const REFRESH_WINDOW_MS = 5 * 60 * 1000;",
+    "",
+    "/**",
+    " * Reads the session for an incoming request.",
+    " * Returns null when the request is anonymous.",
+    " */",
+    ...Array.from({ length: n - 11 }, (_, i) => `// setup step ${i + 1}`),
+    "export async function getSession(req: Request) {",
+  ].slice(-n);
+
+const after = (n: number) =>
+  Array.from({ length: n }, (_, i) =>
+    i % 5 === 0 ? "" : `export const helper${i} = (value: number) => value * ${i}; // keeps the file realistic`,
+  );
+
+const oldBody = [
+  '  const cookie = req.headers.get("cookie");',
+  "  if (!cookie) return null;",
+  "",
+  "  const token = parseLegacyCookie(cookie);",
+  "  if (!token || token.expiresAt < Date.now()) return null;",
+  "",
+  "  return db.session.findUnique({",
+  "    where: { id: token.sid },",
+  "    include: { user: true },",
+  "  });",
+  "}",
 ];
+
+const newBody = [
+  '  const cookie = req.headers.get("cookie");',
+  "  if (!cookie) return null;",
+  "",
+  "  const token = readSessionToken(cookie);",
+  "  if (!token) return null;",
+  "",
+  "  if (isExpiringSoon(token, REFRESH_WINDOW_MS)) {",
+  "    return refreshSession(token);",
+  "  }",
+  "",
+  "  return db.session.findUnique({",
+  "    where: { id: token.sessionId },",
+  "    include: { user: true },",
+  "  });",
+  "}",
+];
+
+const PRE = 17;
+const POST = 30;
+const oldContents = [...before(PRE), ...oldBody, ...after(POST)].join("\n") + "\n";
+const newContents = [...before(PRE), ...newBody, ...after(POST)].join("\n") + "\n";
+
+// The changed region of the body, plus three lines of trailing context.
+const hunkLines = [
+  ...oldBody.slice(0, 3).map((l) => ` ${l}`),
+  ...oldBody.slice(3, 5).map((l) => `-${l}`),
+  ...newBody.slice(3, 9).map((l) => `+${l}`),
+  ` ${oldBody[5]}`,
+  ` ${oldBody[6]}`,
+  `-${oldBody[7]}`,
+  `+${newBody[11]}`,
+  ...oldBody.slice(8).map((l) => ` ${l}`),
+  ...after(POST).slice(0, 3).map((l) => ` ${l}`),
+];
+const count = (sign: string) => hunkLines.filter((l) => l[0] === " " || l[0] === sign).length;
+const changedHunk = [`@@ -${PRE + 1},${count("-")} +${PRE + 1},${count("+")} @@ export async function getSession(req: Request) {`, ...hunkLines];
+
+const allLines = (contents: string, sign: string) =>
+  contents
+    .slice(0, -1)
+    .split("\n")
+    .map((l) => sign + l);
+
+function filePatch(f: MockFile): string {
+  const oldPath = f.oldPath ?? f.path;
+  const header = `diff --git a/${oldPath} b/${f.path}\n`;
+  if (f.binary) return `${header}index 1111111..2222222 100644\nBinary files a/${oldPath} and b/${f.path} differ\n`;
+  switch (f.status) {
+    case "added": {
+      const lines = allLines(newContents, "+");
+      return `${header}new file mode 100644\n--- /dev/null\n+++ b/${f.path}\n@@ -0,0 +1,${lines.length} @@\n${lines.join("\n")}\n`;
+    }
+    case "deleted": {
+      const lines = allLines(oldContents, "-");
+      return `${header}deleted file mode 100644\n--- a/${oldPath}\n+++ /dev/null\n@@ -1,${lines.length} +0,0 @@\n${lines.join("\n")}\n`;
+    }
+    case "renamed":
+      return `${header}similarity index 88%\nrename from ${oldPath}\nrename to ${f.path}\n--- a/${oldPath}\n+++ b/${f.path}\n${changedHunk.join("\n")}\n`;
+    default:
+      return `${header}index 1111111..2222222 100644\n--- a/${oldPath}\n+++ b/${f.path}\n${changedHunk.join("\n")}\n`;
+  }
+}
+
+export function mockDiffPatch(worktreePath: string, scope: DiffScope): Promise<DiffPatch> {
+  const patch = inScope(worktreePath, scope).map(filePatch).join("");
+  return delay({ oldRev: "base", newRev: null, patch });
+}
+
+export function mockFileVersions(): Promise<FileVersions> {
+  return delay({ old: oldContents, new: newContents });
+}

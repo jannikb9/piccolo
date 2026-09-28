@@ -1,5 +1,5 @@
 import { Check, ChevronRight, Folder, FolderOpen } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn, type TreeNode } from "../lib/utils";
 import { useStore } from "../store";
 import { DiffCount, Skeleton, StatusLetter } from "./ui";
@@ -124,10 +124,17 @@ function FileRow({
 }) {
   const viewed = useStore((s) => !!s.viewed[worktreeId]?.[node.path]);
   const active = useStore((s) => s.activePath === node.path);
+  const ref = useRef<HTMLButtonElement>(null);
   const { file } = node;
+
+  // Keep the file being read visible in the tree as the diff scrolls.
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
 
   return (
     <button
+      ref={ref}
       type="button"
       onClick={() => onSelect(node.path)}
       style={indent(depth)}

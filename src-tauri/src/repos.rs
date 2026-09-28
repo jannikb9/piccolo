@@ -1,6 +1,6 @@
 //! The user's list of repositories and the Tauri commands the UI uses to read them.
 
-use crate::git::{self, ChangedFile, Result, Scope};
+use crate::git::{self, ChangedFile, DiffPatch, Result, Scope};
 use crate::watch::Watchers;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -189,7 +189,7 @@ pub async fn worktree_stats(path: String, base: Option<String>) -> Result<Worktr
             Some(base) => git::ahead_behind(&wt, base)?,
             None => (0, 0),
         };
-        let files = git::changed_files(&wt, base.as_deref(), Scope::All)?;
+        let files = git::changed_files(&wt, base.as_deref(), Scope::All, false)?;
         Ok(WorktreeStats {
             ahead,
             behind,
@@ -201,6 +201,42 @@ pub async fn worktree_stats(path: String, base: Option<String>) -> Result<Worktr
 }
 
 #[tauri::command]
-pub async fn changed_files(path: String, base: Option<String>, scope: Scope) -> Result<Vec<ChangedFile>> {
-    blocking(move || git::changed_files(Path::new(&path), base.as_deref(), scope)).await
+pub async fn changed_files(
+    path: String,
+    base: Option<String>,
+    scope: Scope,
+    ignore_whitespace: bool,
+) -> Result<Vec<ChangedFile>> {
+    blocking(move || git::changed_files(Path::new(&path), base.as_deref(), scope, ignore_whitespace)).await
+}
+
+#[tauri::command]
+pub async fn diff_patch(path: String, base: Option<String>, scope: Scope, ignore_whitespace: bool) -> Result<DiffPatch> {
+    blocking(move || git::diff_patch(Path::new(&path), base.as_deref(), scope, ignore_whitespace)).await
+}
+
+/// Full contents of one file on both sides of a diff, for expanding unchanged lines.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileVersions {
+    old: Option<String>,
+    new: Option<String>,
+}
+
+#[tauri::command]
+pub async fn file_versions(
+    path: String,
+    old_rev: String,
+    new_rev: Option<String>,
+    old_path: String,
+    new_path: String,
+) -> Result<FileVersions> {
+    blocking(move || {
+        let wt = Path::new(&path);
+        Ok(FileVersions {
+            old: git::file_contents(wt, Some(&old_rev), &old_path)?,
+            new: git::file_contents(wt, new_rev.as_deref(), &new_path)?,
+        })
+    })
+    .await
 }

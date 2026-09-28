@@ -207,6 +207,8 @@ pub struct ChangedFile {
     pub additions: u32,
     pub deletions: u32,
     pub binary: bool,
+    /// Marked `linguist-generated` in `.gitattributes`.
+    pub generated: bool,
 }
 
 pub fn merge_base(wt: &Path, base: &str) -> Result<String> {
@@ -222,21 +224,53 @@ pub fn ahead_behind(wt: &Path, base: &str) -> Result<(u32, u32)> {
     Ok((ahead, behind))
 }
 
+/// The two sides being compared. `new == None` means the working tree (including untracked files).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffRange {
+    pub old_rev: String,
+    pub new_rev: Option<String>,
+}
+
+impl DiffRange {
+    /// Without a base, only uncommitted changes are compared.
+    pub fn resolve(wt: &Path, base: Option<&str>, scope: Scope) -> Result<Self> {
+        let head = git(wt, &["rev-parse", "HEAD"])?.trim().to_string();
+        let fork_point = match base {
+            Some(base) => merge_base(wt, base)?,
+            None => head.clone(),
+        };
+        Ok(match scope {
+            Scope::All => Self { old_rev: fork_point, new_rev: None },
+            Scope::Committed => Self { old_rev: fork_point, new_rev: Some(head) },
+            Scope::Uncommitted => Self { old_rev: head, new_rev: None },
+        })
+    }
+
+    fn args(&self) -> Vec<&str> {
+        std::iter::once(self.old_rev.as_str()).chain(self.new_rev.as_deref()).collect()
+    }
+
+    fn includes_untracked(&self) -> bool {
+        self.new_rev.is_none()
+    }
+}
+
+fn diff_flags(ignore_whitespace: bool) -> Vec<&'static str> {
+    let mut flags = vec!["diff", "-M", "--no-ext-diff", "--no-color"];
+    if ignore_whitespace {
+        flags.push("--ignore-all-space");
+    }
+    flags
+}
+
 /// Files changed in the worktree relative to where it forked from `base`.
-/// Without a base, only uncommitted changes are reported.
-pub fn changed_files(wt: &Path, base: Option<&str>, scope: Scope) -> Result<Vec<ChangedFile>> {
-    let fork_point = match base {
-        Some(base) => merge_base(wt, base)?,
-        None => "HEAD".to_string(),
-    };
-    let range: Vec<&str> = match scope {
-        Scope::All => vec![&fork_point],
-        Scope::Committed => vec![&fork_point, "HEAD"],
-        Scope::Uncommitted => vec!["HEAD"],
-    };
+pub fn changed_files(wt: &Path, base: Option<&str>, scope: Scope, ignore_whitespace: bool) -> Result<Vec<ChangedFile>> {
+    let range = DiffRange::resolve(wt, base, scope)?;
     let diff = |format: &str| {
-        let mut args = vec!["diff", "-M", "--no-ext-diff", "-z", format];
-        args.extend(&range);
+        let mut args = diff_flags(ignore_whitespace);
+        args.extend(["-z", format]);
+        args.extend(range.args());
         args.push("--");
         git(wt, &args)
     };
@@ -246,25 +280,162 @@ pub fn changed_files(wt: &Path, base: Option<&str>, scope: Scope) -> Result<Vec<
         .into_iter()
         .map(|(path, status, old_path)| {
             let (additions, deletions, binary) = counts.get(&path).copied().unwrap_or_default();
-            ChangedFile { path, old_path, status, additions, deletions, binary }
+            ChangedFile { path, old_path, status, additions, deletions, binary, generated: false }
         })
+        // With whitespace ignored, files whose only changes were whitespace have no lines left.
+        .filter(|f| !ignore_whitespace || f.binary || f.additions + f.deletions > 0 || f.status != FileStatus::Modified)
         .collect();
 
-    if scope != Scope::Committed {
-        let untracked = git(wt, &["ls-files", "--others", "--exclude-standard", "-z"])?;
-        for path in untracked.split('\0').filter(|p| !p.is_empty()) {
-            let (additions, binary) = count_lines(&wt.join(path));
+    if range.includes_untracked() {
+        for path in untracked_files(wt)? {
+            let (additions, binary) = count_lines(&wt.join(&path));
             files.push(ChangedFile {
-                path: path.to_string(),
+                path,
                 old_path: None,
                 status: FileStatus::Added,
                 additions,
                 deletions: 0,
                 binary,
+                generated: false,
             });
         }
     }
+
+    let generated = generated_paths(wt, files.iter().map(|f| f.path.as_str()))?;
+    for file in &mut files {
+        file.generated = generated.contains(&file.path);
+    }
     Ok(files)
+}
+
+fn untracked_files(wt: &Path) -> Result<Vec<String>> {
+    let out = git(wt, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    Ok(out.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+}
+
+/// Paths marked `linguist-generated` in `.gitattributes`, the convention GitHub uses to collapse
+/// generated files in reviews.
+fn generated_paths<'a>(wt: &Path, paths: impl Iterator<Item = &'a str>) -> Result<std::collections::HashSet<String>> {
+    let input: String = paths.map(|p| format!("{p}\0")).collect();
+    if input.is_empty() {
+        return Ok(Default::default());
+    }
+    let out = git_with_input(wt, &["check-attr", "-z", "--stdin", "linguist-generated"], &input)?;
+    // Output: `path\0attribute\0value\0` per path.
+    let tokens: Vec<&str> = out.split('\0').collect();
+    Ok(tokens
+        .chunks(3)
+        .filter(|c| c.len() == 3 && matches!(c[2], "set" | "true"))
+        .map(|c| c[0].to_string())
+        .collect())
+}
+
+fn git_with_input(cwd: &Path, args: &[&str], input: &str) -> Result<String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new("git")
+        .current_dir(cwd)
+        .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    // Written from a thread so a large input can't deadlock against a full stdout pipe.
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    let input = input.to_string();
+    let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let _ = writer.join();
+    if !out.status.success() {
+        return Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffPatch {
+    #[serde(flatten)]
+    pub range: DiffRange,
+    /// Unified diff of every changed file, including untracked text files.
+    pub patch: String,
+}
+
+pub fn diff_patch(wt: &Path, base: Option<&str>, scope: Scope, ignore_whitespace: bool) -> Result<DiffPatch> {
+    let range = DiffRange::resolve(wt, base, scope)?;
+    let mut args = diff_flags(ignore_whitespace);
+    // Explicit prefixes override `diff.noprefix` / `diff.mnemonicPrefix` in the user's config.
+    args.extend(["--src-prefix=a/", "--dst-prefix=b/"]);
+    args.extend(range.args());
+    args.push("--");
+    let mut patch = git(wt, &args)?;
+
+    if range.includes_untracked() {
+        for path in untracked_files(wt)? {
+            if let Some(contents) = read_text(&wt.join(&path)) {
+                patch.push_str(&new_file_patch(&path, &contents));
+            }
+        }
+    }
+    Ok(DiffPatch { range, patch })
+}
+
+/// The patch `git diff` would print for a new file, for untracked files git doesn't diff.
+fn new_file_patch(path: &str, contents: &str) -> String {
+    let mut out = format!("diff --git a/{path} b/{path}\nnew file mode 100644\n");
+    if contents.is_empty() {
+        return out;
+    }
+    let lines: Vec<&str> = contents.split_inclusive('\n').collect();
+    out.push_str(&format!("--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{} @@\n", lines.len()));
+    for line in &lines {
+        out.push('+');
+        out.push_str(line);
+    }
+    if !contents.ends_with('\n') {
+        out.push_str("\n\\ No newline at end of file\n");
+    }
+    out
+}
+
+/// Contents of `path` at `rev`, or in the working tree when `rev` is `None`.
+/// `None` if the file doesn't exist there or isn't text.
+pub fn file_contents(wt: &Path, rev: Option<&str>, path: &str) -> Result<Option<String>> {
+    match rev {
+        None => Ok(read_text(&wt.join(path))),
+        Some(rev) => {
+            let spec = format!("{rev}:{path}");
+            if git(wt, &["cat-file", "-e", &spec]).is_err() {
+                return Ok(None);
+            }
+            let out = Command::new("git")
+                .current_dir(wt)
+                .args(["cat-file", "blob", &spec])
+                .output()
+                .map_err(|e| e.to_string())?;
+            Ok(text_from_bytes(out.stdout))
+        }
+    }
+}
+
+/// Large files are left out of patches; their diffs aren't reviewable line by line anyway.
+const MAX_TEXT_BYTES: u64 = 4 * 1024 * 1024;
+
+fn read_text(path: &Path) -> Option<String> {
+    let meta = fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > MAX_TEXT_BYTES {
+        return None;
+    }
+    text_from_bytes(fs::read(path).ok()?)
+}
+
+fn text_from_bytes(bytes: Vec<u8>) -> Option<String> {
+    if bytes[..bytes.len().min(8000)].contains(&0) {
+        return None;
+    }
+    Some(String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
 }
 
 /// `git diff --numstat -z`: `add\tdel\tpath\0`, or `add\tdel\t\0old\0new\0` for renames.
@@ -407,7 +578,7 @@ mod tests {
         assert!(!worktree_status(&repo).unwrap().dirty);
 
         let find = |files: &[ChangedFile], p: &str| files.iter().find(|f| f.path == p).cloned();
-        let all = changed_files(&wt, Some("main"), Scope::All).unwrap();
+        let all = changed_files(&wt, Some("main"), Scope::All, false).unwrap();
         assert_eq!(all.len(), 3);
         let renamed = find(&all, "new.txt").unwrap();
         assert_eq!(renamed.status, FileStatus::Renamed);
@@ -416,10 +587,31 @@ mod tests {
         assert_eq!((modified.additions, modified.deletions), (2, 1));
         assert_eq!(find(&all, "untracked.md").unwrap().additions, 2);
 
-        let committed = changed_files(&wt, Some("main"), Scope::Committed).unwrap();
+        let committed = changed_files(&wt, Some("main"), Scope::Committed, false).unwrap();
         assert_eq!(committed.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), vec!["new.txt"]);
-        let uncommitted = changed_files(&wt, Some("main"), Scope::Uncommitted).unwrap();
+        let uncommitted = changed_files(&wt, Some("main"), Scope::Uncommitted, false).unwrap();
         assert_eq!(uncommitted.len(), 2);
+
+        // Patch covers tracked changes and the untracked file; revs identify both sides.
+        let diff = diff_patch(&wt, Some("main"), Scope::All, false).unwrap();
+        assert!(diff.patch.contains("diff --git a/a.txt b/a.txt"));
+        assert!(diff.patch.contains("rename from old.txt"));
+        assert!(diff.patch.contains("+++ b/untracked.md\n@@ -0,0 +1,2 @@\n+hello\n+world\n\\ No newline at end of file\n"));
+        assert_eq!(diff.range.new_rev, None);
+        assert_eq!(file_contents(&wt, Some(&diff.range.old_rev), "a.txt").unwrap().as_deref(), Some("one\ntwo\n"));
+        assert_eq!(file_contents(&wt, None, "a.txt").unwrap().as_deref(), Some("one\n2\nthree\n"));
+        assert_eq!(file_contents(&wt, Some(&diff.range.old_rev), "new.txt").unwrap(), None);
+
+        // Whitespace-only edits disappear when whitespace is ignored.
+        fs::write(wt.join("a.txt"), "one\ntwo  \n").unwrap();
+        let ws = changed_files(&wt, Some("main"), Scope::Uncommitted, true).unwrap();
+        assert!(ws.iter().all(|f| f.path != "a.txt"));
+
+        // `linguist-generated` files are flagged.
+        fs::write(wt.join(".gitattributes"), "*.md linguist-generated\n").unwrap();
+        let all = changed_files(&wt, Some("main"), Scope::All, false).unwrap();
+        assert!(find(&all, "untracked.md").unwrap().generated);
+        assert!(!find(&all, "new.txt").unwrap().generated);
 
         fs::remove_dir_all(&root).unwrap();
     }

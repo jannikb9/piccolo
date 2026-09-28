@@ -2,9 +2,10 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { useEffect, useMemo, useRef } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { FilePanel } from "./components/FilePanel";
-import { fileAnchorId, ReviewPane, Welcome } from "./components/ReviewPane";
+import type { DiffViewHandle } from "./components/DiffView";
+import { ReviewPane, Welcome } from "./components/ReviewPane";
 import { Sidebar } from "./components/Sidebar";
-import { useChangedFiles, useLiveGitData, useRepos } from "./lib/queries";
+import { useChangedFiles, useDiffPatch, useLiveGitData, useRepos } from "./lib/queries";
 import { buildTree, treeOrder } from "./lib/utils";
 import { orderedWorktrees, resolveSelection, useStore } from "./store";
 import type { Worktree } from "./types";
@@ -15,8 +16,9 @@ export default function App() {
   const selectedId = useStore((s) => s.selectedWorktreeId);
   const collapsedRepos = useStore((s) => s.collapsedRepos);
   const scope = useStore((s) => s.scope);
-  const setActivePath = useStore((s) => s.setActivePath);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const hideWhitespace = useStore((s) => s.hideWhitespace);
+  const pinActivePath = useStore((s) => s.pinActivePath);
+  const viewRef = useRef<DiffViewHandle>(null);
 
   const selection = repos.data ? resolveSelection(repos.data, selectedId) : undefined;
   const worktree = selection?.worktree;
@@ -26,7 +28,8 @@ export default function App() {
   const shortcuts = useMemo(() => new Map(ordered.slice(0, 9).map((w, i) => [w.id, i + 1])), [ordered]);
   useWorktreeHotkeys(ordered, worktree?.id);
 
-  const filesQuery = useChangedFiles(worktree, base, scope);
+  const filesQuery = useChangedFiles(worktree, base, scope, hideWhitespace);
+  const patchQuery = useDiffPatch(worktree, base, scope, hideWhitespace);
   const { tree, files } = useMemo(() => {
     const tree = buildTree(filesQuery.data ?? []);
     return { tree, files: treeOrder(tree) };
@@ -37,12 +40,8 @@ export default function App() {
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: "main-layout", storage: localStorage });
 
   const jumpTo = (path: string) => {
-    const container = scrollRef.current;
-    const target = document.getElementById(fileAnchorId(path));
-    if (!container || !target) return;
-    const offset = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    container.scrollTo({ top: container.scrollTop + offset - 12 });
-    setActivePath(path);
+    pinActivePath(path);
+    viewRef.current?.scrollTo({ type: "item", id: path, align: "start", behavior: "instant" });
   };
 
   return (
@@ -69,8 +68,9 @@ export default function App() {
               repo={selection.repo}
               worktree={selection.worktree}
               files={files}
-              query={filesQuery}
-              scrollRef={scrollRef}
+              filesQuery={filesQuery}
+              patchQuery={patchQuery}
+              viewRef={viewRef}
             />
           ) : (
             <Welcome loading={repos.isPending} />

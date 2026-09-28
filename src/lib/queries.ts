@@ -17,8 +17,17 @@ export const queryClient = new QueryClient({
 export const keys = {
   repos: ["repos"] as const,
   stats: (path: string, base: string | null) => ["stats", path, base] as const,
-  files: (path: string, base: string | null, scope: DiffScope) => ["files", path, base, scope] as const,
+  files: (path: string, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) =>
+    ["files", path, base, scope, ignoreWhitespace] as const,
+  patch: (path: string, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) =>
+    ["patch", path, base, scope, ignoreWhitespace] as const,
 };
+
+/** Keeps showing the previous result while switching scope or whitespace, but never another worktree's. */
+const sameWorktree =
+  (path: string | undefined) =>
+  <T>(previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) =>
+    previousQuery?.queryKey[1] === path ? previous : undefined;
 
 export function useRepos() {
   return useQuery({ queryKey: keys.repos, queryFn: api.listRepos });
@@ -31,22 +40,33 @@ export function useWorktreeStats(worktree: Worktree, base: string | null) {
   });
 }
 
-export function useChangedFiles(worktree: Worktree | undefined, base: string | null, scope: DiffScope) {
+export function useChangedFiles(worktree: Worktree | undefined, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) {
   return useQuery({
-    queryKey: keys.files(worktree?.path ?? "", base, scope),
-    queryFn: () => api.changedFiles(worktree!.path, base, scope),
+    queryKey: keys.files(worktree?.path ?? "", base, scope, ignoreWhitespace),
+    queryFn: () => api.changedFiles(worktree!.path, base, scope, ignoreWhitespace),
     enabled: !!worktree,
-    // Switching scope keeps showing the previous list until the new one arrives, but never
-    // another worktree's files.
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === worktree?.path ? previous : undefined,
+    placeholderData: sameWorktree(worktree?.path),
   });
 }
 
-export function prefetchChangedFiles(worktree: Worktree, base: string | null, scope: DiffScope) {
-  return queryClient.prefetchQuery({
-    queryKey: keys.files(worktree.path, base, scope),
-    queryFn: () => api.changedFiles(worktree.path, base, scope),
+export function useDiffPatch(worktree: Worktree | undefined, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) {
+  return useQuery({
+    queryKey: keys.patch(worktree?.path ?? "", base, scope, ignoreWhitespace),
+    queryFn: () => api.diffPatch(worktree!.path, base, scope, ignoreWhitespace),
+    enabled: !!worktree,
+    placeholderData: sameWorktree(worktree?.path),
+  });
+}
+
+/** Loading on hover makes the click feel instant. */
+export function prefetchWorktree(worktree: Worktree, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) {
+  queryClient.prefetchQuery({
+    queryKey: keys.files(worktree.path, base, scope, ignoreWhitespace),
+    queryFn: () => api.changedFiles(worktree.path, base, scope, ignoreWhitespace),
+  });
+  queryClient.prefetchQuery({
+    queryKey: keys.patch(worktree.path, base, scope, ignoreWhitespace),
+    queryFn: () => api.diffPatch(worktree.path, base, scope, ignoreWhitespace),
   });
 }
 
@@ -86,6 +106,7 @@ export function useLiveGitData() {
       client.invalidateQueries({ queryKey: keys.repos });
       client.invalidateQueries({ queryKey: ["stats"] });
       client.invalidateQueries({ queryKey: ["files"] });
+      client.invalidateQueries({ queryKey: ["patch"] });
     });
     return () => {
       offFocus();

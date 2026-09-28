@@ -30,6 +30,9 @@ export function totals(files: ChangedFile[]) {
   return { additions, deletions };
 }
 
+/** Natural order, so `file9` sorts before `file10`. */
+const compareNames = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
 export type TreeNode =
   | { type: "dir"; name: string; path: string; children: TreeNode[] }
   | { type: "file"; name: string; path: string; file: ChangedFile };
@@ -58,7 +61,7 @@ export function buildTree(files: ChangedFile[]): TreeNode[] {
 
   const toNodes = (dir: Dir, prefix: string): TreeNode[] => {
     const dirs: TreeNode[] = [...dir.dirs.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => compareNames(a, b))
       .map(([name, child]) => {
         let label = name;
         let node = child;
@@ -71,7 +74,7 @@ export function buildTree(files: ChangedFile[]): TreeNode[] {
         return { type: "dir", name: label, path, children: toNodes(node, `${path}/`) };
       });
     const fileNodes: TreeNode[] = dir.files
-      .sort((a, b) => a.path.localeCompare(b.path))
+      .sort((a, b) => compareNames(a.path, b.path))
       .map((file) => ({ type: "file", name: splitPath(file.path).base, path: file.path, file }));
     return [...dirs, ...fileNodes];
   };

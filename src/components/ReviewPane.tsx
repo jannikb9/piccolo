@@ -1,37 +1,37 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, ChevronRight, Columns2, Copy, FileImage, FolderGit2, GitBranch, GitCompareArrows, Rows2 } from "lucide-react";
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { AlertTriangle, ArrowLeft, Columns2, Copy, FolderGit2, GitBranch, GitCompareArrows, Pilcrow, Rows2 } from "lucide-react";
+import type { ReactNode, Ref } from "react";
 import { useAddRepo } from "../lib/queries";
-import { cn, splitPath, totals } from "../lib/utils";
+import { cn, totals } from "../lib/utils";
 import { useStore } from "../store";
-import type { ChangedFile, Repo, Worktree } from "../types";
-import { MockDiff } from "./MockDiff";
-import { DiffBlocks, DiffCount, IconButton, Segmented, Skeleton, StatusBadge, Tooltip, ViewedToggle } from "./ui";
-
-export const fileAnchorId = (path: string) => `file:${path}`;
+import type { ChangedFile, DiffPatch, Repo, Worktree } from "../types";
+import { DiffView, type DiffViewHandle } from "./DiffView";
+import { DiffCount, IconButton, Segmented, Skeleton, Tooltip } from "./ui";
 
 export function ReviewPane({
   repo,
   worktree,
   files,
-  query,
-  scrollRef,
+  filesQuery,
+  patchQuery,
+  viewRef,
 }: {
   repo: Repo;
   worktree: Worktree;
-  /** `query.data` in display order. */
+  /** `filesQuery.data` in display order. */
   files: ChangedFile[];
-  query: UseQueryResult<ChangedFile[]>;
-  scrollRef: RefObject<HTMLDivElement | null>;
+  filesQuery: UseQueryResult<ChangedFile[]>;
+  patchQuery: UseQueryResult<DiffPatch>;
+  viewRef: Ref<DiffViewHandle>;
 }) {
   const scope = useStore((s) => s.scope);
-  useActiveFileTracking(scrollRef, files, `${worktree.id}:${scope}`);
+  const query = filesQuery.isError ? filesQuery : patchQuery;
 
   return (
     <main className="@container flex h-full min-w-0 flex-col bg-bg">
       <Toolbar repo={repo} worktree={worktree} files={files} />
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        {query.isPending ? (
+      <div className="min-h-0 flex-1">
+        {filesQuery.isPending || patchQuery.isPending ? (
           <DiffSkeleton />
         ) : query.isError ? (
           <CenteredMessage
@@ -62,11 +62,14 @@ export function ReviewPane({
             )}
           </CenteredMessage>
         ) : (
-          <div className="flex flex-col gap-3 px-4 pt-3 pb-[40vh]">
-            {files.map((file) => (
-              <FileCard key={file.path} worktreeId={worktree.id} file={file} />
-            ))}
-          </div>
+          // Remounted per worktree and scope so each starts at the top.
+          <DiffView
+            key={`${worktree.id}:${scope}`}
+            worktree={worktree}
+            files={files}
+            diff={patchQuery.data!}
+            viewRef={viewRef}
+          />
         )}
       </div>
     </main>
@@ -78,6 +81,8 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
   const setLayout = useStore((s) => s.setLayout);
   const scope = useStore((s) => s.scope);
   const setScope = useStore((s) => s.setScope);
+  const hideWhitespace = useStore((s) => s.hideWhitespace);
+  const toggleHideWhitespace = useStore((s) => s.toggleHideWhitespace);
   const { additions, deletions } = totals(files);
   const branch = worktree.branch ?? worktree.head;
 
@@ -113,6 +118,14 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        <IconButton
+          label={hideWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
+          aria-pressed={hideWhitespace}
+          onClick={toggleHideWhitespace}
+          className={cn("size-7", hideWhitespace && "bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent")}
+        >
+          <Pilcrow className="size-3.5" />
+        </IconButton>
         <Segmented
           label="Changes to show"
           value={scope}
@@ -134,77 +147,6 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
         />
       </div>
     </header>
-  );
-}
-
-function FileCard({ worktreeId, file }: { worktreeId: string; file: ChangedFile }) {
-  const viewed = useStore((s) => !!s.viewed[worktreeId]?.[file.path]);
-  const collapsed = useStore((s) => !!s.collapsed[worktreeId]?.[file.path]);
-  const layout = useStore((s) => s.layout);
-  const toggleViewed = useStore((s) => s.toggleViewed);
-  const toggleCollapsed = useStore((s) => s.toggleCollapsed);
-  const { dir, base } = splitPath(file.path);
-
-  return (
-    <section id={fileAnchorId(file.path)} className="scroll-mt-3 rounded-lg border border-border bg-bg">
-      <header
-        onClick={() => toggleCollapsed(worktreeId, file.path)}
-        className={cn(
-          "group sticky top-0 z-10 flex h-10 items-center gap-2 border-border bg-bg-raised pr-2 pl-2.5",
-          collapsed ? "rounded-lg" : "rounded-t-lg border-b",
-        )}
-      >
-        <ChevronRight
-          className={cn("size-3.5 shrink-0 text-fg-subtle transition-transform duration-150", !collapsed && "rotate-90")}
-        />
-        <span className={cn("flex min-w-0 items-baseline font-mono text-[12.5px]", viewed && "opacity-60")}>
-          <span className="truncate text-fg-subtle">{dir}</span>
-          <span className="shrink-0 font-medium text-fg">{base}</span>
-        </span>
-        <IconButton
-          label="Copy path"
-          className="size-5 shrink-0 opacity-0 group-hover:opacity-100"
-          onClick={(e) => {
-            e.stopPropagation();
-            navigator.clipboard.writeText(file.path);
-          }}
-        >
-          <Copy className="size-3" />
-        </IconButton>
-
-        <span className="ml-auto flex shrink-0 items-center gap-3">
-          {file.oldPath ? (
-            <Tooltip label={<span className="font-mono">from {file.oldPath}</span>}>
-              <span>
-                <StatusBadge status={file.status} />
-              </span>
-            </Tooltip>
-          ) : (
-            <StatusBadge status={file.status} />
-          )}
-          {!file.binary && (
-            <span className="flex items-center gap-2">
-              <DiffCount additions={file.additions} deletions={file.deletions} />
-              <DiffBlocks additions={file.additions} deletions={file.deletions} />
-            </span>
-          )}
-          <ViewedToggle checked={viewed} onChange={() => toggleViewed(worktreeId, file.path)} />
-        </span>
-      </header>
-
-      {!collapsed && (
-        <div className="overflow-hidden rounded-b-lg">
-          {file.binary ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-fg-subtle">
-              <FileImage className="size-4" />
-              Binary file not shown
-            </div>
-          ) : (
-            <MockDiff layout={layout} />
-          )}
-        </div>
-      )}
-    </section>
   );
 }
 
@@ -278,43 +220,4 @@ export function Welcome({ loading }: { loading: boolean }) {
       )}
     </main>
   );
-}
-
-/**
- * Highlights the file in the tree whose header is currently at the top of the diff stream.
- * `viewKey` identifies what is being reviewed; the stream scrolls back to the top when it changes.
- */
-function useActiveFileTracking(scrollRef: RefObject<HTMLDivElement | null>, files: ChangedFile[], viewKey: string) {
-  const setActivePath = useStore((s) => s.setActivePath);
-  const frame = useRef(0);
-
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = 0;
-  }, [scrollRef, viewKey]);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-
-    const update = () => {
-      const top = el.getBoundingClientRect().top + 48;
-      let active: string | null = null;
-      for (const section of el.querySelectorAll<HTMLElement>("section[id^='file:']")) {
-        if (section.getBoundingClientRect().top <= top) active = section.id.slice(5);
-        else break;
-      }
-      setActivePath(active ?? files[0]?.path ?? null);
-    };
-    const onScroll = () => {
-      cancelAnimationFrame(frame.current);
-      frame.current = requestAnimationFrame(update);
-    };
-
-    update();
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      cancelAnimationFrame(frame.current);
-    };
-  }, [scrollRef, files, setActivePath]);
 }

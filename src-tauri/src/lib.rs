@@ -29,6 +29,8 @@ pub fn run() {
             repos::remove_repo,
             repos::worktree_stats,
             repos::changed_files,
+            repos::diff_patch,
+            repos::file_versions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
