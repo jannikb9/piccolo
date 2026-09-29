@@ -1,15 +1,17 @@
 import type { CodeViewItem, DiffLineAnnotation, FileDiffLoadedFiles, FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
 import { ChevronRight, Copy, MessageSquare } from "lucide-react";
-import { useCallback, useMemo, useRef, type CSSProperties, type Ref } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
 import { emptyDiff, hashString, isCollapsedByDefault, parsePatch } from "../lib/diff";
 import { useAddThread } from "../lib/queries";
+import { clearMatches, findMatches, paintMatches } from "../lib/search";
 import { cn, splitPath } from "../lib/utils";
 import { useStore } from "../store";
 import type { ChangedFile, DiffPatch, LineRange, Thread, Worktree } from "../types";
 import { Composer, DetachedNote, ThreadCard } from "./Comments";
+import { FindBar } from "./FindBar";
 import { DiffBlocks, DiffCount, IconButton, StatusBadge, Tooltip, ViewedToggle } from "./ui";
 
 /** What an annotation row under a diff line holds. */
@@ -82,6 +84,14 @@ const unsafeCSS = /* css */ `
   }
   [data-line-annotation] {
     --diffs-annotation-bg: var(--bg);
+  }
+  /* ⌘F matches, painted with the CSS Custom Highlight API (see lib/search.ts). */
+  ::highlight(review-find) {
+    background-color: color-mix(in oklab, var(--mod) 38%, transparent);
+  }
+  ::highlight(review-find-current) {
+    background-color: var(--mod);
+    color: oklch(0.2 0.02 70);
   }
 `;
 
@@ -213,6 +223,67 @@ export function DiffView({
     [discardDraft],
   );
 
+  // ⌘F: search the lines of expanded files, like a browser's find in page.
+  const [find, setFind] = useState({ open: false, query: "", current: -1, focusKey: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchable = useMemo(
+    () => items.flatMap((item) => (item.type === "diff" && !item.collapsed ? [{ path: item.id, fileDiff: item.fileDiff }] : [])),
+    [items],
+  );
+  const matches = useMemo(() => (find.open ? findMatches(searchable, find.query) : []), [find.open, searchable, find.query]);
+  const current = matches.length === 0 ? -1 : Math.min(Math.max(find.current, 0), matches.length - 1);
+
+  const setQuery = (query: string) => {
+    // Start from the file being read, as a browser starts from the current scroll position.
+    const next = findMatches(searchable, query);
+    const active = useStore.getState().activePath;
+    const from = Math.max(0, searchable.findIndex((f) => f.path === active));
+    const order = new Map(searchable.map((f, i) => [f.path, i]));
+    const first = next.findIndex((m) => (order.get(m.path) ?? 0) >= from);
+    setFind((f) => ({ ...f, query, current: next.length === 0 ? -1 : Math.max(first, 0) }));
+  };
+  const step = useCallback(
+    (delta: 1 | -1) =>
+      setFind((f) => (matches.length === 0 ? f : { ...f, current: (current + delta + matches.length) % matches.length })),
+    [matches.length, current],
+  );
+  const closeFind = useCallback(() => setFind((f) => ({ ...f, open: false })), []);
+
+  // Bring the current match into view, also after switching between split and unified.
+  const match = current >= 0 ? matches[current] : undefined;
+  useEffect(() => {
+    if (!match) return;
+    localRef.current?.scrollTo({ type: "line", id: match.path, lineNumber: match.line, side: match.side, align: "center" });
+  }, [match, layout]);
+
+  // Highlights are painted on rendered lines, so repaint whenever the diff renders more of them.
+  const paint = useRef<() => void>(() => {});
+  paint.current = () => paintMatches(containerRef.current, matches, current);
+  const repaintFrame = useRef(0);
+  const schedulePaint = useCallback(() => {
+    cancelAnimationFrame(repaintFrame.current);
+    repaintFrame.current = requestAnimationFrame(() => paint.current());
+  }, []);
+  useEffect(() => {
+    paint.current();
+  }, [matches, current]);
+  useEffect(() => () => clearMatches(), []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.altKey || e.ctrlKey) return;
+      if (e.key === "f" && !e.shiftKey) {
+        e.preventDefault();
+        setFind((f) => ({ ...f, open: true, focusKey: f.focusKey + 1 }));
+      } else if (e.key.toLowerCase() === "g" && find.open) {
+        e.preventDefault();
+        step(e.shiftKey ? -1 : 1);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [find.open, step]);
+
   const loadDiffFiles = useCallback(
     async (fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
       const oldPath = fileDiff.prevName ?? fileDiff.name;
@@ -243,8 +314,9 @@ export function DiffView({
       enableGutterUtility: true,
       onGutterUtilityClick: (selection: SelectedLineRange, context: { item: CodeViewItem<Note> }) =>
         startComment.current?.(selection, context.item.id),
+      onPostRender: schedulePaint,
     }),
-    [layout, loadDiffFiles],
+    [layout, loadDiffFiles, schedulePaint],
   );
 
   // Highlights the file in the tree whose header is at the top of the viewport.
@@ -258,8 +330,9 @@ export function DiffView({
         active = file.path;
       }
       setActivePath(active);
+      schedulePaint();
     },
-    [files, setActivePath],
+    [files, setActivePath, schedulePaint],
   );
 
   const renderHeader = useCallback(
@@ -326,17 +399,32 @@ export function DiffView({
   );
 
   return (
-    <CodeView<Note>
-      ref={setRefs}
-      items={items}
-      options={options}
-      onScroll={onScroll}
-      renderCustomHeader={renderHeader}
-      renderAnnotation={renderAnnotation}
-      renderCodeViewHeader={renderViewHeader}
-      className="h-full overflow-auto px-4"
-      style={viewStyle}
-    />
+    <div className="relative h-full">
+      {find.open && (
+        <FindBar
+          query={find.query}
+          onQueryChange={setQuery}
+          count={matches.length}
+          current={current}
+          capped={matches.length >= 5000}
+          focusKey={find.focusKey}
+          onStep={step}
+          onClose={closeFind}
+        />
+      )}
+      <CodeView<Note>
+        ref={setRefs}
+        containerRef={containerRef}
+        items={items}
+        options={options}
+        onScroll={onScroll}
+        renderCustomHeader={renderHeader}
+        renderAnnotation={renderAnnotation}
+        renderCodeViewHeader={renderViewHeader}
+        className="h-full overflow-auto px-4"
+        style={viewStyle}
+      />
+    </div>
   );
 }
 
@@ -405,6 +493,7 @@ function FileHeader({
 
   return (
     <div
+      data-file-path={file.path}
       onClick={() => expandable && setCollapsed(worktreeId, file.path, !collapsed)}
       className={cn(
         "group flex h-10 items-center gap-2 border border-border bg-bg-raised pr-2 pl-2.5 font-sans",
