@@ -78,18 +78,20 @@ fn list(include_resolved: bool, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&threads).map_err(|e| e.to_string())?);
     } else {
-        print!("{}", format_threads(&target.label(), &threads, include_resolved));
+        print!("{}", format_threads(&target, &threads, include_resolved));
     }
     Ok(())
 }
 
 /// Markdown for an agent: each thread with the code it's about, then how to answer.
-fn format_threads(branch: &str, threads: &[Thread], include_resolved: bool) -> String {
+fn format_threads(target: &Target, threads: &[Thread], include_resolved: bool) -> String {
+    let (branch, worktree) = (target.label(), &target.worktree);
     let what = if include_resolved { "review comments" } else { "open review comments" };
     if threads.is_empty() {
-        return format!("No {what} on {branch}.\n");
+        return format!("No {what} on {branch} in {worktree}.\n");
     }
-    let mut out = format!("# Review comments on {branch}\n\n");
+    // Agents often work from outside the worktree, so say where the relative paths start.
+    let mut out = format!("# Review comments on {branch}\n\nWorktree: {worktree} (file paths below are relative to it)\n\n");
     let count = threads.len();
     out.push_str(&format!(
         "{count} {}. Line numbers refer to the files as they are now; the code shown is what the reviewer saw.\n",
@@ -186,6 +188,12 @@ mod tests {
         assert_eq!(describe(&r(Side::Additions, 4, Side::Additions, 6)), "lines 4-6");
         assert_eq!(describe(&r(Side::Deletions, 4, Side::Deletions, 4)), "removed line 4");
         assert_eq!(describe(&r(Side::Deletions, 3, Side::Additions, 5)), "removed line 3 to new line 5");
+    }
+
+    #[test]
+    fn names_the_worktree() {
+        let target = Target { repo: "/r".into(), branch: Some("feat/x".into()), worktree: "/wt/feat".into() };
+        assert_eq!(format_threads(&target, &[], false), "No open review comments on feat/x in /wt/feat.\n");
     }
 
     #[test]

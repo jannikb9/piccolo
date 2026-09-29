@@ -87,7 +87,8 @@ function DirRow({ node, ...props }: RowProps & { node: Extract<TreeNode, { type:
         type="button"
         onClick={() => setOpen(!open)}
         style={indent(depth)}
-        className="flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px] text-fg-subtle hover:bg-bg-hover hover:text-fg-muted"
+        // Folder paths sit between the subtle and muted text colours: readable, but quieter than file names.
+        className="flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px] text-[color-mix(in_oklab,var(--fg-subtle),var(--fg-muted))] hover:bg-bg-hover hover:text-fg-muted"
       >
         <ChevronRight className={cn("size-3 shrink-0 transition-transform duration-150", open && "rotate-90")} />
         <Icon className="size-3.5 shrink-0" />

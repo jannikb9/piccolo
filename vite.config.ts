@@ -10,6 +10,12 @@ export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
   // The diff highlighter's web worker is an ES module.
   worker: { format: "es" as const },
+  build: {
+    // The default 500 kB warning is about download size on the web; the app loads from disk. The
+    // largest chunks are the app itself (~1.2 MB) and Shiki grammars that already load on demand
+    // (C++, Emacs Lisp, ~800 kB each). This still flags a chunk that grows far beyond that.
+    chunkSizeWarningLimit: 2000,
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
