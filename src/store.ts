@@ -59,7 +59,7 @@ function toggle(set: PathSet | undefined, key: string, on: boolean): PathSet {
 
 export const useStore = create<State>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       selectedWorktreeId: null,
       collapsedRepos: {},
       layout: "split",
@@ -90,7 +90,12 @@ export const useStore = create<State>()(
         }),
       setCollapsed: (wt, path, collapsed) =>
         set((s) => ({ collapsed: { ...s.collapsed, [wt]: { ...s.collapsed[wt], [path]: collapsed } } })),
-      setActivePath: (activePath) => set((s) => (Date.now() < s.activePinnedUntil ? {} : { activePath })),
+      // Called on every scroll event: only touch the store when the file actually changes, since
+      // each update re-runs every subscriber and the persist middleware writes to localStorage.
+      setActivePath: (activePath) => {
+        const s = get();
+        if (s.activePath !== activePath && Date.now() >= s.activePinnedUntil) set({ activePath });
+      },
       pinActivePath: (activePath) => set({ activePath, activePinnedUntil: Date.now() + 400 }),
       // Starting a comment where one is already being written keeps its text.
       startDraft: (draft) =>

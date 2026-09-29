@@ -71,39 +71,38 @@ const key = (path: string, side: Side, line: number) => `${path}\n${side}\n${lin
  */
 export function paintMatches(container: HTMLElement | null, matches: SearchMatch[], current: number) {
   if (typeof CSS === "undefined" || !("highlights" in CSS)) return;
+  if (!container || matches.length === 0) return clearMatches();
   const all = new Highlight();
   const active = new Highlight();
 
-  if (container && matches.length > 0) {
-    const byLine = new Map<string, { start: number; end: number; index: number }[]>();
-    const add = (k: string, entry: { start: number; end: number; index: number }) => {
-      const list = byLine.get(k);
-      if (list) list.push(entry);
-      else byLine.set(k, [entry]);
-    };
-    matches.forEach((m, index) => {
-      add(key(m.path, m.side, m.line), { start: m.start, end: m.end, index });
-      if (m.oldLine !== undefined) add(key(m.path, "deletions", m.oldLine), { start: m.start, end: m.end, index });
-    });
+  const byLine = new Map<string, { start: number; end: number; index: number }[]>();
+  const add = (k: string, entry: { start: number; end: number; index: number }) => {
+    const list = byLine.get(k);
+    if (list) list.push(entry);
+    else byLine.set(k, [entry]);
+  };
+  matches.forEach((m, index) => {
+    add(key(m.path, m.side, m.line), { start: m.start, end: m.end, index });
+    if (m.oldLine !== undefined) add(key(m.path, "deletions", m.oldLine), { start: m.start, end: m.end, index });
+  });
 
-    for (const host of container.querySelectorAll<HTMLElement>("diffs-container")) {
-      const path = host.querySelector<HTMLElement>("[data-file-path]")?.dataset.filePath;
-      const root = host.shadowRoot;
-      if (!path || !root) continue;
-      for (const lineEl of root.querySelectorAll<HTMLElement>("[data-content] > [data-line]")) {
-        const code = lineEl.closest("code");
-        const side: Side =
-          code?.hasAttribute("data-deletions") ||
-          (code?.hasAttribute("data-unified") && lineEl.dataset.lineType === "change-deletion")
-            ? "deletions"
-            : "additions";
-        // In the unified layout an unchanged line shows once, under its new line number.
-        const entries = byLine.get(key(path, side, Number(lineEl.dataset.line)));
-        if (!entries) continue;
-        for (const { start, end, index } of entries) {
-          const range = textRange(lineEl, start, end);
-          if (range) (index === current ? active : all).add(range);
-        }
+  for (const host of container.querySelectorAll<HTMLElement>("diffs-container")) {
+    const path = host.querySelector<HTMLElement>("[data-file-path]")?.dataset.filePath;
+    const root = host.shadowRoot;
+    if (!path || !root) continue;
+    for (const lineEl of root.querySelectorAll<HTMLElement>("[data-content] > [data-line]")) {
+      const code = lineEl.closest("code");
+      const side: Side =
+        code?.hasAttribute("data-deletions") ||
+        (code?.hasAttribute("data-unified") && lineEl.dataset.lineType === "change-deletion")
+          ? "deletions"
+          : "additions";
+      // In the unified layout an unchanged line shows once, under its new line number.
+      const entries = byLine.get(key(path, side, Number(lineEl.dataset.line)));
+      if (!entries) continue;
+      for (const { start, end, index } of entries) {
+        const range = textRange(lineEl, start, end);
+        if (range) (index === current ? active : all).add(range);
       }
     }
   }

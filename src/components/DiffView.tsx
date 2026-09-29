@@ -259,8 +259,12 @@ export function DiffView({
   // Highlights are painted on rendered lines, so repaint whenever the diff renders more of them.
   const paint = useRef<() => void>(() => {});
   paint.current = () => paintMatches(containerRef.current, matches, current);
+  // Scrolling calls this every frame; with nothing to highlight it must not touch the page.
+  const hasMatches = useRef(false);
+  hasMatches.current = matches.length > 0;
   const repaintFrame = useRef(0);
   const schedulePaint = useCallback(() => {
+    if (!hasMatches.current) return;
     cancelAnimationFrame(repaintFrame.current);
     repaintFrame.current = requestAnimationFrame(() => paint.current());
   }, []);
