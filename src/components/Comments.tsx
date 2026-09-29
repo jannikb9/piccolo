@@ -1,5 +1,5 @@
 import { Bot, CheckCircle2, ChevronRight, RotateCcw, Trash2, User } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useDeleteComment, useReplyThread, useSetThreadResolved } from "../lib/queries";
 import { cn, timeAgo } from "../lib/utils";
 import { useStore } from "../store";
@@ -43,12 +43,6 @@ function CommentField({
   autoFocus?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
   useEffect(() => {
     if (autoFocus) ref.current?.focus({ preventScroll: true });
   }, [autoFocus]);
@@ -63,16 +57,28 @@ function CommentField({
     }
   };
 
+  // The textarea grows with a hidden copy of its text in the same grid cell, so the height follows
+  // in the normal layout pass; measuring it from script forces a layout of the whole diff per key.
+  // WebKit draws the caret as tall as the line, so lines are kept fairly tight.
+  const shared = "col-start-1 row-start-1 max-h-80 px-3 py-2.5 leading-[18px] break-words whitespace-pre-wrap";
   return (
-    <textarea
-      ref={ref}
-      value={value}
-      rows={3}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
-      onKeyDown={onKeyDown}
-      className="selectable block max-h-80 min-h-[4.5rem] w-full resize-none bg-transparent px-3 py-2.5 leading-5 text-fg outline-none placeholder:text-fg-faint"
-    />
+    <div className="grid">
+      <div aria-hidden className={cn(shared, "invisible overflow-hidden")}>
+        {value}{" "}
+      </div>
+      <textarea
+        ref={ref}
+        value={value}
+        rows={3}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        className={cn(
+          shared,
+          "selectable block min-h-[74px] w-full resize-none bg-transparent text-fg caret-accent outline-none placeholder:text-fg-faint",
+        )}
+      />
+    </div>
   );
 }
 
