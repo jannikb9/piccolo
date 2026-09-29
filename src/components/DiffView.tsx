@@ -37,14 +37,16 @@ const unsafeCSS = /* css */ `
     --diffs-light-bg: var(--bg);
 
     /* Quieter row tints than the theme defaults so syntax colours stay readable on changed
-       lines; the changed words themselves get the stronger tint. */
+       lines; the changed words themselves get the stronger tint. The library mixes these
+       overrides into the background again (20% on lines, 15% on numbers in dark; 12% / 9% in
+       light), so 30% here is about a 6% tint on a dark line. */
     --diffs-addition-color-override: var(--add);
     --diffs-deletion-color-override: var(--del);
-    --diffs-bg-addition-override: color-mix(in oklab, var(--add) 8%, var(--bg));
-    --diffs-bg-addition-number-override: color-mix(in oklab, var(--add) 14%, var(--bg));
+    --diffs-bg-addition-override: color-mix(in oklab, var(--add) 30%, var(--bg));
+    --diffs-bg-addition-number-override: color-mix(in oklab, var(--add) 60%, var(--bg));
     --diffs-bg-addition-emphasis-override: color-mix(in oklab, var(--add) 28%, transparent);
-    --diffs-bg-deletion-override: color-mix(in oklab, var(--del) 8%, var(--bg));
-    --diffs-bg-deletion-number-override: color-mix(in oklab, var(--del) 14%, var(--bg));
+    --diffs-bg-deletion-override: color-mix(in oklab, var(--del) 30%, var(--bg));
+    --diffs-bg-deletion-number-override: color-mix(in oklab, var(--del) 60%, var(--bg));
     --diffs-bg-deletion-emphasis-override: color-mix(in oklab, var(--del) 28%, transparent);
   }
   [data-diffs-header] {
