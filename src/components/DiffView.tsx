@@ -6,7 +6,19 @@ import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
 import { emptyDiff, hashString, isCollapsedByDefault, parsePatch } from "../lib/diff";
 import { useAddThread } from "../lib/queries";
-import { clearMatches, findMatches, paintMatches } from "../lib/search";
+import {
+  clearMatches,
+  FIND_LAYER,
+  findMatches,
+  inScreenOrder,
+  isInside,
+  isMatchInView,
+  matchFromView,
+  MAX_MATCHES,
+  OCCURRENCE_LAYER,
+  paintMatches,
+  type SearchMatch,
+} from "../lib/search";
 import { cn, splitPath } from "../lib/utils";
 import { useStore } from "../store";
 import type { ChangedFile, DiffPatch, LineRange, Thread, Worktree } from "../types";
@@ -93,7 +105,13 @@ const unsafeCSS = /* css */ `
     background-color: var(--mod);
     color: oklch(0.2 0.02 70);
   }
+  /* Other occurrences of the selected text. */
+  ::highlight(review-occurrence) {
+    background-color: color-mix(in oklab, var(--accent) 30%, transparent);
+  }
 `;
+
+const matchKey = (m: SearchMatch) => `${m.path}\n${m.side}\n${m.line}\n${m.start}`;
 
 /** A library selection as stored ranges: sides default to the new version, top line first. */
 function toLineRange(selection: SelectedLineRange): LineRange {
@@ -223,45 +241,74 @@ export function DiffView({
     [discardDraft],
   );
 
-  // ⌘F: search the lines of expanded files, like a browser's find in page.
-  const [find, setFind] = useState({ open: false, query: "", current: -1, focusKey: 0 });
+  // ⌘F: search the lines of expanded files. Typing only highlights; stepping starts from what's on
+  // screen and only scrolls when the next match isn't visible.
+  const [find, setFind] = useState({ open: false, query: "", currentKey: null as string | null, focusKey: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const searchable = useMemo(
     () => items.flatMap((item) => (item.type === "diff" && !item.collapsed ? [{ path: item.id, fileDiff: item.fileDiff }] : [])),
     [items],
   );
-  const matches = useMemo(() => (find.open ? findMatches(searchable, find.query) : []), [find.open, searchable, find.query]);
-  const current = matches.length === 0 ? -1 : Math.min(Math.max(find.current, 0), matches.length - 1);
+  const fileIndex = useMemo(() => new Map(searchable.map((f, i) => [f.path, i])), [searchable]);
+  const matches = useMemo(
+    () => (find.open ? inScreenOrder(findMatches(searchable, find.query), layout) : []),
+    [find.open, searchable, find.query, layout],
+  );
+  // The current match is kept by identity, so it survives the list being rebuilt or reordered.
+  const current = find.currentKey === null ? -1 : matches.findIndex((m) => matchKey(m) === find.currentKey);
 
-  const setQuery = (query: string) => {
-    // Start from the file being read, as a browser starts from the current scroll position.
-    const next = findMatches(searchable, query);
-    const active = useStore.getState().activePath;
-    const from = Math.max(0, searchable.findIndex((f) => f.path === active));
-    const order = new Map(searchable.map((f, i) => [f.path, i]));
-    const first = next.findIndex((m) => (order.get(m.path) ?? 0) >= from);
-    setFind((f) => ({ ...f, query, current: next.length === 0 ? -1 : Math.max(first, 0) }));
-  };
+  const setQuery = (query: string) => setFind((f) => ({ ...f, query, currentKey: null }));
   const step = useCallback(
-    (delta: 1 | -1) =>
-      setFind((f) => (matches.length === 0 ? f : { ...f, current: (current + delta + matches.length) % matches.length })),
-    [matches.length, current],
+    (direction: 1 | -1) => {
+      if (matches.length === 0) return;
+      const container = containerRef.current;
+      const index =
+        current >= 0 && isMatchInView(container, matches[current], fileIndex, layout)
+          ? (current + direction + matches.length) % matches.length
+          : matchFromView(container, matches, direction, fileIndex, layout, fileIndex.get(useStore.getState().activePath ?? "") ?? 0);
+      const target = matches[index];
+      setFind((f) => ({ ...f, currentKey: matchKey(target) }));
+      if (!isMatchInView(container, target, fileIndex, layout)) {
+        localRef.current?.scrollTo({ type: "line", id: target.path, lineNumber: target.line, side: target.side, align: "center" });
+      }
+    },
+    [matches, current, fileIndex, layout],
   );
   const closeFind = useCallback(() => setFind((f) => ({ ...f, open: false })), []);
 
-  // Bring the current match into view, also after switching between split and unified.
-  const match = current >= 0 ? matches[current] : undefined;
+  // Selecting text highlights where else it occurs, like a code editor does.
+  const [selected, setSelected] = useState("");
   useEffect(() => {
-    if (!match) return;
-    localRef.current?.scrollTo({ type: "line", id: match.path, lineNumber: match.line, side: match.side, align: "center" });
-  }, [match, layout]);
+    let timer = 0;
+    const onSelectionChange = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const selection = document.getSelection();
+        const text = selection?.toString() ?? "";
+        const inCode = isInside(containerRef.current, selection?.anchorNode ?? null) && !document.activeElement?.closest("textarea, input");
+        setSelected(inCode && text.trim().length >= 2 && text.length <= 200 && !text.includes("\n") ? text : "");
+      }, 120);
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("selectionchange", onSelectionChange);
+    };
+  }, []);
+  const occurrences = useMemo(
+    () => (selected ? findMatches(searchable, selected, { caseSensitive: true }) : []),
+    [searchable, selected],
+  );
 
   // Highlights are painted on rendered lines, so repaint whenever the diff renders more of them.
   const paint = useRef<() => void>(() => {});
-  paint.current = () => paintMatches(containerRef.current, matches, current);
+  paint.current = () => {
+    paintMatches(containerRef.current, matches, current, FIND_LAYER, fileIndex, layout);
+    paintMatches(containerRef.current, occurrences, -1, OCCURRENCE_LAYER, fileIndex, layout);
+  };
   // Scrolling calls this every frame; with nothing to highlight it must not touch the page.
   const hasMatches = useRef(false);
-  hasMatches.current = matches.length > 0;
+  hasMatches.current = matches.length > 0 || occurrences.length > 0;
   const repaintFrame = useRef(0);
   const schedulePaint = useCallback(() => {
     if (!hasMatches.current) return;
@@ -270,8 +317,14 @@ export function DiffView({
   }, []);
   useEffect(() => {
     paint.current();
-  }, [matches, current]);
-  useEffect(() => () => clearMatches(), []);
+  }, [matches, current, occurrences]);
+  useEffect(
+    () => () => {
+      clearMatches(FIND_LAYER);
+      clearMatches(OCCURRENCE_LAYER);
+    },
+    [],
+  );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -410,7 +463,7 @@ export function DiffView({
           onQueryChange={setQuery}
           count={matches.length}
           current={current}
-          capped={matches.length >= 5000}
+          capped={matches.length >= MAX_MATCHES}
           focusKey={find.focusKey}
           onStep={step}
           onClose={closeFind}

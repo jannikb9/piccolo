@@ -61,7 +61,13 @@ export function FindBar({
           query && count === 0 ? "text-del" : "text-fg-subtle",
         )}
       >
-        {!query ? "" : count === 0 ? "No results" : `${current + 1} of ${count}${capped ? "+" : ""}`}
+        {!query
+          ? ""
+          : count === 0
+            ? "No results"
+            : current < 0
+              ? `${count}${capped ? "+" : ""} ${count === 1 ? "match" : "matches"}`
+              : `${current + 1} of ${count}${capped ? "+" : ""}`}
       </span>
       <span className="mx-1 h-4 w-px bg-border" />
       <IconButton label="Previous match (⇧↩)" disabled={count === 0} onClick={() => onStep(-1)} className="disabled:opacity-40">

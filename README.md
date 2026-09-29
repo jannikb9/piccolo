@@ -53,7 +53,8 @@ feedback on this branch; after addressing a comment, reply with `review reply <i
 - [x] M3 — Real diffs: `@pierre/diffs` CodeView (virtualized, worker-highlighted), split/unified, expandable context, hide whitespace
 - [x] Syntax themes: GitHub by default, others selectable in Settings (⌘,)
 - [x] Line comments (single and multi-line), replies, resolve; `review` CLI for agents
-- [x] ⌘F find in changes (expanded files; ⌘G / ⇧⌘G, Enter / ⇧Enter)
+- [x] ⌘F find in changes: highlights without scrolling; ⌘G / ⇧⌘G, Enter / ⇧Enter step from the current view
+- [x] Selecting text highlights its other occurrences
 - [ ] M4 — Review flow: viewed state with content fingerprints, keyboard nav, live refresh
 - [ ] M5 — Polish: empty/loading/error states, large-diff performance, transitions
 
