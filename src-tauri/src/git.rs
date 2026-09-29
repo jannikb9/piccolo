@@ -81,7 +81,8 @@ fn parse_worktree_list(out: &str) -> Vec<WorktreeEntry> {
 }
 
 /// The branch reviews are compared against: the remote's default branch if known, else
-/// `main`/`master`. Prefers the local branch, since agent worktrees usually branch off it.
+/// `main`/`master`. Prefers `origin/<name>` since local branches go stale unless pulled, which
+/// would show teammates' merged commits as part of the review; falls back to the local branch.
 pub fn default_branch(repo: &Path) -> Option<String> {
     let remote_head = git(repo, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
         .ok()
@@ -93,14 +94,12 @@ pub fn default_branch(repo: &Path) -> Option<String> {
 
     let exists = |r: &str| git(repo, &["rev-parse", "--verify", "--quiet", &format!("{r}^{{commit}}")]).is_ok();
     for name in &candidates {
-        if exists(&format!("refs/heads/{name}")) {
-            return Some(name.clone());
+        let remote = format!("origin/{name}");
+        if exists(&format!("refs/remotes/{remote}")) {
+            return Some(remote);
         }
     }
-    candidates
-        .iter()
-        .map(|name| format!("origin/{name}"))
-        .find(|r| exists(&format!("refs/remotes/{r}")))
+    candidates.into_iter().find(|name| exists(&format!("refs/heads/{name}")))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -717,6 +716,40 @@ mod tests {
         assert!(!find(&all, "new.txt").unwrap().generated);
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A stale local `main` must not be the base: merging `origin/main` would otherwise make
+    /// every upstream commit look like part of the branch.
+    #[test]
+    fn prefers_remote_default_branch() {
+        let root = std::env::temp_dir().join(format!("review-git-base-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let run = |args: &[&str]| git(&repo, args).unwrap();
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "user.email", "t@example.com"]);
+        run(&["config", "user.name", "Test"]);
+        run(&["commit", "-q", "--allow-empty", "-m", "init"]);
+        assert_eq!(default_branch(&repo).as_deref(), Some("main"));
+
+        // Upstream moves ahead of the local branch; the feature branch merges it.
+        run(&["checkout", "-q", "-b", "feat"]);
+        run(&["checkout", "-q", "main"]);
+        fs::write(repo.join("upstream.txt"), "x").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "upstream"]);
+        run(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        run(&["reset", "-q", "--hard", "HEAD~1"]);
+        run(&["checkout", "-q", "feat"]);
+        run(&["merge", "-q", "--no-edit", "origin/main"]);
+
+        assert_eq!(default_branch(&repo).as_deref(), Some("origin/main"));
+        let files = changed_files(&repo, Some("origin/main"), Scope::All, false).unwrap();
+        assert!(files.is_empty(), "{files:?}");
+        let files = changed_files(&repo, Some("main"), Scope::All, false).unwrap();
+        assert_eq!(files.len(), 1);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
