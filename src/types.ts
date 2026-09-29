@@ -65,3 +65,41 @@ export type FileVersions = {
 
 export type DiffScope = "all" | "committed" | "uncommitted";
 export type DiffLayout = "split" | "unified";
+
+/** A side of a diff: the old version (removed + unchanged lines) or the new one (added + unchanged). */
+export type Side = "deletions" | "additions";
+
+/** Commented lines. In the unified layout a range can start on removed lines and end on added ones. */
+export type LineRange = { startSide: Side; startLine: number; endSide: Side; endLine: number };
+
+export type ExcerptRow = {
+  kind: "context" | "add" | "del";
+  old: number | null;
+  new: number | null;
+  text: string;
+  commented: boolean;
+};
+
+export type CommentMessage = {
+  id: number;
+  author: "reviewer" | "agent";
+  body: string;
+  createdAt: number;
+};
+
+/** A comment on some lines and its replies. Stored per branch; agents answer via the `review` CLI. */
+export type Thread = {
+  id: number;
+  path: string;
+  oldPath?: string;
+  /** Where the comment was made. */
+  range: LineRange;
+  /** Where those lines are in the current diff; `null` when they changed (outdated). */
+  position: LineRange | null;
+  resolved: boolean;
+  /** The diff around the commented lines when the comment was made. */
+  excerpt: ExcerptRow[];
+  messages: CommentMessage[];
+  createdAt: number;
+  updatedAt: number;
+};

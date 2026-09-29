@@ -4,7 +4,7 @@ import type { ReactNode, Ref } from "react";
 import { useAddRepo } from "../lib/queries";
 import { cn, totals } from "../lib/utils";
 import { useStore } from "../store";
-import type { ChangedFile, DiffPatch, Repo, Worktree } from "../types";
+import type { ChangedFile, DiffPatch, Repo, Thread, Worktree } from "../types";
 import { DiffView, type DiffViewHandle } from "./DiffView";
 import { DiffCount, IconButton, Segmented, Skeleton, Tooltip } from "./ui";
 
@@ -14,6 +14,7 @@ export function ReviewPane({
   files,
   filesQuery,
   patchQuery,
+  threads,
   viewRef,
 }: {
   repo: Repo;
@@ -22,6 +23,7 @@ export function ReviewPane({
   files: ChangedFile[];
   filesQuery: UseQueryResult<ChangedFile[]>;
   patchQuery: UseQueryResult<DiffPatch>;
+  threads: Thread[];
   viewRef: Ref<DiffViewHandle>;
 }) {
   const scope = useStore((s) => s.scope);
@@ -66,8 +68,10 @@ export function ReviewPane({
           <DiffView
             key={`${worktree.id}:${scope}`}
             worktree={worktree}
+            base={repo.defaultBranch}
             files={files}
             diff={patchQuery.data!}
+            threads={threads}
             viewRef={viewRef}
           />
         )}

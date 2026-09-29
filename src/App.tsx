@@ -8,7 +8,8 @@ import { ReviewPane, Welcome } from "./components/ReviewPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { shikiThemes } from "./lib/codeThemes";
-import { useChangedFiles, useDiffPatch, useLiveGitData, useRepos } from "./lib/queries";
+import { hashString } from "./lib/diff";
+import { useChangedFiles, useDiffPatch, useLiveGitData, useRepos, useThreads } from "./lib/queries";
 import { buildTree, treeOrder } from "./lib/utils";
 import { orderedWorktrees, resolveSelection, useStore } from "./store";
 import type { Worktree } from "./types";
@@ -34,6 +35,15 @@ export default function App() {
 
   const filesQuery = useChangedFiles(worktree, base, scope, hideWhitespace);
   const patchQuery = useDiffPatch(worktree, base, scope, hideWhitespace);
+  // Threads are re-positioned whenever the diff changes.
+  const revision = useMemo(() => (patchQuery.data ? hashString(patchQuery.data.patch) : 0), [patchQuery.data]);
+  const threadsQuery = useThreads(worktree, base, scope, revision);
+  const threads = threadsQuery.data ?? [];
+  const commentCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of threadsQuery.data ?? []) if (!t.resolved) counts.set(t.path, (counts.get(t.path) ?? 0) + 1);
+    return counts;
+  }, [threadsQuery.data]);
   const { tree, files } = useMemo(() => {
     const tree = buildTree(filesQuery.data ?? []);
     return { tree, files: treeOrder(tree) };
@@ -61,6 +71,7 @@ export default function App() {
             tree={tree}
             fileCount={files.length}
             viewedCount={viewedCount}
+            commentCounts={commentCounts}
             loading={!!worktree && filesQuery.isPending}
             onSelect={jumpTo}
           />
@@ -74,6 +85,7 @@ export default function App() {
               files={files}
               filesQuery={filesQuery}
               patchQuery={patchQuery}
+              threads={threads}
               viewRef={viewRef}
             />
           ) : (

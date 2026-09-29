@@ -382,6 +382,109 @@ pub fn diff_patch(wt: &Path, base: Option<&str>, scope: Scope, ignore_whitespace
     Ok(DiffPatch { range, patch })
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum LineKind {
+    Context,
+    Add,
+    Del,
+}
+
+/// One row of a diff, with its line number on each side it exists on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiffLine {
+    pub kind: LineKind,
+    pub old: Option<u32>,
+    pub new: Option<u32>,
+    pub text: String,
+}
+
+/// Every line of one file across `range`: a diff with unlimited context, so unchanged lines the
+/// reviewer expanded are included too. `old_path` differs from `path` for renames.
+pub fn full_file_diff(wt: &Path, range: &DiffRange, old_path: &str, path: &str) -> Result<Vec<DiffLine>> {
+    let mut args = diff_flags(false);
+    args.extend(["--unified=100000000", "--src-prefix=a/", "--dst-prefix=b/"]);
+    args.extend(range.args());
+    args.push("--");
+    args.push(path);
+    if old_path != path {
+        args.push(old_path);
+    }
+    let rows = parse_file_diff(&git(wt, &args)?, path);
+    if !rows.is_empty() {
+        return Ok(rows);
+    }
+    // No textual diff: untracked (all added) or unchanged (all context).
+    let contents = match &range.new_rev {
+        None => read_text(&wt.join(path)),
+        rev => file_contents(wt, rev.as_deref(), path)?,
+    };
+    let Some(contents) = contents else { return Ok(Vec::new()) };
+    let untracked = file_contents(wt, Some(&range.old_rev), old_path)?.is_none();
+    Ok(contents
+        .lines()
+        .enumerate()
+        .map(|(i, text)| {
+            let n = i as u32 + 1;
+            if untracked {
+                DiffLine { kind: LineKind::Add, old: None, new: Some(n), text: text.to_string() }
+            } else {
+                DiffLine { kind: LineKind::Context, old: Some(n), new: Some(n), text: text.to_string() }
+            }
+        })
+        .collect())
+}
+
+/// Rows of the file entry for `path` in a unified diff.
+fn parse_file_diff(patch: &str, path: &str) -> Vec<DiffLine> {
+    let header_suffix = format!(" b/{path}");
+    let mut rows = Vec::new();
+    let (mut in_file, mut in_hunk) = (false, false);
+    let (mut old, mut new) = (0u32, 0u32);
+    for line in patch.lines() {
+        if line.starts_with("diff --git ") {
+            if in_file {
+                break;
+            }
+            in_file = line.ends_with(&header_suffix);
+            in_hunk = false;
+            continue;
+        }
+        if !in_file {
+            continue;
+        }
+        if let Some(header) = line.strip_prefix("@@ ") {
+            // `@@ -12,5 +12,7 @@`
+            let mut starts = header.split(' ').take(2).map(|part| {
+                part[1..].split(',').next().and_then(|n| n.parse::<u32>().ok()).unwrap_or(1)
+            });
+            old = starts.next().unwrap_or(1);
+            new = starts.next().unwrap_or(1);
+            in_hunk = true;
+            continue;
+        }
+        if !in_hunk {
+            continue;
+        }
+        let (kind, text) = match line.split_at_checked(1) {
+            Some(("+", text)) => (LineKind::Add, text),
+            Some(("-", text)) => (LineKind::Del, text),
+            Some((" ", text)) => (LineKind::Context, text),
+            _ => continue, // `\ No newline at end of file`
+        };
+        let row = DiffLine {
+            kind,
+            old: (kind != LineKind::Add).then_some(old),
+            new: (kind != LineKind::Del).then_some(new),
+            text: text.to_string(),
+        };
+        old += u32::from(row.old.is_some());
+        new += u32::from(row.new.is_some());
+        rows.push(row);
+    }
+    rows
+}
+
 /// The patch `git diff` would print for a new file, for untracked files git doesn't diff.
 fn new_file_patch(path: &str, contents: &str) -> String {
     let mut out = format!("diff --git a/{path} b/{path}\nnew file mode 100644\n");

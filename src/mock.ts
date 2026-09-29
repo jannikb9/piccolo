@@ -1,5 +1,5 @@
 // Placeholder data used when the UI runs in a plain browser (`pnpm dev`) instead of the desktop app.
-import type { ChangedFile, DiffPatch, DiffScope, FileVersions, Repo, WorktreeStats } from "./types";
+import type { ChangedFile, DiffPatch, DiffScope, ExcerptRow, FileVersions, LineRange, Repo, Thread, WorktreeStats } from "./types";
 
 const minutesAgo = (m: number) => Date.now() - m * 60_000;
 
@@ -214,4 +214,129 @@ export function mockDiffPatch(worktreePath: string, scope: DiffScope): Promise<D
 
 export function mockFileVersions(): Promise<FileVersions> {
   return delay({ old: oldContents, new: newContents });
+}
+
+// --- Review comments (kept in memory) ----------------------------------------------------------
+
+const newLines = newContents.split("\n");
+
+/** New-side lines around a range, standing in for the snapshot the backend stores. */
+function excerpt(range: LineRange): ExcerptRow[] {
+  const from = Math.max(1, Math.min(range.startLine, range.endLine) - 3);
+  const to = Math.min(newLines.length, Math.max(range.startLine, range.endLine) + 3);
+  return Array.from({ length: to - from + 1 }, (_, i) => {
+    const n = from + i;
+    return {
+      kind: "context",
+      old: n,
+      new: n,
+      text: newLines[n - 1] ?? "",
+      commented: n >= range.startLine && n <= range.endLine,
+    };
+  });
+}
+
+const lines = (startLine: number, endLine: number): LineRange => ({
+  startSide: "additions",
+  startLine,
+  endSide: "additions",
+  endLine,
+});
+
+let nextId = 100;
+const threads: Record<string, Thread[]> = {
+  "~/projects/spoke-app/auth-session": [
+    {
+      id: 1,
+      path: "src/auth/session.ts",
+      range: lines(24, 26),
+      position: lines(24, 26),
+      resolved: false,
+      excerpt: excerpt(lines(24, 26)),
+      messages: [
+        {
+          id: 1,
+          author: "reviewer",
+          body: "Refreshing here makes every read a potential write. Can we refresh in the middleware instead,\nso getSession stays side-effect free?",
+          createdAt: minutesAgo(42),
+        },
+        {
+          id: 2,
+          author: "agent",
+          body: "Moved the refresh into authMiddleware; getSession now only reads. The window check is shared via isExpiringSoon().",
+          createdAt: minutesAgo(6),
+        },
+      ],
+      createdAt: minutesAgo(42),
+      updatedAt: minutesAgo(6),
+    },
+    {
+      id: 2,
+      path: "src/auth/session.ts",
+      range: lines(29, 29),
+      position: null,
+      resolved: false,
+      excerpt: excerpt(lines(29, 29)),
+      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.", createdAt: minutesAgo(40) }],
+      createdAt: minutesAgo(40),
+      updatedAt: minutesAgo(40),
+    },
+    {
+      id: 3,
+      path: "src/api/client.ts",
+      range: lines(21, 21),
+      position: lines(21, 21),
+      resolved: true,
+      excerpt: excerpt(lines(21, 21)),
+      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.", createdAt: minutesAgo(90) }],
+      createdAt: minutesAgo(90),
+      updatedAt: minutesAgo(30),
+    },
+  ],
+};
+
+const findThread = (id: number) => Object.values(threads).flat().find((t) => t.id === id);
+
+export function mockThreads(worktreePath: string): Promise<Thread[]> {
+  return delay(structuredClone(threads[worktreePath] ?? []));
+}
+
+export function mockAddThread(worktreePath: string, file: string, range: LineRange, body: string): Promise<number> {
+  const now = Date.now();
+  const id = nextId++;
+  (threads[worktreePath] ??= []).push({
+    id,
+    path: file,
+    range,
+    position: range,
+    resolved: false,
+    excerpt: excerpt(range),
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), createdAt: now }],
+    createdAt: now,
+    updatedAt: now,
+  });
+  return delay(id);
+}
+
+export function mockReply(id: number, body: string): Promise<void> {
+  const thread = findThread(id);
+  thread?.messages.push({ id: nextId++, author: "reviewer", body: body.trim(), createdAt: Date.now() });
+  return delay(undefined);
+}
+
+export function mockSetResolved(id: number, resolved: boolean): Promise<void> {
+  const thread = findThread(id);
+  if (thread) thread.resolved = resolved;
+  return delay(undefined);
+}
+
+export function mockDeleteComment(messageId: number): Promise<void> {
+  for (const list of Object.values(threads)) {
+    const index = list.findIndex((t) => t.messages.some((m) => m.id === messageId));
+    if (index === -1) continue;
+    const thread = list[index];
+    if (thread.messages[0].id === messageId) list.splice(index, 1);
+    else thread.messages = thread.messages.filter((m) => m.id !== messageId);
+  }
+  return delay(undefined);
 }

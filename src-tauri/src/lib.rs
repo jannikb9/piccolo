@@ -1,3 +1,5 @@
+pub mod cli;
+mod comments;
 mod git;
 mod menu;
 mod repos;
@@ -21,6 +23,7 @@ pub fn run() {
             for path in repos.paths() {
                 watchers.watch(handle, &path);
             }
+            watchers.watch_comments(handle);
             app.manage(repos);
             app.manage(watchers);
             Ok(())
@@ -33,6 +36,11 @@ pub fn run() {
             repos::changed_files,
             repos::diff_patch,
             repos::file_versions,
+            comments::list_threads,
+            comments::add_thread,
+            comments::reply_thread,
+            comments::set_thread_resolved,
+            comments::delete_comment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

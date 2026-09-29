@@ -1,8 +1,8 @@
 import { focusManager, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useStore } from "../store";
-import type { DiffScope, Repo, Worktree } from "../types";
-import { api, onRepoChanged, onWindowFocusChanged, pickRepoFolder } from "./api";
+import type { DiffScope, LineRange, Repo, Worktree } from "../types";
+import { api, onCommentsChanged, onRepoChanged, onWindowFocusChanged, pickRepoFolder } from "./api";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,6 +21,9 @@ export const keys = {
     ["files", path, base, scope, ignoreWhitespace] as const,
   patch: (path: string, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) =>
     ["patch", path, base, scope, ignoreWhitespace] as const,
+  /** `revision` identifies the diff; threads are re-positioned whenever it changes. */
+  threads: (path: string, base: string | null, scope: DiffScope, revision: number) =>
+    ["threads", path, base, scope, revision] as const,
 };
 
 /** Keeps showing the previous result while switching scope or whitespace, but never another worktree's. */
@@ -57,6 +60,37 @@ export function useDiffPatch(worktree: Worktree | undefined, base: string | null
     placeholderData: sameWorktree(worktree?.path),
   });
 }
+
+export function useThreads(worktree: Worktree | undefined, base: string | null, scope: DiffScope, revision: number) {
+  return useQuery({
+    queryKey: keys.threads(worktree?.path ?? "", base, scope, revision),
+    queryFn: () => api.listThreads(worktree!.path, base, scope),
+    enabled: !!worktree,
+    placeholderData: sameWorktree(worktree?.path),
+  });
+}
+
+/** Wraps a comment mutation so the threads refresh once it lands. */
+function useCommentMutation<T>(mutationFn: (args: T) => Promise<unknown>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSettled: () => client.invalidateQueries({ queryKey: ["threads"] }),
+  });
+}
+
+export function useAddThread(worktree: Worktree, base: string | null, scope: DiffScope) {
+  return useCommentMutation((args: { file: string; oldFile: string | null; range: LineRange; body: string }) =>
+    api.addThread({ path: worktree.path, base, scope, ...args }),
+  );
+}
+
+export const useReplyThread = () => useCommentMutation((args: { id: number; body: string }) => api.replyThread(args.id, args.body));
+
+export const useSetThreadResolved = () =>
+  useCommentMutation((args: { id: number; resolved: boolean }) => api.setThreadResolved(args.id, args.resolved));
+
+export const useDeleteComment = () => useCommentMutation((id: number) => api.deleteComment(id));
 
 /** Loading on hover makes the click feel instant. */
 export function prefetchWorktree(worktree: Worktree, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) {
@@ -95,7 +129,10 @@ export function useRemoveRepo() {
   });
 }
 
-/** Keeps git data fresh: refetch when the window regains focus or a repository's worktrees change. */
+/**
+ * Keeps git data fresh: refetch when the window regains focus or a repository's worktrees change,
+ * and reload comments when they change (an agent replying from the command line).
+ */
 export function useLiveGitData() {
   const client = useQueryClient();
   useEffect(() => {
@@ -107,10 +144,13 @@ export function useLiveGitData() {
       client.invalidateQueries({ queryKey: ["stats"] });
       client.invalidateQueries({ queryKey: ["files"] });
       client.invalidateQueries({ queryKey: ["patch"] });
+      client.invalidateQueries({ queryKey: ["threads"] });
     });
+    const offComments = onCommentsChanged(() => client.invalidateQueries({ queryKey: ["threads"] }));
     return () => {
       offFocus();
       offRepo();
+      offComments();
     };
   }, [client]);
 }

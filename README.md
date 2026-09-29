@@ -17,8 +17,34 @@ Install a local build (unsigned, for this machine):
 
 ```bash
 pnpm tauri build --bundles app
-cp -R src-tauri/target/release/bundle/macos/Review.app /Applications/
+# Quit Review first; replace the bundle rather than copying over it (macOS kills a binary
+# that was overwritten in place).
+rm -rf /Applications/Review.app && cp -R src-tauri/target/release/bundle/macos/Review.app /Applications/
 ```
+
+## Comments for agents
+
+Hover a line in the diff and click the **+** (or drag it over several lines) to comment, like on
+GitHub. Comments belong to the branch and are stored in
+`~/Library/Application Support/dev.jb.review/comments.db`, which the `review` command reads too.
+
+`review` is the app binary run with a subcommand. Link it onto your PATH once (bundling an installer
+is still open):
+
+```bash
+ln -sf /Applications/Review.app/Contents/MacOS/review ~/.local/bin/review
+```
+
+Then in any worktree:
+
+```bash
+review comments            # open comments on this branch, with the code they're about (--all, --json)
+review reply 12 "Fixed"    # answer as the agent; shows up in the app right away
+review resolve 12          # or: review reopen 12
+```
+
+Tell your agent about it, e.g. in `CLAUDE.md` / `AGENTS.md`: *Run `review comments` to see review
+feedback on this branch; after addressing a comment, reply with `review reply <id> "<what changed>"`.*
 
 ## Status
 
@@ -26,6 +52,7 @@ cp -R src-tauri/target/release/bundle/macos/Review.app /Applications/
 - [x] M2 — Repos & worktrees from git, changed-file lists, switching (⌘1–9, ⌥↑/↓), auto-discovery
 - [x] M3 — Real diffs: `@pierre/diffs` CodeView (virtualized, worker-highlighted), split/unified, expandable context, hide whitespace
 - [x] Syntax themes: GitHub by default, others selectable in Settings (⌘,)
+- [x] Line comments (single and multi-line), replies, resolve; `review` CLI for agents
 - [ ] M4 — Review flow: viewed state with content fingerprints, keyboard nav, live refresh
 - [ ] M5 — Polish: empty/loading/error states, large-diff performance, transitions
 
@@ -38,7 +65,10 @@ cp -R src-tauri/target/release/bundle/macos/Review.app /Applications/
 - Keyboard: `j`/`k` next/previous file, `v` viewed, `x` collapse.
 - Choose the base branch per worktree (currently the repo default: origin/HEAD → main → master).
 - Image previews for binary files; a proper app icon.
-- Later: line comments with an interface agents can read (MCP server + CLI), ⌘K palette.
+- Comments: edit a comment, "Start a review" drafts that agents only see once submitted,
+  per-worktree comment counts in the sidebar, installing `review` from the app, an MCP server on
+  top of the same store.
+- Later: ⌘K palette.
 
 ## Layout
 
@@ -49,7 +79,8 @@ src/
     Sidebar.tsx         repos → worktrees
     FilePanel.tsx       changed-file tree + viewed progress
     ReviewPane.tsx      toolbar + loading/error/empty states around the diff
-    DiffView.tsx        CodeView from @pierre/diffs with our file headers
+    DiffView.tsx        CodeView from @pierre/diffs with our file headers and comment annotations
+    Comments.tsx        comment threads, composer, replies
     SettingsDialog.tsx  settings (⌘, / app menu): syntax theme
     ui.tsx              primitives: Tooltip, Segmented, badges, Viewed toggle
   lib/
@@ -63,7 +94,9 @@ src/
   mock.ts               placeholder data used when running in a plain browser
 src-tauri/src/
   git.rs                git CLI wrapper: worktrees, status, changed files, patches, file contents (+ tests)
+  comments.rs           comment store (SQLite), anchoring to lines as files change, Tauri commands (+ tests)
+  cli.rs                the `review` command (the app binary run with a subcommand)
   repos.rs              saved repo list and the Tauri commands
-  watch.rs              watches .git for added/removed worktrees and branch switches
+  watch.rs              watches .git for worktree changes, and the comments database for agent replies
   menu.rs               native menu bar with Settings… (⌘,)
 ```

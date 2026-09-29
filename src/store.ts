@@ -1,9 +1,16 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CodeThemeId } from "./lib/codeThemes";
-import type { DiffLayout, DiffScope, Repo, Worktree } from "./types";
+import type { DiffLayout, DiffScope, LineRange, Repo, Worktree } from "./types";
 
 type PathSet = Record<string, true>;
+
+/** A comment being written, before it's saved. */
+export type Draft = { worktreeId: string; path: string; oldPath: string | null; range: LineRange; body: string };
+
+/** Drafts are keyed by where their composer shows: below the last selected line. */
+export const draftKey = (worktreeId: string, path: string, range: LineRange) =>
+  `${worktreeId}\n${path}\n${range.endSide}:${range.endLine}`;
 
 type State = {
   selectedWorktreeId: string | null;
@@ -22,6 +29,10 @@ type State = {
   activePath: string | null;
   /** Scroll tracking leaves `activePath` alone until then, so an explicit jump keeps its target. */
   activePinnedUntil: number;
+  /** Unsaved comments by `draftKey`; kept here so they survive scrolling out of view. */
+  drafts: Record<string, Draft>;
+  /** Draft replies by thread id. */
+  replyDrafts: Record<number, string>;
 
   selectWorktree: (id: string) => void;
   toggleRepo: (id: string) => void;
@@ -33,6 +44,10 @@ type State = {
   setCollapsed: (worktreeId: string, path: string, collapsed: boolean) => void;
   setActivePath: (path: string | null) => void;
   pinActivePath: (path: string) => void;
+  startDraft: (draft: Omit<Draft, "body">) => void;
+  setDraftBody: (key: string, body: string) => void;
+  discardDraft: (key: string) => void;
+  setReplyDraft: (threadId: number, body: string | null) => void;
 };
 
 function toggle(set: PathSet | undefined, key: string, on: boolean): PathSet {
@@ -55,6 +70,8 @@ export const useStore = create<State>()(
       collapsed: {},
       activePath: null,
       activePinnedUntil: 0,
+      drafts: {},
+      replyDrafts: {},
 
       selectWorktree: (id) => set({ selectedWorktreeId: id, activePath: null }),
       toggleRepo: (id) => set((s) => ({ collapsedRepos: toggle(s.collapsedRepos, id, !s.collapsedRepos[id]) })),
@@ -75,6 +92,24 @@ export const useStore = create<State>()(
         set((s) => ({ collapsed: { ...s.collapsed, [wt]: { ...s.collapsed[wt], [path]: collapsed } } })),
       setActivePath: (activePath) => set((s) => (Date.now() < s.activePinnedUntil ? {} : { activePath })),
       pinActivePath: (activePath) => set({ activePath, activePinnedUntil: Date.now() + 400 }),
+      // Starting a comment where one is already being written keeps its text.
+      startDraft: (draft) =>
+        set((s) => {
+          const key = draftKey(draft.worktreeId, draft.path, draft.range);
+          return { drafts: { ...s.drafts, [key]: { ...draft, body: s.drafts[key]?.body ?? "" } } };
+        }),
+      setDraftBody: (key, body) =>
+        set((s) => (s.drafts[key] ? { drafts: { ...s.drafts, [key]: { ...s.drafts[key], body } } } : {})),
+      discardDraft: (key) =>
+        set((s) => {
+          const { [key]: _, ...drafts } = s.drafts;
+          return { drafts };
+        }),
+      setReplyDraft: (threadId, body) =>
+        set((s) => {
+          const { [threadId]: _, ...rest } = s.replyDrafts;
+          return { replyDrafts: body === null ? rest : { ...rest, [threadId]: body } };
+        }),
     }),
     {
       name: "review-ui",

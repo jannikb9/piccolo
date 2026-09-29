@@ -1,15 +1,25 @@
-import type { CodeViewItem, FileDiffLoadedFiles, FileDiffMetadata } from "@pierre/diffs";
+import type { CodeViewItem, DiffLineAnnotation, FileDiffLoadedFiles, FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
-import { ChevronRight, Copy } from "lucide-react";
-import { useCallback, useMemo, type CSSProperties, type Ref } from "react";
+import { ChevronRight, Copy, MessageSquare } from "lucide-react";
+import { useCallback, useMemo, useRef, type CSSProperties, type Ref } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
 import { emptyDiff, hashString, isCollapsedByDefault, parsePatch } from "../lib/diff";
+import { useAddThread } from "../lib/queries";
 import { cn, splitPath } from "../lib/utils";
 import { useStore } from "../store";
-import type { ChangedFile, DiffPatch, Worktree } from "../types";
+import type { ChangedFile, DiffPatch, LineRange, Thread, Worktree } from "../types";
+import { Composer, DetachedNote, ThreadCard } from "./Comments";
 import { DiffBlocks, DiffCount, IconButton, StatusBadge, Tooltip, ViewedToggle } from "./ui";
 
-export type DiffViewHandle = CodeViewHandle<undefined, undefined>;
+/** What an annotation row under a diff line holds. */
+type Note =
+  | { kind: "thread"; thread: Thread }
+  /** Threads whose lines changed, shown above the file. */
+  | { kind: "outdated"; threads: Thread[] }
+  | { kind: "draft"; key: string; range: LineRange };
+
+export type DiffViewHandle = CodeViewHandle<Note, undefined>;
 
 // Code and chrome share the app's fonts; syntax colours come from the Pierre themes.
 const viewStyle = {
@@ -52,47 +62,153 @@ const unsafeCSS = /* css */ `
     -webkit-user-select: text;
     cursor: text;
   }
+  /* Selected lines (for commenting) and the gutter "+" use the app accent, tinted lightly so
+     the code stays readable. */
+  :host {
+    --diffs-selection-base: var(--accent);
+    --diffs-bg-selection-override: color-mix(in oklab, var(--accent) 30%, var(--bg));
+    --diffs-bg-selection-number-override: color-mix(in oklab, var(--accent) 45%, var(--bg));
+  }
+  [data-utility-button] {
+    background-color: var(--accent);
+    color: var(--accent-fg);
+    border-radius: 5px;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  }
+  [data-utility-button]:hover {
+    filter: brightness(1.12);
+  }
+  [data-line-annotation] {
+    --diffs-annotation-bg: var(--bg);
+  }
 `;
+
+/** A library selection as stored ranges: sides default to the new version, top line first. */
+function toLineRange(selection: SelectedLineRange): LineRange {
+  const startSide = selection.side ?? "additions";
+  const endSide = selection.endSide ?? startSide;
+  const range = { startSide, startLine: selection.start, endSide, endLine: selection.end };
+  const upwards = startSide === endSide ? selection.start > selection.end : startSide === "additions";
+  return upwards
+    ? { startSide: endSide, startLine: selection.end, endSide: startSide, endLine: selection.start }
+    : range;
+}
+
+/** Changes whenever an annotation would render differently, to bump the item's version. */
+function annotationSignature(annotations: DiffLineAnnotation<Note>[]): string {
+  const thread = (t: Thread) => `${t.id}.${t.updatedAt}.${t.resolved ? 1 : 0}.${t.messages.map((m) => m.id).join(",")}`;
+  return annotations
+    .map(({ side, lineNumber, metadata: note }) => {
+      const detail =
+        note.kind === "thread" ? thread(note.thread) : note.kind === "outdated" ? note.threads.map(thread).join("|") : note.key;
+      return `${side}:${lineNumber}:${note.kind}:${detail}`;
+    })
+    .join(";");
+}
 
 export function DiffView({
   worktree,
+  base,
   files,
   diff,
+  threads,
   viewRef,
 }: {
   worktree: Worktree;
+  base: string | null;
   /** Changed files in display order. */
   files: ChangedFile[];
   diff: DiffPatch;
+  threads: Thread[];
   viewRef: Ref<DiffViewHandle>;
 }) {
   const layout = useStore((s) => s.layout);
   const viewed = useStore((s) => s.viewed[worktree.id]);
   const collapsedOverrides = useStore((s) => s.collapsed[worktree.id]);
   const setActivePath = useStore((s) => s.setActivePath);
+  const startDraft = useStore((s) => s.startDraft);
+  const discardDraft = useStore((s) => s.discardDraft);
+  // Keys only: typing in a draft mustn't rebuild the items.
+  const draftKeys = useStore(
+    useShallow((s) => Object.keys(s.drafts).filter((key) => s.drafts[key].worktreeId === worktree.id)),
+  );
+  const localRef = useRef<DiffViewHandle>(null);
+  const setRefs = useCallback(
+    (handle: DiffViewHandle | null) => {
+      localRef.current = handle;
+      if (typeof viewRef === "function") viewRef(handle);
+      else if (viewRef) viewRef.current = handle;
+    },
+    [viewRef],
+  );
 
   // Parsed once per patch: the library hydrates these objects in place when context is expanded.
   const fileDiffs = useMemo(() => parsePatch(diff.patch), [diff.patch]);
   const patchVersion = useMemo(() => hashString(diff.patch), [diff.patch]);
   const byPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
 
+  const annotationsByPath = useMemo(() => {
+    const map = new Map<string, DiffLineAnnotation<Note>[]>();
+    const add = (path: string, annotation: DiffLineAnnotation<Note>) => {
+      const list = map.get(path) ?? [];
+      list.push(annotation);
+      map.set(path, list);
+    };
+    const outdated = new Map<string, Thread[]>();
+    for (const thread of threads) {
+      const { position } = thread;
+      if (position) {
+        add(thread.path, { side: position.endSide, lineNumber: position.endLine, metadata: { kind: "thread", thread } });
+      } else {
+        outdated.set(thread.path, [...(outdated.get(thread.path) ?? []), thread]);
+      }
+    }
+    // Line 0 renders above the file's first hunk.
+    for (const [path, list] of outdated) add(path, { side: "additions", lineNumber: 0, metadata: { kind: "outdated", threads: list } });
+    const drafts = useStore.getState().drafts;
+    for (const key of draftKeys) {
+      const draft = drafts[key];
+      if (!draft) continue;
+      const { range } = draft;
+      add(draft.path, { side: range.endSide, lineNumber: range.endLine, metadata: { kind: "draft", key, range } });
+    }
+    return map;
+  }, [threads, draftKeys]);
+
   const items = useMemo(
     () =>
-      files.map((file): CodeViewItem<undefined> => {
+      files.map((file): CodeViewItem<Note> => {
         const fileDiff = fileDiffs.get(file.path);
         const hasBody = !!fileDiff && fileDiff.hunks.length > 0;
         const collapsed = !hasBody || (collapsedOverrides?.[file.path] ?? isCollapsedByDefault(file));
         const isViewed = !!viewed?.[file.path];
+        const annotations = annotationsByPath.get(file.path) ?? [];
         return {
           id: file.path,
           type: "diff",
           fileDiff: fileDiff ?? emptyDiff(file.path),
+          annotations,
           collapsed,
           // Any change to what the item shows must change its version.
-          version: patchVersion * 4 + (collapsed ? 1 : 0) + (isViewed ? 2 : 0),
+          version: hashString(`${patchVersion}:${collapsed}:${isViewed}:${annotationSignature(annotations)}`),
         };
       }),
-    [files, fileDiffs, collapsedOverrides, viewed, patchVersion],
+    [files, fileDiffs, collapsedOverrides, viewed, patchVersion, annotationsByPath],
+  );
+
+  // Clicking or dragging the gutter "+" (or a selection's "+") opens a comment on those lines.
+  const startComment = useRef<(selection: SelectedLineRange, path: string) => void>(null);
+  startComment.current = (selection, path) => {
+    const file = byPath.get(path);
+    if (!file) return;
+    startDraft({ worktreeId: worktree.id, path, oldPath: file.oldPath ?? null, range: toLineRange(selection) });
+  };
+  const closeDraft = useCallback(
+    (key: string) => {
+      discardDraft(key);
+      localRef.current?.clearSelectedLines();
+    },
+    [discardDraft],
   );
 
   const loadDiffFiles = useCallback(
@@ -110,7 +226,7 @@ export function DiffView({
   );
 
   const options = useMemo(
-    (): CodeViewReactOptions<undefined, undefined> => ({
+    (): CodeViewReactOptions<Note, undefined> => ({
       diffStyle: layout,
       diffIndicators: "classic",
       hunkSeparators: "line-info",
@@ -121,6 +237,10 @@ export function DiffView({
       layout: { paddingTop: 12, paddingBottom: 240, gap: 12 },
       unsafeCSS,
       loadDiffFiles,
+      enableLineSelection: true,
+      enableGutterUtility: true,
+      onGutterUtilityClick: (selection: SelectedLineRange, context: { item: CodeViewItem<Note> }) =>
+        startComment.current?.(selection, context.item.id),
     }),
     [layout, loadDiffFiles],
   );
@@ -141,7 +261,7 @@ export function DiffView({
   );
 
   const renderHeader = useCallback(
-    (item: CodeViewItem<undefined>) => {
+    (item: CodeViewItem<Note>) => {
       const file = byPath.get(item.id);
       if (!file || item.type !== "diff") return null;
       const hasBody = item.fileDiff.hunks.length > 0;
@@ -158,15 +278,94 @@ export function DiffView({
     [byPath, worktree.id],
   );
 
+  const renderAnnotation = useCallback(
+    (annotation: { metadata?: Note }, item: CodeViewItem<Note>) => {
+      const note = annotation.metadata;
+      if (!note) return null;
+      switch (note.kind) {
+        case "thread":
+          return <ThreadCard thread={note.thread} />;
+        case "outdated":
+          return note.threads.map((thread) => (
+            <ThreadCard key={thread.id} thread={thread} note={<DetachedNote thread={thread} reason="Outdated" />} />
+          ));
+        case "draft":
+          return (
+            <DraftComposer
+              worktree={worktree}
+              base={base}
+              file={byPath.get(item.id)}
+              draftKey={note.key}
+              range={note.range}
+              onClose={closeDraft}
+            />
+          );
+      }
+    },
+    [worktree, base, byPath, closeDraft],
+  );
+
+  // Threads on files that no longer differ can't sit in the diff; list them above it.
+  const orphans = useMemo(() => threads.filter((t) => !byPath.has(t.path)), [threads, byPath]);
+  const renderViewHeader = useCallback(
+    () =>
+      orphans.length > 0 && (
+        <section className="pt-3 font-sans">
+          <h2 className="flex items-center gap-1.5 px-1 text-[12px] font-medium text-fg-subtle">
+            <MessageSquare className="size-3.5" />
+            Comments on files without changes in this view
+          </h2>
+          {orphans.map((thread) => (
+            <ThreadCard key={thread.id} thread={thread} note={<DetachedNote thread={thread} reason="Not in diff" />} />
+          ))}
+        </section>
+      ),
+    [orphans],
+  );
+
   return (
-    <CodeView
-      ref={viewRef}
+    <CodeView<Note>
+      ref={setRefs}
       items={items}
       options={options}
       onScroll={onScroll}
       renderCustomHeader={renderHeader}
+      renderAnnotation={renderAnnotation}
+      renderCodeViewHeader={renderViewHeader}
       className="h-full overflow-auto px-4"
       style={viewStyle}
+    />
+  );
+}
+
+function DraftComposer({
+  worktree,
+  base,
+  file,
+  draftKey: key,
+  range,
+  onClose,
+}: {
+  worktree: Worktree;
+  base: string | null;
+  file: ChangedFile | undefined;
+  draftKey: string;
+  range: LineRange;
+  onClose: (key: string) => void;
+}) {
+  const scope = useStore((s) => s.scope);
+  const addThread = useAddThread(worktree, base, scope);
+  if (!file) return null;
+  return (
+    <Composer
+      draftKey={key}
+      range={range}
+      pending={addThread.isPending}
+      error={addThread.error}
+      onCancel={() => onClose(key)}
+      onSubmit={(body) =>
+        addThread.mutate({ file: file.path, oldFile: file.oldPath ?? null, range, body }, { onSuccess: () => onClose(key) })
+      }
     />
   );
 }

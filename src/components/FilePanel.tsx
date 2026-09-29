@@ -1,4 +1,4 @@
-import { Check, ChevronRight, Folder, FolderOpen } from "lucide-react";
+import { Check, ChevronRight, Folder, FolderOpen, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn, type TreeNode } from "../lib/utils";
 import { useStore } from "../store";
@@ -9,6 +9,7 @@ export function FilePanel({
   tree,
   fileCount,
   viewedCount,
+  commentCounts,
   loading,
   onSelect,
 }: {
@@ -16,6 +17,8 @@ export function FilePanel({
   tree: TreeNode[];
   fileCount: number;
   viewedCount: number;
+  /** Open comment threads per file path. */
+  commentCounts: Map<string, number>;
   loading: boolean;
   onSelect: (path: string) => void;
 }) {
@@ -46,33 +49,26 @@ export function FilePanel({
         ) : fileCount === 0 ? (
           worktreeId && <p className="px-2 py-6 text-center text-[12px] text-fg-subtle">No changed files</p>
         ) : (
-          <TreeList nodes={tree} depth={0} worktreeId={worktreeId} onSelect={onSelect} />
+          <TreeList nodes={tree} depth={0} worktreeId={worktreeId} commentCounts={commentCounts} onSelect={onSelect} />
         )}
       </div>
     </div>
   );
 }
 
-function TreeList({
-  nodes,
-  depth,
-  worktreeId,
-  onSelect,
-}: {
-  nodes: TreeNode[];
+type RowProps = {
   depth: number;
   worktreeId: string;
+  commentCounts: Map<string, number>;
   onSelect: (path: string) => void;
-}) {
+};
+
+function TreeList({ nodes, ...props }: RowProps & { nodes: TreeNode[] }) {
   return (
     <ul>
       {nodes.map((node) => (
         <li key={node.path}>
-          {node.type === "dir" ? (
-            <DirRow node={node} depth={depth} worktreeId={worktreeId} onSelect={onSelect} />
-          ) : (
-            <FileRow node={node} depth={depth} worktreeId={worktreeId} onSelect={onSelect} />
-          )}
+          {node.type === "dir" ? <DirRow node={node} {...props} /> : <FileRow node={node} {...props} />}
         </li>
       ))}
     </ul>
@@ -81,17 +77,8 @@ function TreeList({
 
 const indent = (depth: number) => ({ paddingLeft: 8 + depth * 12 });
 
-function DirRow({
-  node,
-  depth,
-  worktreeId,
-  onSelect,
-}: {
-  node: Extract<TreeNode, { type: "dir" }>;
-  depth: number;
-  worktreeId: string;
-  onSelect: (path: string) => void;
-}) {
+function DirRow({ node, ...props }: RowProps & { node: Extract<TreeNode, { type: "dir" }> }) {
+  const { depth } = props;
   const [open, setOpen] = useState(true);
   const Icon = open ? FolderOpen : Folder;
   return (
@@ -106,7 +93,7 @@ function DirRow({
         <Icon className="size-3.5 shrink-0" />
         <span className="truncate">{node.name}</span>
       </button>
-      {open && <TreeList nodes={node.children} depth={depth + 1} worktreeId={worktreeId} onSelect={onSelect} />}
+      {open && <TreeList nodes={node.children} {...props} depth={depth + 1} />}
     </>
   );
 }
@@ -115,13 +102,10 @@ function FileRow({
   node,
   depth,
   worktreeId,
+  commentCounts,
   onSelect,
-}: {
-  node: Extract<TreeNode, { type: "file" }>;
-  depth: number;
-  worktreeId: string;
-  onSelect: (path: string) => void;
-}) {
+}: RowProps & { node: Extract<TreeNode, { type: "file" }> }) {
+  const comments = commentCounts.get(node.path) ?? 0;
   const viewed = useStore((s) => !!s.viewed[worktreeId]?.[node.path]);
   const active = useStore((s) => s.activePath === node.path);
   const ref = useRef<HTMLButtonElement>(null);
@@ -147,10 +131,16 @@ function FileRow({
       <span className="w-3 shrink-0" />
       <StatusLetter status={file.status} />
       <span className={cn("truncate", viewed && !active && "text-fg-subtle")}>{node.name}</span>
+      {comments > 0 && (
+        <span className="tabular ml-auto flex shrink-0 items-center gap-0.5 text-[11px] text-fg-subtle" aria-label={`${comments} open comments`}>
+          <MessageSquare className="size-3" />
+          {comments}
+        </span>
+      )}
       {viewed ? (
-        <Check className="ml-auto size-3.5 shrink-0 text-accent" strokeWidth={2.5} aria-label="Viewed" />
+        <Check className={cn("size-3.5 shrink-0 text-accent", comments === 0 && "ml-auto")} strokeWidth={2.5} aria-label="Viewed" />
       ) : (
-        <DiffCount additions={file.additions} deletions={file.deletions} className="ml-auto shrink-0" />
+        <DiffCount additions={file.additions} deletions={file.deletions} className={cn("shrink-0", comments === 0 && "ml-auto")} />
       )}
     </button>
   );

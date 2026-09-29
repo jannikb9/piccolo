@@ -26,6 +26,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
 notify = "8.2.0"
 notify-debouncer-mini = "0.7.0"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+dirs = "7.0.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

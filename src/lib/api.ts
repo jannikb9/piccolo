@@ -2,8 +2,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { mockChangedFiles, mockDiffPatch, mockFileVersions, mockRepos, mockWorktreeStats } from "../mock";
-import type { ChangedFile, DiffPatch, DiffScope, FileVersions, Repo, WorktreeStats } from "../types";
+import {
+  mockAddThread,
+  mockChangedFiles,
+  mockDeleteComment,
+  mockDiffPatch,
+  mockFileVersions,
+  mockReply,
+  mockRepos,
+  mockSetResolved,
+  mockThreads,
+  mockWorktreeStats,
+} from "../mock";
+import type { ChangedFile, DiffPatch, DiffScope, FileVersions, LineRange, Repo, Thread, WorktreeStats } from "../types";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -34,6 +45,30 @@ export const api = {
     isTauri
       ? invoke("file_versions", { path, oldRev: range.oldRev, newRev: range.newRev, oldPath, newPath })
       : mockFileVersions(),
+
+  /** Comment threads on the worktree's branch, positioned for this diff. */
+  listThreads: (path: string, base: string | null, scope: DiffScope): Promise<Thread[]> =>
+    isTauri ? invoke("list_threads", { path, base, scope }) : mockThreads(path),
+
+  /** Resolves to the new thread's id. */
+  addThread: (args: {
+    path: string;
+    base: string | null;
+    scope: DiffScope;
+    file: string;
+    oldFile: string | null;
+    range: LineRange;
+    body: string;
+  }): Promise<number> => (isTauri ? invoke("add_thread", args) : mockAddThread(args.path, args.file, args.range, args.body)),
+
+  replyThread: (id: number, body: string): Promise<void> =>
+    isTauri ? invoke("reply_thread", { id, body }) : mockReply(id, body),
+
+  setThreadResolved: (id: number, resolved: boolean): Promise<void> =>
+    isTauri ? invoke("set_thread_resolved", { id, resolved }) : mockSetResolved(id, resolved),
+
+  /** Deletes a message; deleting a thread's first message deletes the thread. */
+  deleteComment: (id: number): Promise<void> => (isTauri ? invoke("delete_comment", { id }) : mockDeleteComment(id)),
 };
 
 export async function pickRepoFolder(): Promise<string | null> {
@@ -46,6 +81,13 @@ export async function pickRepoFolder(): Promise<string | null> {
 export function onRepoChanged(callback: (repoId: string) => void): () => void {
   if (!isTauri) return () => {};
   const unlisten = listen<string>("repo-changed", (e) => callback(e.payload));
+  return () => void unlisten.then((fn) => fn());
+}
+
+/** Fires when comments change, including replies an agent writes with the `review` command. */
+export function onCommentsChanged(callback: () => void): () => void {
+  if (!isTauri) return () => {};
+  const unlisten = listen("comments-changed", () => callback());
   return () => void unlisten.then((fn) => fn());
 }
 

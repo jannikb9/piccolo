@@ -1,7 +1,8 @@
 //! Watches each repository's git directory so the sidebar updates when worktrees are added or
-//! removed, or a worktree switches branch — typically done by an agent in a terminal.
+//! removed, or a worktree switches branch — typically done by an agent in a terminal. Also watches
+//! the comments database, so replies written with the `review` command show up right away.
 
-use crate::git;
+use crate::{comments, git};
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use std::collections::HashMap;
@@ -11,9 +12,13 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 pub const REPO_CHANGED: &str = "repo-changed";
+pub const COMMENTS_CHANGED: &str = "comments-changed";
 
 #[derive(Default)]
-pub struct Watchers(Mutex<HashMap<String, Debouncer<RecommendedWatcher>>>);
+pub struct Watchers {
+    repos: Mutex<HashMap<String, Debouncer<RecommendedWatcher>>>,
+    comments: Mutex<Option<Debouncer<RecommendedWatcher>>>,
+}
 
 impl Watchers {
     pub fn watch(&self, app: &AppHandle, repo: &str) {
@@ -30,12 +35,36 @@ impl Watchers {
         });
         let Ok(mut debouncer) = debouncer else { return };
         if debouncer.watcher().watch(&git_dir, RecursiveMode::Recursive).is_ok() {
-            self.0.lock().unwrap().insert(repo.to_string(), debouncer);
+            self.repos.lock().unwrap().insert(repo.to_string(), debouncer);
         }
     }
 
     pub fn unwatch(&self, repo: &str) {
-        self.0.lock().unwrap().remove(repo);
+        self.repos.lock().unwrap().remove(repo);
+    }
+
+    pub fn watch_comments(&self, app: &AppHandle) {
+        let db = comments::db_path();
+        let Some(dir) = db.parent().map(Path::to_path_buf) else { return };
+        if std::fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        // Writes touch the database and its `-journal` file.
+        let name = db.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let app = app.clone();
+        let debouncer = new_debouncer(Duration::from_millis(150), move |res: DebounceEventResult| {
+            let Ok(events) = res else { return };
+            let touched = events.iter().any(|e| {
+                e.path.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&name))
+            });
+            if touched {
+                let _ = app.emit(COMMENTS_CHANGED, ());
+            }
+        });
+        let Ok(mut debouncer) = debouncer else { return };
+        if debouncer.watcher().watch(&dir, RecursiveMode::NonRecursive).is_ok() {
+            *self.comments.lock().unwrap() = Some(debouncer);
+        }
     }
 }
 
