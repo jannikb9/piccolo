@@ -10,7 +10,7 @@ import { Sidebar } from "./components/Sidebar";
 import { shikiThemes } from "./lib/codeThemes";
 import { hashString } from "./lib/diff";
 import { useChangedFiles, useDiffPatch, useLiveGitData, useRepos, useThreads } from "./lib/queries";
-import { buildTree, treeOrder } from "./lib/utils";
+import { groupIntoSections } from "./lib/sections";
 import { orderedWorktrees, resolveSelection, useStore } from "./store";
 import type { Worktree } from "./types";
 
@@ -51,9 +51,10 @@ export default function App() {
     for (const t of threadsQuery.data ?? []) if (!t.resolved) counts.set(t.path, (counts.get(t.path) ?? 0) + 1);
     return counts;
   }, [threadsQuery.data]);
-  const { tree, files } = useMemo(() => {
-    const tree = buildTree(filesQuery.data ?? []);
-    return { tree, files: treeOrder(tree) };
+  // Files grouped into Implementation / Tests / Changesets; the diff follows the same order.
+  const { sections, files } = useMemo(() => {
+    const sections = groupIntoSections(filesQuery.data ?? []);
+    return { sections, files: sections.flatMap((s) => s.files) };
   }, [filesQuery.data]);
   const viewed = useStore((s) => (worktree ? s.viewed[worktree.id] : undefined));
   const viewedCount = files.filter((f) => viewed?.[f.path]).length;
@@ -75,7 +76,7 @@ export default function App() {
         <Panel id="files" defaultSize={272} minSize={220} maxSize={520} groupResizeBehavior="preserve-pixel-size">
           <FilePanel
             worktreeId={worktree?.id ?? ""}
-            tree={tree}
+            sections={sections}
             fileCount={files.length}
             viewedCount={viewedCount}
             commentCounts={commentCounts}

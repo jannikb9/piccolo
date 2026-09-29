@@ -1,12 +1,13 @@
 import { Check, ChevronRight, Folder, FolderOpen, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { COLLAPSED_BY_DEFAULT, type FileSection } from "../lib/sections";
 import { cn, type TreeNode } from "../lib/utils";
 import { useStore } from "../store";
 import { DiffCount, Skeleton, StatusLetter } from "./ui";
 
 export function FilePanel({
   worktreeId,
-  tree,
+  sections,
   fileCount,
   viewedCount,
   commentCounts,
@@ -14,7 +15,8 @@ export function FilePanel({
   onSelect,
 }: {
   worktreeId: string;
-  tree: TreeNode[];
+  /** Non-empty sections (Implementation, Tests, Changesets) in review order. */
+  sections: FileSection[];
   fileCount: number;
   viewedCount: number;
   /** Open comment threads per file path. */
@@ -49,10 +51,50 @@ export function FilePanel({
         ) : fileCount === 0 ? (
           worktreeId && <p className="px-2 py-6 text-center text-[12px] text-fg-subtle">No changed files</p>
         ) : (
-          <TreeList nodes={tree} depth={0} worktreeId={worktreeId} commentCounts={commentCounts} onSelect={onSelect} />
+          sections.map((section, i) => (
+            <SectionGroup
+              key={section.id}
+              section={section}
+              className={cn(i > 0 && "mt-2")}
+              worktreeId={worktreeId}
+              commentCounts={commentCounts}
+              onSelect={onSelect}
+            />
+          ))
         )}
       </div>
     </div>
+  );
+}
+
+/** A collapsible section of the file list (Implementation, Tests, Changesets). */
+function SectionGroup({
+  section,
+  className,
+  ...rowProps
+}: Omit<RowProps, "depth"> & { section: FileSection; className?: string }) {
+  const collapsed = useStore((s) => s.collapsedSections[section.id] ?? COLLAPSED_BY_DEFAULT[section.id]);
+  const setCollapsed = useStore((s) => s.setSectionCollapsed);
+  // While closed, the header stands in for the file being read, so the reader still knows where they are.
+  const holdsActive = useStore((s) => collapsed && !!s.activePath && section.files.some((f) => f.path === s.activePath));
+
+  return (
+    <section className={className}>
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed(section.id, !collapsed)}
+        className={cn(
+          "flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-[11px] font-semibold tracking-wide uppercase transition-colors hover:bg-bg-hover hover:text-fg-muted",
+          holdsActive ? "bg-accent-soft text-fg" : "text-fg-subtle",
+        )}
+      >
+        <ChevronRight className={cn("size-3 shrink-0 transition-transform duration-150", !collapsed && "rotate-90")} />
+        {section.label}
+        <span className="tabular rounded-full bg-bg-hover px-1.5 font-medium tracking-normal">{section.files.length}</span>
+      </button>
+      {!collapsed && <TreeList nodes={section.tree} depth={0} {...rowProps} />}
+    </section>
   );
 }
 

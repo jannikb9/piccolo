@@ -61,6 +61,7 @@ const files: Record<string, MockFile[]> = {
     committed({ path: "package.json", status: "modified", additions: 8, deletions: 3 }),
     committed({ path: "pnpm-lock.yaml", status: "modified", additions: 8, deletions: 3 }),
     committed({ path: "public/logo.png", status: "modified", additions: 0, deletions: 0, binary: true }),
+    uncommitted({ path: ".changeset/brave-owls-sing.md", status: "added", additions: 5, deletions: 0 }),
   ],
   "~/projects/spoke-app/billing": [
     committed({ path: "services/billing/webhooks/handler.ts", status: "modified", additions: 8, deletions: 3 }),

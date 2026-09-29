@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CodeThemeId } from "./lib/codeThemes";
+import type { SectionId } from "./lib/sections";
 import type { DiffLayout, DiffScope, LineRange, Repo, Worktree } from "./types";
 
 type PathSet = Record<string, true>;
@@ -15,6 +16,8 @@ export const draftKey = (worktreeId: string, path: string, range: LineRange) =>
 type State = {
   selectedWorktreeId: string | null;
   collapsedRepos: PathSet;
+  /** File list sections the user opened or closed; others use `COLLAPSED_BY_DEFAULT`. */
+  collapsedSections: Partial<Record<SectionId, boolean>>;
   layout: DiffLayout;
   scope: DiffScope;
   hideWhitespace: boolean;
@@ -36,6 +39,7 @@ type State = {
 
   selectWorktree: (id: string) => void;
   toggleRepo: (id: string) => void;
+  setSectionCollapsed: (id: SectionId, collapsed: boolean) => void;
   setLayout: (layout: DiffLayout) => void;
   setScope: (scope: DiffScope) => void;
   toggleHideWhitespace: () => void;
@@ -62,6 +66,7 @@ export const useStore = create<State>()(
     (set, get) => ({
       selectedWorktreeId: null,
       collapsedRepos: {},
+      collapsedSections: {},
       layout: "split",
       scope: "all",
       hideWhitespace: false,
@@ -75,6 +80,7 @@ export const useStore = create<State>()(
 
       selectWorktree: (id) => set({ selectedWorktreeId: id, activePath: null }),
       toggleRepo: (id) => set((s) => ({ collapsedRepos: toggle(s.collapsedRepos, id, !s.collapsedRepos[id]) })),
+      setSectionCollapsed: (id, collapsed) => set((s) => ({ collapsedSections: { ...s.collapsedSections, [id]: collapsed } })),
       setLayout: (layout) => set({ layout }),
       setScope: (scope) => set({ scope }),
       toggleHideWhitespace: () => set((s) => ({ hideWhitespace: !s.hideWhitespace })),
@@ -122,6 +128,7 @@ export const useStore = create<State>()(
       partialize: (s) => ({
         selectedWorktreeId: s.selectedWorktreeId,
         collapsedRepos: s.collapsedRepos,
+        collapsedSections: s.collapsedSections,
         layout: s.layout,
         scope: s.scope,
         hideWhitespace: s.hideWhitespace,

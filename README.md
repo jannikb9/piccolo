@@ -55,6 +55,7 @@ feedback on this branch; after addressing a comment, reply with `review reply <i
 - [x] Line comments (single and multi-line), replies, resolve; `review` CLI for agents
 - [x] ⌘F find in changes: highlights without scrolling; ⌘G / ⇧⌘G, Enter / ⇧Enter step from the current view
 - [x] Selecting text highlights its other occurrences
+- [x] File list in sections (Implementation, Tests, Changesets); the diff follows that order
 - [ ] M4 — Review flow: viewed state with content fingerprints, keyboard nav, live refresh
 - [ ] M5 — Polish: empty/loading/error states, large-diff performance, transitions
 
@@ -79,7 +80,7 @@ src/
   App.tsx               three-panel layout
   components/
     Sidebar.tsx         repos → worktrees
-    FilePanel.tsx       changed-file tree + viewed progress
+    FilePanel.tsx       changed-file tree in sections + viewed progress
     ReviewPane.tsx      toolbar + loading/error/empty states around the diff
     DiffView.tsx        CodeView from @pierre/diffs with our file headers and comment annotations
     Comments.tsx        comment threads, composer, replies
@@ -88,6 +89,8 @@ src/
   lib/
     api.ts              typed wrappers around Tauri commands and events
     diff.ts             patch parsing, default-collapsed files (lockfiles, generated)
+    sections.ts         sorts files into Implementation / Tests / Changesets
+    search.ts           ⌘F and selection matches, painted with the CSS Custom Highlight API
     codeThemes.ts       syntax themes (Shiki) offered in Settings
     queries.ts          TanStack Query hooks, live refresh on focus / repo changes
   styles.css            design tokens (OKLCH) + Tailwind theme
