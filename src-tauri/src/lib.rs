@@ -32,6 +32,7 @@ pub fn run() {
             repos::list_repos,
             repos::add_repo,
             repos::remove_repo,
+            repos::reorder_repos,
             repos::worktree_stats,
             repos::changed_files,
             repos::diff_patch,

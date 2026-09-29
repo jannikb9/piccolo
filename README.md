@@ -49,7 +49,7 @@ feedback on this branch; after addressing a comment, reply with `review reply <i
 ## Status
 
 - [x] M1 — App shell: window chrome, design tokens (dark/light), resizable three-column layout
-- [x] M2 — Repos & worktrees from git, changed-file lists, switching (⌘1–9, ⌥↑/↓), auto-discovery
+- [x] M2 — Repos & worktrees from git, changed-file lists, switching (⌘1–9, ⌥↑/↓), auto-discovery, drag to reorder repos
 - [x] M3 — Real diffs: `@pierre/diffs` CodeView (virtualized, worker-highlighted), split/unified, expandable context, hide whitespace
 - [x] Syntax themes: GitHub by default, others selectable in Settings (⌘,)
 - [x] Line comments (single and multi-line), replies, resolve; `review` CLI for agents

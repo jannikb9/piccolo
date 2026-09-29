@@ -1,5 +1,17 @@
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type Modifier,
+} from "@dnd-kit/core";
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { AlertTriangle, ChevronRight, FolderGit2, GitBranch, Plus, X } from "lucide-react";
-import { prefetchWorktree, useAddRepo, useRemoveRepo, useRepos, useWorktreeStats } from "../lib/queries";
+import { prefetchWorktree, useAddRepo, useRemoveRepo, useReorderRepos, useRepos, useWorktreeStats } from "../lib/queries";
 import { cn, timeAgo } from "../lib/utils";
 import { sortWorktrees, useStore } from "../store";
 import type { Repo, Worktree } from "../types";
@@ -44,12 +56,48 @@ export function Sidebar({ selectedId, shortcuts }: { selectedId: string | null; 
             </button>
           </div>
         ) : (
-          repos.data?.map((repo) => (
-            <RepoSection key={repo.id} repo={repo} selectedId={selectedId} shortcuts={shortcuts} />
-          ))
+          repos.data && <RepoList repos={repos.data} selectedId={selectedId} shortcuts={shortcuts} />
         )}
       </nav>
     </aside>
+  );
+}
+
+const verticalOnly: Modifier = ({ transform }) => ({ ...transform, x: 0 });
+
+/** When the last drag ended; the click that ends a drag mustn't also collapse the repository. */
+let lastDragEnd = 0;
+
+/** Repositories in the user's order; drag a repository's header to move it. */
+function RepoList({ repos, selectedId, shortcuts }: { repos: Repo[]; selectedId: string | null; shortcuts: Map<string, number> }) {
+  const reorder = useReorderRepos();
+  const sensors = useSensors(
+    // A few pixels of movement before a drag starts, so clicks still toggle the repository.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const ids = repos.map((r) => r.id);
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    lastDragEnd = Date.now();
+    if (!over || active.id === over.id) return;
+    reorder.mutate(arrayMove(ids, ids.indexOf(String(active.id)), ids.indexOf(String(over.id))));
+  };
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      modifiers={[verticalOnly]}
+      onDragEnd={onDragEnd}
+      onDragCancel={() => (lastDragEnd = Date.now())}
+    >
+      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+        {repos.map((repo) => (
+          <RepoSection key={repo.id} repo={repo} selectedId={selectedId} shortcuts={shortcuts} />
+        ))}
+      </SortableContext>
+    </DndContext>
   );
 }
 
@@ -57,14 +105,24 @@ function RepoSection({ repo, selectedId, shortcuts }: { repo: Repo; selectedId: 
   const collapsed = useStore((s) => !!s.collapsedRepos[repo.id]);
   const toggleRepo = useStore((s) => s.toggleRepo);
   const removeRepo = useRemoveRepo();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: repo.id });
 
   return (
-    <section className="mb-3">
-      <div className="group flex h-7 items-center rounded-md pr-1 text-[12px] font-medium text-fg-subtle">
+    <section
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn("relative mb-3 rounded-md", isDragging && "z-10 bg-bg-sidebar shadow-lg ring-1 shadow-black/30 ring-border")}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        aria-label={`${repo.name}, drag to reorder`}
+        className="group flex h-7 items-center rounded-md pr-1 text-[12px] font-medium text-fg-subtle outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
         <Tooltip label={<span className="font-mono">{repo.path}</span>} side="right">
           <button
             type="button"
-            onClick={() => toggleRepo(repo.id)}
+            onClick={() => Date.now() - lastDragEnd > 100 && toggleRepo(repo.id)}
             className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 hover:text-fg-muted"
           >
             <FolderGit2 className="size-3.5 shrink-0" />

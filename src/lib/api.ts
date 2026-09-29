@@ -8,6 +8,7 @@ import {
   mockDeleteComment,
   mockDiffPatch,
   mockFileVersions,
+  mockReorderRepos,
   mockReply,
   mockRepos,
   mockSetResolved,
@@ -26,6 +27,9 @@ export const api = {
   addRepo: (path: string): Promise<string> => invoke("add_repo", { path }),
 
   removeRepo: (id: string): Promise<void> => (isTauri ? invoke("remove_repo", { id }) : Promise.resolve()),
+
+  /** Saves the sidebar order of repositories. */
+  reorderRepos: (ids: string[]): Promise<void> => (isTauri ? invoke("reorder_repos", { ids }) : mockReorderRepos(ids)),
 
   worktreeStats: (path: string, base: string | null): Promise<WorktreeStats> =>
     isTauri ? invoke("worktree_stats", { path, base }) : mockWorktreeStats(path),

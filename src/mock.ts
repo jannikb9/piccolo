@@ -340,3 +340,8 @@ export function mockDeleteComment(messageId: number): Promise<void> {
   }
   return delay(undefined);
 }
+
+export function mockReorderRepos(ids: string[]): Promise<void> {
+  mockRepos.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+  return Promise.resolve();
+}

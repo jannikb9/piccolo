@@ -129,6 +129,22 @@ export function useRemoveRepo() {
   });
 }
 
+/** Moves repositories in the sidebar; the new order shows immediately and is saved in the background. */
+export function useReorderRepos() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: api.reorderRepos,
+    onMutate: (ids) => {
+      client.setQueryData<Repo[]>(keys.repos, (repos) => {
+        if (!repos) return repos;
+        const byId = new Map(repos.map((r) => [r.id, r]));
+        return [...ids.flatMap((id) => byId.get(id) ?? []), ...repos.filter((r) => !ids.includes(r.id))];
+      });
+    },
+    onError: () => client.invalidateQueries({ queryKey: keys.repos }),
+  });
+}
+
 /**
  * Keeps git data fresh: refetch when the window regains focus or a repository's worktrees change,
  * and reload comments when they change (an agent replying from the command line).

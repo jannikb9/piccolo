@@ -26,6 +26,13 @@ export default function App() {
   const viewRef = useRef<DiffViewHandle>(null);
 
   const selection = repos.data ? resolveSelection(repos.data, selectedId) : undefined;
+  // Keep a fallback selection (nothing chosen yet, or the chosen worktree is gone), so it
+  // doesn't jump elsewhere when repositories are reordered.
+  const selectWorktree = useStore((s) => s.selectWorktree);
+  const resolvedId = selection?.worktree.id;
+  useEffect(() => {
+    if (resolvedId && resolvedId !== selectedId) selectWorktree(resolvedId);
+  }, [resolvedId, selectedId, selectWorktree]);
   const worktree = selection?.worktree;
   const base = selection?.repo.defaultBranch ?? null;
 

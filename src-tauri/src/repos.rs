@@ -181,6 +181,23 @@ pub fn remove_repo(app: AppHandle, repos: State<'_, Repos>, watchers: State<'_, 
     repos.update(&app, |paths| paths.retain(|p| *p != id))
 }
 
+/// `paths` in the order of `ids`; unknown ids are ignored and paths missing from `ids` go last.
+fn reordered(paths: &[String], ids: Vec<String>) -> Vec<String> {
+    let mut ordered: Vec<String> = Vec::with_capacity(paths.len());
+    for id in ids.into_iter().chain(paths.iter().cloned()) {
+        if paths.contains(&id) && !ordered.contains(&id) {
+            ordered.push(id);
+        }
+    }
+    ordered
+}
+
+/// Saves the sidebar order of repositories.
+#[tauri::command]
+pub fn reorder_repos(app: AppHandle, repos: State<'_, Repos>, ids: Vec<String>) -> Result<()> {
+    repos.update(&app, |paths| *paths = reordered(paths, ids))
+}
+
 #[tauri::command]
 pub async fn worktree_stats(path: String, base: Option<String>) -> Result<WorktreeStats> {
     blocking(move || {
@@ -239,4 +256,16 @@ pub async fn file_versions(
         })
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reorders_known_paths_and_keeps_the_rest() {
+        let paths: Vec<String> = ["/a", "/b", "/c"].map(String::from).to_vec();
+        let ids = ["/c", "/x", "/a", "/c"].map(String::from).to_vec();
+        assert_eq!(reordered(&paths, ids), ["/c", "/a", "/b"]);
+    }
 }
