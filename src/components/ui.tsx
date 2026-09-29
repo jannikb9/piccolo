@@ -1,3 +1,4 @@
+import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { Check } from "lucide-react";
@@ -19,6 +20,35 @@ export function Tooltip({ label, children, side = "bottom" }: { label: ReactNode
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>
+  );
+}
+
+/** Wraps `children` (a single element) so that right-clicking it opens a menu of `items`. */
+export function ContextMenu({
+  children,
+  items,
+}: {
+  children: ReactNode;
+  items: { label: string; icon?: ReactNode; onSelect: () => void }[];
+}) {
+  return (
+    <ContextMenuPrimitive.Root>
+      <ContextMenuPrimitive.Trigger asChild>{children}</ContextMenuPrimitive.Trigger>
+      <ContextMenuPrimitive.Portal>
+        <ContextMenuPrimitive.Content className="z-50 min-w-40 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20">
+          {items.map((item) => (
+            <ContextMenuPrimitive.Item
+              key={item.label}
+              onSelect={item.onSelect}
+              className="flex h-7 cursor-default items-center gap-2 rounded px-2 outline-none data-[highlighted]:bg-bg-hover data-[highlighted]:text-fg"
+            >
+              {item.icon}
+              {item.label}
+            </ContextMenuPrimitive.Item>
+          ))}
+        </ContextMenuPrimitive.Content>
+      </ContextMenuPrimitive.Portal>
+    </ContextMenuPrimitive.Root>
   );
 }
 

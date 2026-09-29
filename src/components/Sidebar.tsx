@@ -10,12 +10,12 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, ChevronRight, FolderGit2, GitBranch, Plus, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, Copy, FolderGit2, GitBranch, Plus, X } from "lucide-react";
 import { prefetchWorktree, useAddRepo, useRemoveRepo, useReorderRepos, useRepos, useWorktreeStats } from "../lib/queries";
 import { cn, timeAgo } from "../lib/utils";
 import { sortWorktrees, useStore } from "../store";
 import type { Repo, Worktree } from "../types";
-import { DiffCount, IconButton, Skeleton, Tooltip } from "./ui";
+import { ContextMenu, DiffCount, IconButton, Skeleton, Tooltip } from "./ui";
 
 export function Sidebar({ selectedId, shortcuts }: { selectedId: string | null; shortcuts: Map<string, number> }) {
   const repos = useRepos();
@@ -193,41 +193,51 @@ function WorktreeRow({
         </span>
       }
     >
-      <button
-        type="button"
-        onClick={() => selectWorktree(wt.id)}
-        onPointerEnter={() => prefetchWorktree(wt, base, scope, hideWhitespace)}
-        aria-current={selected ? "page" : undefined}
-        className={cn(
-          "group grid w-full grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left transition-colors",
-          selected ? "bg-bg-active" : "hover:bg-bg-hover",
-        )}
+      <ContextMenu
+        items={[
+          {
+            label: "Copy worktree name",
+            icon: <Copy className="size-3.5 text-fg-subtle" />,
+            onSelect: () => navigator.clipboard.writeText(wt.name),
+          },
+        ]}
       >
-        <GitBranch className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} />
-        <span className={cn("truncate text-[13px] font-medium", selected ? "text-fg" : "text-fg-muted group-hover:text-fg")}>
-          {wt.branch ?? `detached @ ${wt.head}`}
-        </span>
-        <span className="tabular text-[11px] text-fg-faint">{wt.updatedAt ? timeAgo(wt.updatedAt) : ""}</span>
-
-        <span className="grid place-items-center">
-          {wt.dirty && <span className="size-1.5 rounded-full bg-mod" aria-label="Uncommitted changes" />}
-        </span>
-        <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-fg-subtle">
-          <span className="truncate">{wt.isMain ? "root" : wt.name}</span>
-          {stats.data && (stats.data.ahead > 0 || stats.data.behind > 0) && (
-            <span className="tabular shrink-0 text-fg-faint">
-              {stats.data.ahead > 0 && `↑${stats.data.ahead}`}
-              {stats.data.ahead > 0 && stats.data.behind > 0 && " "}
-              {stats.data.behind > 0 && `↓${stats.data.behind}`}
-            </span>
+        <button
+          type="button"
+          onClick={() => selectWorktree(wt.id)}
+          onPointerEnter={() => prefetchWorktree(wt, base, scope, hideWhitespace)}
+          aria-current={selected ? "page" : undefined}
+          className={cn(
+            "group grid w-full grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left transition-colors",
+            selected ? "bg-bg-active" : "hover:bg-bg-hover",
           )}
-        </span>
-        {stats.isPending ? (
-          <Skeleton className="h-2.5 w-9 justify-self-end" />
-        ) : (
-          <DiffCount additions={stats.data?.additions ?? 0} deletions={stats.data?.deletions ?? 0} className="justify-end" />
-        )}
-      </button>
+        >
+          <GitBranch className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} />
+          <span className={cn("truncate text-[13px] font-medium", selected ? "text-fg" : "text-fg-muted group-hover:text-fg")}>
+            {wt.branch ?? `detached @ ${wt.head}`}
+          </span>
+          <span className="tabular text-[11px] text-fg-faint">{wt.updatedAt ? timeAgo(wt.updatedAt) : ""}</span>
+  
+          <span className="grid place-items-center">
+            {wt.dirty && <span className="size-1.5 rounded-full bg-mod" aria-label="Uncommitted changes" />}
+          </span>
+          <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-fg-subtle">
+            <span className="truncate">{wt.isMain ? "root" : wt.name}</span>
+            {stats.data && (stats.data.ahead > 0 || stats.data.behind > 0) && (
+              <span className="tabular shrink-0 text-fg-faint">
+                {stats.data.ahead > 0 && `↑${stats.data.ahead}`}
+                {stats.data.ahead > 0 && stats.data.behind > 0 && " "}
+                {stats.data.behind > 0 && `↓${stats.data.behind}`}
+              </span>
+            )}
+          </span>
+          {stats.isPending ? (
+            <Skeleton className="h-2.5 w-9 justify-self-end" />
+          ) : (
+            <DiffCount additions={stats.data?.additions ?? 0} deletions={stats.data?.deletions ?? 0} className="justify-end" />
+          )}
+        </button>
+      </ContextMenu>
     </Tooltip>
   );
 }
