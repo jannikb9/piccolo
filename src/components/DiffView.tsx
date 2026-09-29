@@ -50,18 +50,29 @@ const unsafeCSS = /* css */ `
     --diffs-dark-bg: var(--bg);
     --diffs-light-bg: var(--bg);
 
-    /* Quieter row tints than the theme defaults so syntax colours stay readable on changed
-       lines; the changed words themselves get the stronger tint. The library mixes these
-       overrides into the background again (20% on lines, 15% on numbers in dark; 12% / 9% in
-       light), so 40% here is about an 8% tint on a dark line. */
+    /* GitHub's diff colours (see --add-* / --del-* in styles.css): tinted lines, stronger line
+       numbers, strongest on the changed words. */
     --diffs-addition-color-override: var(--add);
     --diffs-deletion-color-override: var(--del);
-    --diffs-bg-addition-override: color-mix(in oklab, var(--add) 40%, var(--bg));
-    --diffs-bg-addition-number-override: color-mix(in oklab, var(--add) 75%, var(--bg));
-    --diffs-bg-addition-emphasis-override: color-mix(in oklab, var(--add) 28%, transparent);
-    --diffs-bg-deletion-override: color-mix(in oklab, var(--del) 40%, var(--bg));
-    --diffs-bg-deletion-number-override: color-mix(in oklab, var(--del) 75%, var(--bg));
-    --diffs-bg-deletion-emphasis-override: color-mix(in oklab, var(--del) 28%, transparent);
+    --diffs-bg-addition-override: var(--add-bg);
+    --diffs-bg-addition-number-override: var(--add-gutter);
+    --diffs-bg-addition-emphasis-override: var(--add-word);
+    --diffs-bg-deletion-override: var(--del-bg);
+    --diffs-bg-deletion-number-override: var(--del-gutter);
+    --diffs-bg-deletion-emphasis-override: var(--del-word);
+    --diffs-fg-number-override: var(--fg-faint);
+    --diffs-fg-number-addition-override: var(--fg-muted);
+    --diffs-fg-number-deletion-override: var(--fg-muted);
+    --diffs-bg-separator-override: var(--hunk-bg);
+  }
+  /* The library blends those colours into the background again (to 20% or less); use them as
+     given, as GitHub does. Unchanged lines blend with the background itself, so stay plain. */
+  [data-diff] :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer]) {
+    --mix-light: 0%;
+    --mix-dark: 0%;
+  }
+  [data-separator] {
+    color: var(--hunk-fg);
   }
   [data-diffs-header] {
     background: var(--bg);

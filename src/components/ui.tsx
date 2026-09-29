@@ -195,7 +195,7 @@ export function Button({
       className={cn(
         "flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
         variant === "primary"
-          ? "bg-accent text-accent-fg hover:brightness-110"
+          ? "bg-primary text-primary-fg shadow-sm shadow-black/20 hover:bg-primary-hover"
           : "text-fg-muted hover:bg-bg-hover hover:text-fg",
         className,
       )}

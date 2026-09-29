@@ -212,7 +212,7 @@ export function Welcome({ loading }: { loading: boolean }) {
             <button
               type="button"
               onClick={() => addRepo.mutate()}
-              className="mt-5 h-8 rounded-md bg-accent px-3.5 text-[13px] font-medium text-accent-fg hover:brightness-110"
+              className="mt-5 h-8 rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-fg hover:bg-primary-hover"
             >
               Add repository
             </button>

@@ -3,84 +3,97 @@
 @import "@fontsource-variable/jetbrains-mono";
 
 /*
- * Design tokens. Dark is the primary theme; light mirrors it.
- * Surfaces step up in lightness by small increments — borders do the separating, not shadows.
+ * Design tokens, following GitHub's Primer palette so reviews look like they do on GitHub.
+ * Dark is the primary theme; light mirrors it.
  */
 :root {
   color-scheme: dark;
 
-  --bg: oklch(0.178 0.004 270);
-  --bg-sidebar: oklch(0.155 0.004 270);
-  --bg-raised: oklch(0.2 0.005 270);
-  --bg-hover: oklch(0.235 0.006 270);
-  --bg-active: oklch(0.265 0.008 270);
-  --bg-inset: oklch(0.155 0.004 270);
+  --bg: #0d1117;
+  --bg-sidebar: #010409;
+  --bg-raised: #161b22;
+  --bg-hover: #1f252d;
+  --bg-active: #262c36;
+  --bg-inset: #010409;
 
-  --border: oklch(0.275 0.006 270);
-  --border-subtle: oklch(0.225 0.005 270);
-  --border-strong: oklch(0.34 0.008 270);
+  --border: #30363d;
+  --border-subtle: #21262d;
+  --border-strong: #484f58;
 
-  --fg: oklch(0.94 0.004 270);
-  --fg-muted: oklch(0.72 0.01 270);
-  --fg-subtle: oklch(0.56 0.012 270);
-  --fg-faint: oklch(0.44 0.01 270);
+  --fg: #f0f6fc;
+  --fg-muted: #d1d7e0;
+  --fg-subtle: #9198a1;
+  --fg-faint: #6e7681;
 
-  --accent: oklch(0.64 0.16 277);
-  --accent-fg: oklch(0.98 0.01 277);
-  --accent-soft: oklch(0.64 0.16 277 / 0.16);
+  --accent: #4493f8;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(56 139 253 / 0.15);
 
-  --add: oklch(0.74 0.14 152);
-  --add-bg: oklch(0.72 0.14 152 / 0.1);
-  --add-gutter: oklch(0.72 0.14 152 / 0.16);
-  --del: oklch(0.7 0.16 22);
-  --del-bg: oklch(0.68 0.17 22 / 0.1);
-  --del-gutter: oklch(0.68 0.17 22 / 0.16);
-  --mod: oklch(0.8 0.13 78);
-  --ren: oklch(0.72 0.11 245);
+  /* GitHub's green primary buttons ("Comment"). */
+  --primary: #238636;
+  --primary-hover: #29903b;
+  --primary-fg: #ffffff;
 
-  --hunk-bg: oklch(0.64 0.16 277 / 0.07);
-  --hunk-fg: oklch(0.68 0.06 277);
+  --add: #3fb950;
+  --add-bg: rgb(46 160 67 / 0.15);
+  --add-gutter: rgb(63 185 80 / 0.3);
+  --add-word: rgb(46 160 67 / 0.4);
+  --del: #f85149;
+  --del-bg: rgb(248 81 73 / 0.1);
+  --del-gutter: rgb(248 81 73 / 0.3);
+  --del-word: rgb(248 81 73 / 0.4);
+  --mod: #d29922;
+  --ren: #ab7df8;
 
-  --ring: oklch(0.64 0.16 277 / 0.55);
+  --hunk-bg: rgb(56 139 253 / 0.1);
+  --hunk-fg: #9198a1;
+
+  --ring: rgb(68 147 248 / 0.6);
 }
 
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
 
-    --bg: oklch(1 0 0);
-    --bg-sidebar: oklch(0.975 0.002 270);
-    --bg-raised: oklch(0.985 0.002 270);
-    --bg-hover: oklch(0.96 0.003 270);
-    --bg-active: oklch(0.935 0.005 270);
-    --bg-inset: oklch(0.975 0.002 270);
+    --bg: #ffffff;
+    --bg-sidebar: #f6f8fa;
+    --bg-raised: #f6f8fa;
+    --bg-hover: #eff2f5;
+    --bg-active: #e6eaef;
+    --bg-inset: #f6f8fa;
 
-    --border: oklch(0.91 0.004 270);
-    --border-subtle: oklch(0.94 0.003 270);
-    --border-strong: oklch(0.85 0.006 270);
+    --border: #d1d9e0;
+    --border-subtle: #e6eaef;
+    --border-strong: #afb8c1;
 
-    --fg: oklch(0.22 0.01 270);
-    --fg-muted: oklch(0.42 0.012 270);
-    --fg-subtle: oklch(0.56 0.012 270);
-    --fg-faint: oklch(0.7 0.01 270);
+    --fg: #1f2328;
+    --fg-muted: #393f46;
+    --fg-subtle: #59636e;
+    --fg-faint: #818b98;
 
-    --accent: oklch(0.55 0.19 277);
-    --accent-fg: oklch(0.99 0.005 277);
-    --accent-soft: oklch(0.55 0.19 277 / 0.1);
+    --accent: #0969da;
+    --accent-fg: #ffffff;
+    --accent-soft: rgb(9 105 218 / 0.1);
 
-    --add: oklch(0.56 0.15 152);
-    --add-bg: oklch(0.72 0.15 152 / 0.12);
-    --add-gutter: oklch(0.72 0.15 152 / 0.22);
-    --del: oklch(0.56 0.19 25);
-    --del-bg: oklch(0.7 0.17 22 / 0.1);
-    --del-gutter: oklch(0.7 0.17 22 / 0.2);
-    --mod: oklch(0.62 0.14 70);
-    --ren: oklch(0.55 0.13 245);
+    --primary: #1f883d;
+    --primary-hover: #1c8139;
+    --primary-fg: #ffffff;
 
-    --hunk-bg: oklch(0.55 0.19 277 / 0.06);
-    --hunk-fg: oklch(0.5 0.08 277);
+    --add: #1a7f37;
+    --add-bg: #dafbe1;
+    --add-gutter: #aceebb;
+    --add-word: #aceebb;
+    --del: #d1242f;
+    --del-bg: #ffebe9;
+    --del-gutter: #ffcecb;
+    --del-word: rgb(255 129 130 / 0.4);
+    --mod: #9a6700;
+    --ren: #8250df;
 
-    --ring: oklch(0.55 0.19 277 / 0.45);
+    --hunk-bg: #ddf4ff;
+    --hunk-fg: #59636e;
+
+    --ring: rgb(9 105 218 / 0.5);
   }
 }
 
@@ -104,6 +117,9 @@
   --color-accent: var(--accent);
   --color-accent-fg: var(--accent-fg);
   --color-accent-soft: var(--accent-soft);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
   --color-add: var(--add);
   --color-add-bg: var(--add-bg);
   --color-add-gutter: var(--add-gutter);
