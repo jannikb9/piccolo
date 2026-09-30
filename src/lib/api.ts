@@ -15,7 +15,7 @@ import {
   mockThreads,
   mockWorktreeStats,
 } from "../mock";
-import type { ChangedFile, DiffPatch, DiffScope, FileVersions, LineRange, Repo, Thread, WorktreeStats } from "../types";
+import type { ChangedFile, DiffOptions, DiffPatch, DiffScope, FileVersions, LineRange, Repo, Thread, WorktreeStats } from "../types";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -34,11 +34,11 @@ export const api = {
   worktreeStats: (path: string, base: string | null): Promise<WorktreeStats> =>
     isTauri ? invoke("worktree_stats", { path, base }) : mockWorktreeStats(path),
 
-  changedFiles: (path: string, base: string | null, scope: DiffScope, ignoreWhitespace: boolean): Promise<ChangedFile[]> =>
-    isTauri ? invoke("changed_files", { path, base, scope, ignoreWhitespace }) : mockChangedFiles(path, scope),
+  changedFiles: (path: string, base: string | null, scope: DiffScope, options: DiffOptions): Promise<ChangedFile[]> =>
+    isTauri ? invoke("changed_files", { path, base, scope, options }) : mockChangedFiles(path, scope),
 
-  diffPatch: (path: string, base: string | null, scope: DiffScope, ignoreWhitespace: boolean): Promise<DiffPatch> =>
-    isTauri ? invoke("diff_patch", { path, base, scope, ignoreWhitespace }) : mockDiffPatch(path, scope),
+  diffPatch: (path: string, base: string | null, scope: DiffScope, options: DiffOptions): Promise<DiffPatch> =>
+    isTauri ? invoke("diff_patch", { path, base, scope, options }) : mockDiffPatch(path, scope),
 
   fileVersions: (
     path: string,

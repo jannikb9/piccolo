@@ -11,7 +11,7 @@ import { shikiThemes } from "./lib/codeThemes";
 import { hashString } from "./lib/diff";
 import { useChangedFiles, useDiffPatch, useLiveGitData, useRepos, useThreads } from "./lib/queries";
 import { groupIntoSections } from "./lib/sections";
-import { orderedWorktrees, resolveSelection, useStore } from "./store";
+import { orderedWorktrees, resolveSelection, useDiffOptions, useStore } from "./store";
 import type { Worktree } from "./types";
 
 export default function App() {
@@ -21,7 +21,7 @@ export default function App() {
   const selectedId = useStore((s) => s.selectedWorktreeId);
   const collapsedRepos = useStore((s) => s.collapsedRepos);
   const scope = useStore((s) => s.scope);
-  const hideWhitespace = useStore((s) => s.hideWhitespace);
+  const diffOptions = useDiffOptions();
   const pinActivePath = useStore((s) => s.pinActivePath);
   const viewRef = useRef<DiffViewHandle>(null);
 
@@ -40,8 +40,8 @@ export default function App() {
   const shortcuts = useMemo(() => new Map(ordered.slice(0, 9).map((w, i) => [w.id, i + 1])), [ordered]);
   useWorktreeHotkeys(ordered, worktree?.id);
 
-  const filesQuery = useChangedFiles(worktree, base, scope, hideWhitespace);
-  const patchQuery = useDiffPatch(worktree, base, scope, hideWhitespace);
+  const filesQuery = useChangedFiles(worktree, base, scope, diffOptions);
+  const patchQuery = useDiffPatch(worktree, base, scope, diffOptions);
   // Threads are re-positioned whenever the diff changes.
   const revision = useMemo(() => (patchQuery.data ? hashString(patchQuery.data.patch) : 0), [patchQuery.data]);
   const threadsQuery = useThreads(worktree, base, scope, revision);

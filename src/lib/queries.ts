@@ -1,7 +1,7 @@
 import { focusManager, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useStore } from "../store";
-import type { DiffScope, LineRange, Repo, Worktree } from "../types";
+import type { DiffOptions, DiffScope, LineRange, Repo, Worktree } from "../types";
 import { api, onCommentsChanged, onRepoChanged, onWindowFocusChanged, pickRepoFolder } from "./api";
 
 export const queryClient = new QueryClient({
@@ -17,16 +17,16 @@ export const queryClient = new QueryClient({
 export const keys = {
   repos: ["repos"] as const,
   stats: (path: string, base: string | null) => ["stats", path, base] as const,
-  files: (path: string, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) =>
-    ["files", path, base, scope, ignoreWhitespace] as const,
-  patch: (path: string, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) =>
-    ["patch", path, base, scope, ignoreWhitespace] as const,
+  files: (path: string, base: string | null, scope: DiffScope, options: DiffOptions) =>
+    ["files", path, base, scope, options] as const,
+  patch: (path: string, base: string | null, scope: DiffScope, options: DiffOptions) =>
+    ["patch", path, base, scope, options] as const,
   /** `revision` identifies the diff; threads are re-positioned whenever it changes. */
   threads: (path: string, base: string | null, scope: DiffScope, revision: number) =>
     ["threads", path, base, scope, revision] as const,
 };
 
-/** Keeps showing the previous result while switching scope or whitespace, but never another worktree's. */
+/** Keeps showing the previous result while switching scope or diff options, but never another worktree's. */
 const sameWorktree =
   (path: string | undefined) =>
   <T>(previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) =>
@@ -43,19 +43,19 @@ export function useWorktreeStats(worktree: Worktree, base: string | null) {
   });
 }
 
-export function useChangedFiles(worktree: Worktree | undefined, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) {
+export function useChangedFiles(worktree: Worktree | undefined, base: string | null, scope: DiffScope, options: DiffOptions) {
   return useQuery({
-    queryKey: keys.files(worktree?.path ?? "", base, scope, ignoreWhitespace),
-    queryFn: () => api.changedFiles(worktree!.path, base, scope, ignoreWhitespace),
+    queryKey: keys.files(worktree?.path ?? "", base, scope, options),
+    queryFn: () => api.changedFiles(worktree!.path, base, scope, options),
     enabled: !!worktree,
     placeholderData: sameWorktree(worktree?.path),
   });
 }
 
-export function useDiffPatch(worktree: Worktree | undefined, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) {
+export function useDiffPatch(worktree: Worktree | undefined, base: string | null, scope: DiffScope, options: DiffOptions) {
   return useQuery({
-    queryKey: keys.patch(worktree?.path ?? "", base, scope, ignoreWhitespace),
-    queryFn: () => api.diffPatch(worktree!.path, base, scope, ignoreWhitespace),
+    queryKey: keys.patch(worktree?.path ?? "", base, scope, options),
+    queryFn: () => api.diffPatch(worktree!.path, base, scope, options),
     enabled: !!worktree,
     placeholderData: sameWorktree(worktree?.path),
   });
@@ -93,14 +93,14 @@ export const useSetThreadResolved = () =>
 export const useDeleteComment = () => useCommentMutation((id: number) => api.deleteComment(id));
 
 /** Loading on hover makes the click feel instant. */
-export function prefetchWorktree(worktree: Worktree, base: string | null, scope: DiffScope, ignoreWhitespace: boolean) {
+export function prefetchWorktree(worktree: Worktree, base: string | null, scope: DiffScope, options: DiffOptions) {
   queryClient.prefetchQuery({
-    queryKey: keys.files(worktree.path, base, scope, ignoreWhitespace),
-    queryFn: () => api.changedFiles(worktree.path, base, scope, ignoreWhitespace),
+    queryKey: keys.files(worktree.path, base, scope, options),
+    queryFn: () => api.changedFiles(worktree.path, base, scope, options),
   });
   queryClient.prefetchQuery({
-    queryKey: keys.patch(worktree.path, base, scope, ignoreWhitespace),
-    queryFn: () => api.diffPatch(worktree.path, base, scope, ignoreWhitespace),
+    queryKey: keys.patch(worktree.path, base, scope, options),
+    queryFn: () => api.diffPatch(worktree.path, base, scope, options),
   });
 }
 

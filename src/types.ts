@@ -64,6 +64,9 @@ export type FileVersions = {
 };
 
 export type DiffScope = "all" | "committed" | "uncommitted";
+
+/** Changes the reviewer chose to leave out of the diff. */
+export type DiffOptions = { ignoreWhitespace: boolean; hideImports: boolean };
 export type DiffLayout = "split" | "unified";
 
 /** A side of a diff: the old version (removed + unchanged lines) or the new one (added + unchanged). */

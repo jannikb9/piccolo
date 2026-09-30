@@ -13,7 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { AlertTriangle, ChevronRight, Copy, FolderGit2, GitBranch, Plus, X } from "lucide-react";
 import { prefetchWorktree, useAddRepo, useRemoveRepo, useReorderRepos, useRepos, useWorktreeStats } from "../lib/queries";
 import { cn, timeAgo } from "../lib/utils";
-import { sortWorktrees, useStore } from "../store";
+import { sortWorktrees, useDiffOptions, useStore } from "../store";
 import type { Repo, Worktree } from "../types";
 import { ContextMenu, DiffCount, IconButton, Skeleton, Tooltip } from "./ui";
 
@@ -180,7 +180,7 @@ function WorktreeRow({
 }) {
   const selectWorktree = useStore((s) => s.selectWorktree);
   const scope = useStore((s) => s.scope);
-  const hideWhitespace = useStore((s) => s.hideWhitespace);
+  const diffOptions = useDiffOptions();
   const stats = useWorktreeStats(wt, base);
 
   return (
@@ -205,7 +205,7 @@ function WorktreeRow({
         <button
           type="button"
           onClick={() => selectWorktree(wt.id)}
-          onPointerEnter={() => prefetchWorktree(wt, base, scope, hideWhitespace)}
+          onPointerEnter={() => prefetchWorktree(wt, base, scope, diffOptions)}
           aria-current={selected ? "page" : undefined}
           className={cn(
             "group grid w-full grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left transition-colors",

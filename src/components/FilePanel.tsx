@@ -1,7 +1,7 @@
 import { Check, ChevronRight, Folder, FolderOpen, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { COLLAPSED_BY_DEFAULT, type FileSection } from "../lib/sections";
-import { cn, type TreeNode } from "../lib/utils";
+import { cn, totals, type TreeNode } from "../lib/utils";
 import { useStore } from "../store";
 import { DiffCount, Skeleton, StatusLetter } from "./ui";
 
@@ -77,6 +77,7 @@ function SectionGroup({
   const setCollapsed = useStore((s) => s.setSectionCollapsed);
   // While closed, the header stands in for the file being read, so the reader still knows where they are.
   const holdsActive = useStore((s) => collapsed && !!s.activePath && section.files.some((f) => f.path === s.activePath));
+  const { additions, deletions } = totals(section.files);
 
   return (
     <section className={className}>
@@ -92,6 +93,7 @@ function SectionGroup({
         <ChevronRight className={cn("size-3 shrink-0 transition-transform duration-150", !collapsed && "rotate-90")} />
         {section.label}
         <span className="tabular rounded-full bg-bg-hover px-1.5 font-medium tracking-normal">{section.files.length}</span>
+        <DiffCount additions={additions} deletions={deletions} className="ml-auto font-normal tracking-normal normal-case" />
       </button>
       {!collapsed && <TreeList nodes={section.tree} depth={0} {...rowProps} />}
     </section>

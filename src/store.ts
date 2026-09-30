@@ -1,8 +1,9 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CodeThemeId } from "./lib/codeThemes";
 import type { SectionId } from "./lib/sections";
-import type { DiffLayout, DiffScope, LineRange, Repo, Worktree } from "./types";
+import type { DiffLayout, DiffOptions, DiffScope, LineRange, Repo, Worktree } from "./types";
 
 type PathSet = Record<string, true>;
 
@@ -21,6 +22,7 @@ type State = {
   layout: DiffLayout;
   scope: DiffScope;
   hideWhitespace: boolean;
+  hideImports: boolean;
   codeTheme: CodeThemeId;
   /** worktreeId → set of viewed file paths */
   viewed: Record<string, PathSet>;
@@ -43,6 +45,7 @@ type State = {
   setLayout: (layout: DiffLayout) => void;
   setScope: (scope: DiffScope) => void;
   toggleHideWhitespace: () => void;
+  toggleHideImports: () => void;
   setCodeTheme: (theme: CodeThemeId) => void;
   toggleViewed: (worktreeId: string, path: string) => void;
   setCollapsed: (worktreeId: string, path: string, collapsed: boolean) => void;
@@ -70,6 +73,7 @@ export const useStore = create<State>()(
       layout: "split",
       scope: "all",
       hideWhitespace: false,
+      hideImports: false,
       codeTheme: "github",
       viewed: {},
       collapsed: {},
@@ -84,6 +88,7 @@ export const useStore = create<State>()(
       setLayout: (layout) => set({ layout }),
       setScope: (scope) => set({ scope }),
       toggleHideWhitespace: () => set((s) => ({ hideWhitespace: !s.hideWhitespace })),
+      toggleHideImports: () => set((s) => ({ hideImports: !s.hideImports })),
       setCodeTheme: (codeTheme) => set({ codeTheme }),
       // Like GitHub: marking a file viewed collapses it, un-marking expands it again.
       toggleViewed: (wt, path) =>
@@ -132,11 +137,19 @@ export const useStore = create<State>()(
         layout: s.layout,
         scope: s.scope,
         hideWhitespace: s.hideWhitespace,
+        hideImports: s.hideImports,
         codeTheme: s.codeTheme,
       }),
     },
   ),
 );
+
+/** What the diff leaves out, as the backend takes it. */
+export function useDiffOptions(): DiffOptions {
+  const ignoreWhitespace = useStore((s) => s.hideWhitespace);
+  const hideImports = useStore((s) => s.hideImports);
+  return useMemo(() => ({ ignoreWhitespace, hideImports }), [ignoreWhitespace, hideImports]);
+}
 
 /**
  * Worktrees in sidebar order: per repo, the most recently changed first and the main worktree

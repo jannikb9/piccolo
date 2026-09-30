@@ -1,8 +1,8 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, Columns2, Copy, FolderGit2, GitBranch, GitCompareArrows, Pilcrow, Rows2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Columns2, Copy, FolderGit2, GitBranch, GitCompareArrows, Import, Pilcrow, Rows2 } from "lucide-react";
 import type { ReactNode, Ref } from "react";
 import { useAddRepo } from "../lib/queries";
-import { cn, totals } from "../lib/utils";
+import { totals } from "../lib/utils";
 import { useStore } from "../store";
 import type { ChangedFile, DiffPatch, Repo, Thread, Worktree } from "../types";
 import { DiffView, type DiffViewHandle } from "./DiffView";
@@ -87,6 +87,8 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
   const setScope = useStore((s) => s.setScope);
   const hideWhitespace = useStore((s) => s.hideWhitespace);
   const toggleHideWhitespace = useStore((s) => s.toggleHideWhitespace);
+  const hideImports = useStore((s) => s.hideImports);
+  const toggleHideImports = useStore((s) => s.toggleHideImports);
   const { additions, deletions } = totals(files);
   const branch = worktree.branch ?? worktree.head;
 
@@ -122,14 +124,24 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        <IconButton
-          label={hideWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
-          aria-pressed={hideWhitespace}
-          onClick={toggleHideWhitespace}
-          className={cn("size-7", hideWhitespace && "bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent")}
-        >
-          <Pilcrow className="size-3.5" />
-        </IconButton>
+        <div className="flex items-center gap-0.5">
+          <IconButton
+            label={hideWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
+            aria-pressed={hideWhitespace}
+            onClick={toggleHideWhitespace}
+            className="size-7"
+          >
+            <Pilcrow className="size-3.5" />
+          </IconButton>
+          <IconButton
+            label={hideImports ? "Show import changes" : "Hide import changes"}
+            aria-pressed={hideImports}
+            onClick={toggleHideImports}
+            className="size-7"
+          >
+            <Import className="size-3.5" />
+          </IconButton>
+        </div>
         <Segmented
           label="Changes to show"
           value={scope}

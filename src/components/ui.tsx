@@ -60,6 +60,8 @@ export function IconButton({ label, className, ...props }: ComponentProps<"butto
         aria-label={label}
         className={cn(
           "grid size-6 place-items-center rounded-md text-fg-subtle transition-colors hover:bg-bg-hover hover:text-fg",
+          // Toggles (`aria-pressed`) show their on state in the accent colour.
+          "aria-pressed:bg-accent-soft aria-pressed:text-accent",
           className,
         )}
         {...props}
