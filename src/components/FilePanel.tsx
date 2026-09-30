@@ -37,7 +37,7 @@ export function FilePanel({
       <header
         data-tauri-drag-region
         className={cn(
-          "flex h-13 shrink-0 items-center gap-2 border-b border-border-subtle px-4 transition-[padding] duration-150 ease-out motion-reduce:transition-none",
+          "flex h-13 shrink-0 items-center gap-2 border-b border-border-subtle px-4",
           // The macOS traffic lights end 77px in; leave a clear gap after them.
           sidebarCollapsed && "pl-[86px]",
         )}

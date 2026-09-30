@@ -39,9 +39,8 @@ export function Sidebar({
   const repos = useRepos();
   const addRepo = useAddRepo();
 
-  // The minimum width keeps it from reflowing while the panel slides closed.
   return (
-    <aside className="sidebar-surface flex h-full min-w-[200px] flex-col">
+    <aside className="sidebar-surface flex h-full flex-col">
       {/* Titlebar area: the macOS traffic lights sit in the top-left of this strip. */}
       <div data-tauri-drag-region className="flex h-13 shrink-0 items-center justify-end gap-1 px-3">
         <IconButton label="Add repository" onClick={() => addRepo.mutate()} disabled={addRepo.isPending}>

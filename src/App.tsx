@@ -73,14 +73,11 @@ export default function App() {
     <TooltipPrimitive.Provider delayDuration={500} skipDelayDuration={200}>
       <Group
         groupRef={sidebar.groupRef}
-        elementRef={sidebar.groupElement}
         orientation="horizontal" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged} className="h-full">
         <Panel
           id="sidebar"
           collapsible
           onResize={sidebar.onResize}
-          // Clip rather than scroll while it slides closed.
-          style={{ overflow: "hidden" }}
           defaultSize={248}
           minSize={200}
           maxSize={420}
@@ -130,34 +127,25 @@ export default function App() {
  */
 function useSidebarCollapse() {
   const groupRef = useGroupRef();
-  const groupElement = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
   /** The sidebar's width (% of the window) before it was hidden. */
   const lastSize = useRef<number | null>(null);
   const onResize = useCallback((size: PanelSize) => {
-    // Mid-animation sizes aren't the outcome; `toggle` already set it.
-    if (groupElement.current?.hasAttribute("data-animating")) return;
     setCollapsed(size.inPixels === 0);
     if (size.inPixels > 0) lastSize.current = size.asPercentage;
   }, []);
-  const animationEnd = useRef(0);
   // Hiding gives the width to the diff, not the file list next to it, and showing takes it back.
   const toggle = useCallback(() => {
     const group = groupRef.current;
-    const element = groupElement.current;
-    if (!group || !element) return;
+    if (!group) return;
     const { sidebar, files, diff } = group.getLayout();
     const size = sidebar > 0 ? 0 : (lastSize.current ?? (248 / window.innerWidth) * 100);
-    // The file list's header makes room for the traffic lights before it slides under them.
+    // The file list's header makes room for the traffic lights in the same frame it moves under them.
     flushSync(() => setCollapsed(size === 0));
-    // Panels animate their widths only while `data-animating` is set, so dragging stays direct.
-    element.dataset.animating = "";
-    window.clearTimeout(animationEnd.current);
-    animationEnd.current = window.setTimeout(() => delete element.dataset.animating, 250);
     group.setLayout({ sidebar: size, files, diff: diff + sidebar - size });
   }, [groupRef]);
   useEffect(() => onToggleSidebar(toggle), [toggle]);
-  return { groupRef, groupElement, collapsed, onResize, toggle };
+  return { groupRef, collapsed, onResize, toggle };
 }
 
 /** Applies the chosen syntax theme to the highlighter workers, which re-render mounted diffs. */
