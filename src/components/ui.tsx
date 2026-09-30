@@ -1,4 +1,5 @@
 import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
+import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { Check } from "lucide-react";
@@ -31,41 +32,82 @@ export type MenuItem = {
   onSelect: () => void;
 };
 
+// Right-click menus and "⋯" menus look and behave the same.
+const menuContentClass =
+  "z-50 min-w-44 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20";
+const menuItemClass =
+  "flex h-7 cursor-default items-center gap-2 rounded px-2 outline-none data-[highlighted]:bg-bg-hover data-[highlighted]:text-fg";
+
+/**
+ * A shortcut letter clicks its item, which runs it and closes the menu. Handled before the
+ * menu's own typeahead, which would only move the highlight.
+ */
+function onMenuKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1) return;
+  const item = e.currentTarget.querySelector<HTMLElement>(`[data-shortcut="${e.key.toLowerCase()}"]`);
+  if (!item) return;
+  e.preventDefault();
+  item.click();
+}
+
+function MenuItemContent({ item }: { item: MenuItem }) {
+  return (
+    <>
+      {item.icon}
+      {item.label}
+      {item.shortcut && <kbd className="ml-auto pl-4 font-sans text-[11px] text-fg-subtle">{item.shortcut.toUpperCase()}</kbd>}
+    </>
+  );
+}
+
 /** Wraps `children` (a single element) so that right-clicking it opens a menu of `items`. */
 export function ContextMenu({ children, items }: { children: ReactNode; items: MenuItem[] }) {
-  // A shortcut letter clicks its item, which runs it and closes the menu. Handled before the
-  // menu's own typeahead, which would only move the highlight.
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1) return;
-    const item = e.currentTarget.querySelector<HTMLElement>(`[data-shortcut="${e.key.toLowerCase()}"]`);
-    if (!item) return;
-    e.preventDefault();
-    item.click();
-  };
-
   return (
     <ContextMenuPrimitive.Root>
       <ContextMenuPrimitive.Trigger asChild>{children}</ContextMenuPrimitive.Trigger>
       <ContextMenuPrimitive.Portal>
-        <ContextMenuPrimitive.Content
-          onKeyDown={onKeyDown}
-          className="z-50 min-w-44 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
-        >
+        <ContextMenuPrimitive.Content onKeyDown={onMenuKeyDown} className={menuContentClass}>
           {items.map((item) => (
             <ContextMenuPrimitive.Item
               key={item.label}
               onSelect={item.onSelect}
               data-shortcut={item.shortcut?.toLowerCase()}
-              className="flex h-7 cursor-default items-center gap-2 rounded px-2 outline-none data-[highlighted]:bg-bg-hover data-[highlighted]:text-fg"
+              className={menuItemClass}
             >
-              {item.icon}
-              {item.label}
-              {item.shortcut && <kbd className="ml-auto pl-4 font-sans text-[11px] text-fg-subtle">{item.shortcut.toUpperCase()}</kbd>}
+              <MenuItemContent item={item} />
             </ContextMenuPrimitive.Item>
           ))}
         </ContextMenuPrimitive.Content>
       </ContextMenuPrimitive.Portal>
     </ContextMenuPrimitive.Root>
+  );
+}
+
+/** Opens a menu of `items` below `children` (a single button) when it's clicked. */
+export function DropdownMenu({ children, items }: { children: ReactNode; items: MenuItem[] }) {
+  return (
+    <DropdownMenuPrimitive.Root>
+      <DropdownMenuPrimitive.Trigger asChild>{children}</DropdownMenuPrimitive.Trigger>
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          align="start"
+          sideOffset={4}
+          onKeyDown={onMenuKeyDown}
+          className={menuContentClass}
+        >
+          {items.map((item) => (
+            <DropdownMenuPrimitive.Item
+              key={item.label}
+              onSelect={item.onSelect}
+              data-shortcut={item.shortcut?.toLowerCase()}
+              className={menuItemClass}
+            >
+              <MenuItemContent item={item} />
+            </DropdownMenuPrimitive.Item>
+          ))}
+        </DropdownMenuPrimitive.Content>
+      </DropdownMenuPrimitive.Portal>
+    </DropdownMenuPrimitive.Root>
   );
 }
 

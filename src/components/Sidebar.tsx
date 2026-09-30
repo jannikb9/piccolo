@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   ChevronRight,
   Copy,
+  EllipsisVertical,
   FolderGit2,
   GitBranch,
   GitMerge,
@@ -35,7 +36,7 @@ import {
 import { cn, timeAgo } from "../lib/utils";
 import { sortWorktrees, useDiffOptions, useStore } from "../store";
 import type { Repo, Worktree } from "../types";
-import { ContextMenu, DiffCount, IconButton, Skeleton, Tooltip } from "./ui";
+import { ContextMenu, DiffCount, DropdownMenu, IconButton, Skeleton, Tooltip, type MenuItem } from "./ui";
 
 /** Shows or hides the worktree sidebar. */
 export function SidebarToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
@@ -222,79 +223,92 @@ function WorktreeRow({
   const diffOptions = useDiffOptions();
   const stats = useWorktreeStats(wt, base);
   const deleteWorktree = useDeleteWorktree();
+  // Shared by right-click and the "⋮" button.
+  const menu: MenuItem[] = [
+    {
+      label: "Copy worktree name",
+      icon: <Copy className="size-3.5 text-fg-subtle" />,
+      shortcut: "C",
+      onSelect: () => navigator.clipboard.writeText(wt.name),
+    },
+    // The main worktree is the repository itself.
+    ...(wt.isMain
+      ? []
+      : [
+          {
+            label: "Delete worktree",
+            icon: <Trash2 className="size-3.5 text-fg-subtle" />,
+            shortcut: "D",
+            onSelect: () => deleteWorktree.mutate({ worktree: wt, merged: !!stats.data?.merged }),
+          },
+        ]),
+  ];
 
   return (
-    <Tooltip
-      side="right"
-      label={
-        <span className="flex items-center gap-3">
-          <span className="font-mono">{wt.path}</span>
-          {shortcut && <kbd className="font-sans text-fg-subtle">⌘{shortcut}</kbd>}
-        </span>
-      }
-    >
-      <ContextMenu
-        items={[
-          {
-            label: "Copy worktree name",
-            icon: <Copy className="size-3.5 text-fg-subtle" />,
-            shortcut: "C",
-            onSelect: () => navigator.clipboard.writeText(wt.name),
-          },
-          // The main worktree is the repository itself.
-          ...(wt.isMain
-            ? []
-            : [
-                {
-                  label: "Delete worktree",
-                  icon: <Trash2 className="size-3.5 text-fg-subtle" />,
-                  shortcut: "D",
-                  onSelect: () => deleteWorktree.mutate({ worktree: wt, merged: !!stats.data?.merged }),
-                },
-              ]),
-        ]}
+    <div className="group/row relative">
+      <Tooltip
+        side="right"
+        label={
+          <span className="flex items-center gap-3">
+            <span className="font-mono">{wt.path}</span>
+            {shortcut && <kbd className="font-sans text-fg-subtle">⌘{shortcut}</kbd>}
+          </span>
+        }
       >
-        <button
-          type="button"
-          onClick={() => selectWorktree(wt.id)}
-          onPointerEnter={() => prefetchWorktree(wt, base, scope, diffOptions)}
-          aria-current={selected ? "page" : undefined}
-          className={cn(
-            "group grid w-full grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left transition-colors",
-            selected ? "bg-bg-active" : "hover:bg-bg-hover",
-          )}
-        >
-          {stats.data?.merged ? (
-            <GitMerge className="size-3.5 text-merged" aria-label="Merged" />
-          ) : (
-            <GitBranch className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} />
-          )}
-          <span className={cn("truncate text-[13px] font-medium", selected ? "text-fg" : "text-fg-muted group-hover:text-fg")}>
-            {wt.branch ?? `detached @ ${wt.head}`}
-          </span>
-          <span className="tabular text-[11px] text-fg-faint">{wt.updatedAt ? timeAgo(wt.updatedAt) : ""}</span>
-
-          <span className="grid place-items-center">
-            {wt.dirty && <span className="size-1.5 rounded-full bg-mod" aria-label="Uncommitted changes" />}
-          </span>
-          <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-fg-subtle">
-            <span className="truncate">{wt.isMain ? "root" : wt.name}</span>
-            {stats.data && (stats.data.ahead > 0 || stats.data.behind > 0) && (
-              <span className="tabular shrink-0 text-fg-faint">
-                {stats.data.ahead > 0 && `↑${stats.data.ahead}`}
-                {stats.data.ahead > 0 && stats.data.behind > 0 && " "}
-                {stats.data.behind > 0 && `↓${stats.data.behind}`}
-              </span>
+        <ContextMenu items={menu}>
+          <button
+            type="button"
+            onClick={() => selectWorktree(wt.id)}
+            onPointerEnter={() => prefetchWorktree(wt, base, scope, diffOptions)}
+            aria-current={selected ? "page" : undefined}
+            className={cn(
+              "group grid w-full grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left transition-colors",
+              selected ? "bg-bg-active" : "hover:bg-bg-hover",
             )}
-          </span>
-          {stats.isPending ? (
-            <Skeleton className="h-2.5 w-9 justify-self-end" />
-          ) : (
-            <DiffCount additions={stats.data?.additions ?? 0} deletions={stats.data?.deletions ?? 0} className="justify-end" />
-          )}
-        </button>
-      </ContextMenu>
-    </Tooltip>
+          >
+            {stats.data?.merged ? (
+              <GitMerge className="size-3.5 text-merged" aria-label="Merged" />
+            ) : (
+              <GitBranch className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} />
+            )}
+            <span className={cn("truncate text-[13px] font-medium", selected ? "text-fg" : "text-fg-muted group-hover:text-fg")}>
+              {wt.branch ?? `detached @ ${wt.head}`}
+            </span>
+            {/* The "⋮" button takes its place on hover and while its menu is open. */}
+            <span className="tabular text-[11px] text-fg-faint group-hover/row:invisible group-has-[[data-state=open]]/row:invisible">
+              {wt.updatedAt ? timeAgo(wt.updatedAt) : ""}
+            </span>
+
+            <span className="grid place-items-center">
+              {wt.dirty && <span className="size-1.5 rounded-full bg-mod" aria-label="Uncommitted changes" />}
+            </span>
+            <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-fg-subtle">
+              <span className="truncate">{wt.isMain ? "root" : wt.name}</span>
+              {stats.data && (stats.data.ahead > 0 || stats.data.behind > 0) && (
+                <span className="tabular shrink-0 text-fg-faint">
+                  {stats.data.ahead > 0 && `↑${stats.data.ahead}`}
+                  {stats.data.ahead > 0 && stats.data.behind > 0 && " "}
+                  {stats.data.behind > 0 && `↓${stats.data.behind}`}
+                </span>
+              )}
+            </span>
+            {stats.isPending ? (
+              <Skeleton className="h-2.5 w-9 justify-self-end" />
+            ) : (
+              <DiffCount additions={stats.data?.additions ?? 0} deletions={stats.data?.deletions ?? 0} className="justify-end" />
+            )}
+          </button>
+        </ContextMenu>
+      </Tooltip>
+      <DropdownMenu items={menu}>
+        <IconButton
+          label="More"
+          className="absolute top-1.5 right-1.5 size-5 opacity-0 group-hover/row:opacity-100 data-[state=open]:bg-bg-hover data-[state=open]:opacity-100"
+        >
+          <EllipsisVertical className="size-3.5" />
+        </IconButton>
+      </DropdownMenu>
+    </div>
   );
 }
 
