@@ -163,19 +163,20 @@ function RepoSection({ repo, selectedId, shortcuts }: { repo: Repo; selectedId: 
         aria-label={`${repo.name}, drag to reorder`}
         className="group flex h-7 items-center rounded-md pr-1 text-[12px] font-medium text-fg-subtle outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
-        <Tooltip label={<span className="font-mono">{repo.path}</span>} side="right">
-          <button
-            type="button"
-            onClick={() => Date.now() - lastDragEnd > 100 && toggleRepo(repo.id)}
-            className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 hover:text-fg-muted"
-          >
-            <FolderGit2 className="size-3.5 shrink-0" />
+        <button
+          type="button"
+          onClick={() => Date.now() - lastDragEnd > 100 && toggleRepo(repo.id)}
+          className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 hover:text-fg-muted"
+        >
+          <FolderGit2 className="size-3.5 shrink-0" />
+          {/* Only the name shows the path, and below it, so the tooltip never covers the buttons. */}
+          <Tooltip label={<span className="font-mono">{repo.path}</span>}>
             <span className="truncate">{repo.name}</span>
-            <ChevronRight
-              className={cn("size-3 shrink-0 opacity-0 transition-[transform,opacity] group-hover:opacity-100", !collapsed && "rotate-90")}
-            />
-          </button>
-        </Tooltip>
+          </Tooltip>
+          <ChevronRight
+            className={cn("size-3 shrink-0 opacity-0 transition-[transform,opacity] group-hover:opacity-100", !collapsed && "rotate-90")}
+          />
+        </button>
         {!repo.error && (
           <IconButton
             label="New worktree from branch"
