@@ -108,3 +108,19 @@ export type Thread = {
   createdAt: number;
   updatedAt: number;
 };
+
+/** A line mentioning a name, from a whole-word search (src-tauri/src/navigate.rs). */
+export type SymbolHit = {
+  path: string;
+  line: number;
+  /** The line without indentation, cut around the name when long. */
+  text: string;
+  /** The line looks like it defines the name (`function name`, `class Name`, …). */
+  definition: boolean;
+};
+
+export type SymbolSearch = {
+  hits: SymbolHit[];
+  /** Some references were left out. */
+  truncated: boolean;
+};

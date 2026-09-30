@@ -56,6 +56,9 @@ feedback on this branch; after addressing a comment, reply with `review reply <i
 - [x] ⌘F find in changes: highlights without scrolling; ⌘G / ⇧⌘G, Enter / ⇧Enter step from the current view
 - [x] Selecting text highlights its other occurrences
 - [x] File list in sections (Implementation, Tests, Changesets); the diff follows that order
+- [x] Code navigation: ⌘-click a name to list its definitions and references (`git grep` in files of the
+  same language, definitions recognised by line shape, like GitHub's search-based navigation). Places in
+  the diff scroll into view, other files open over it; ⌘[ goes back
 - [ ] M4 — Review flow: viewed state with content fingerprints, keyboard nav, live refresh
 - [ ] M5 — Polish: empty/loading/error states, large-diff performance, transitions
 
@@ -83,6 +86,7 @@ src/
     FilePanel.tsx       changed-file tree in sections + viewed progress
     ReviewPane.tsx      toolbar + loading/error/empty states around the diff
     DiffView.tsx        CodeView from @pierre/diffs with our file headers and comment annotations
+    CodeNav.tsx         ⌘-click lookup: results popover, file view over the diff, back history
     Comments.tsx        comment threads, composer, replies
     SettingsDialog.tsx  settings (⌘, / app menu): syntax theme
     ui.tsx              primitives: Tooltip, Segmented, badges, Viewed toggle
@@ -91,6 +95,8 @@ src/
     diff.ts             patch parsing, default-collapsed files (lockfiles, generated)
     sections.ts         sorts files into Implementation / Tests / Changesets
     search.ts           ⌘F and selection matches, painted with the CSS Custom Highlight API
+    symbols.ts          the name under the pointer, ordering search results
+    codeViewStyle.ts    fonts and CSS shared by the diff and the file view
     codeThemes.ts       syntax themes (Shiki) offered in Settings
     queries.ts          TanStack Query hooks, live refresh on focus / repo changes
   styles.css            design tokens (OKLCH) + Tailwind theme
@@ -101,6 +107,7 @@ src-tauri/src/
   git.rs                git CLI wrapper: worktrees, status, changed files, patches, file contents (+ tests)
   comments.rs           comment store (SQLite), anchoring to lines as files change, Tauri commands (+ tests)
   cli.rs                the `review` command (the app binary run with a subcommand)
+  navigate.rs           definitions and references via `git grep` (+ tests)
   repos.rs              saved repo list and the Tauri commands
   watch.rs              watches .git for worktree changes, and the comments database for agent replies
   menu.rs               native menu bar with Settings… (⌘,)

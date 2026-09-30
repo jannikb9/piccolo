@@ -151,7 +151,7 @@ pub fn import_lines(src: &str) -> Vec<bool> {
     marks
 }
 
-fn starts_import(line: &str) -> bool {
+pub fn starts_import(line: &str) -> bool {
     let t = line.trim_start();
     keyword(t, "import") // JS/TS, Python, Java, Kotlin, Go, Swift, Scala, Dart, Haskell
         || (t.starts_with("from ") && t.contains(" import")) // Python

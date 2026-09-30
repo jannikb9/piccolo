@@ -7,7 +7,9 @@ import {
   mockChangedFiles,
   mockDeleteComment,
   mockDiffPatch,
+  mockFileText,
   mockFileVersions,
+  mockFindSymbol,
   mockReorderRepos,
   mockReply,
   mockRepos,
@@ -15,7 +17,18 @@ import {
   mockThreads,
   mockWorktreeStats,
 } from "../mock";
-import type { ChangedFile, DiffOptions, DiffPatch, DiffScope, FileVersions, LineRange, Repo, Thread, WorktreeStats } from "../types";
+import type {
+  ChangedFile,
+  DiffOptions,
+  DiffPatch,
+  DiffScope,
+  FileVersions,
+  LineRange,
+  Repo,
+  SymbolSearch,
+  Thread,
+  WorktreeStats,
+} from "../types";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -77,6 +90,14 @@ export const api = {
 
   /** Deletes a message; deleting a thread's first message deletes the thread. */
   deleteComment: (id: number): Promise<void> => (isTauri ? invoke("delete_comment", { id }) : mockDeleteComment(id)),
+
+  /** Lines mentioning `name` in files of the same language as `from`, at `rev` (`null`: the working tree). */
+  findSymbol: (path: string, rev: string | null, name: string, from: string): Promise<SymbolSearch> =>
+    isTauri ? invoke("find_symbol", { path, rev, name, from }) : mockFindSymbol(path, rev, name, from),
+
+  /** `null` when the file doesn't exist at `rev` or isn't text. */
+  fileText: (path: string, rev: string | null, file: string): Promise<string | null> =>
+    isTauri ? invoke("file_text", { path, rev, file }) : mockFileText(path, rev, file),
 };
 
 export async function pickRepoFolder(): Promise<string | null> {

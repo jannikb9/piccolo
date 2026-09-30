@@ -24,6 +24,8 @@ export const keys = {
   /** `revision` identifies the diff; threads are re-positioned whenever it changes. */
   threads: (path: string, base: string | null, scope: DiffScope, revision: number) =>
     ["threads", path, base, scope, revision] as const,
+  symbol: (path: string, rev: string | null, name: string, from: string) => ["symbol", path, rev, name, from] as const,
+  fileText: (path: string, rev: string | null, file: string) => ["file-text", path, rev, file] as const,
 };
 
 /** Keeps showing the previous result while switching scope or diff options, but never another worktree's. */
@@ -67,6 +69,22 @@ export function useThreads(worktree: Worktree | undefined, base: string | null, 
     queryFn: () => api.listThreads(worktree!.path, base, scope),
     enabled: !!worktree,
     placeholderData: sameWorktree(worktree?.path),
+  });
+}
+
+/** Where `name` is defined and used, at `rev` (`null`: the working tree). */
+export function useSymbolSearch(worktreePath: string, rev: string | null, name: string, from: string) {
+  return useQuery({
+    queryKey: keys.symbol(worktreePath, rev, name, from),
+    queryFn: () => api.findSymbol(worktreePath, rev, name, from),
+  });
+}
+
+/** One file's contents at `rev` (`null`: the working tree). */
+export function useFileText(worktreePath: string, rev: string | null, file: string) {
+  return useQuery({
+    queryKey: keys.fileText(worktreePath, rev, file),
+    queryFn: () => api.fileText(worktreePath, rev, file),
   });
 }
 

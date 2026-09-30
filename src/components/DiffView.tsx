@@ -1,9 +1,10 @@
 import type { CodeViewItem, DiffLineAnnotation, FileDiffLoadedFiles, FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
 import { ChevronRight, Copy, MessageSquare } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
+import { unsafeCSS, viewStyle } from "../lib/codeViewStyle";
 import { emptyDiff, hashString, isCollapsedByDefault, parsePatch } from "../lib/diff";
 import { useAddThread } from "../lib/queries";
 import {
@@ -21,7 +22,8 @@ import {
 } from "../lib/search";
 import { cn, splitPath } from "../lib/utils";
 import { useStore } from "../store";
-import type { ChangedFile, DiffPatch, LineRange, Thread, Worktree } from "../types";
+import type { ChangedFile, DiffPatch, LineRange, Side, Thread, Worktree } from "../types";
+import { CodeNavigation } from "./CodeNav";
 import { Composer, DetachedNote, ThreadCard } from "./Comments";
 import { FindBar } from "./FindBar";
 import { DiffBlocks, DiffCount, IconButton, StatusBadge, Tooltip, ViewedToggle } from "./ui";
@@ -34,93 +36,6 @@ type Note =
   | { kind: "draft"; key: string; range: LineRange };
 
 export type DiffViewHandle = CodeViewHandle<Note, undefined>;
-
-// Code and chrome share the app's fonts; syntax colours come from the Pierre themes.
-const viewStyle = {
-  "--diffs-font-family": '"JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace',
-  "--diffs-font-size": "12px",
-  "--diffs-line-height": "20px",
-  "--diffs-header-font-family": '"Inter Variable", ui-sans-serif, system-ui, sans-serif',
-} as CSSProperties;
-
-// Injected into each diff's shadow root. The theme sets its background on :host, so matching the
-// app surface needs to happen in here; the body then gets the card border under our header.
-const unsafeCSS = /* css */ `
-  :host {
-    --diffs-dark-bg: var(--bg);
-    --diffs-light-bg: var(--bg);
-
-    /* GitHub's diff colours (see --add-* / --del-* in styles.css): tinted lines, stronger line
-       numbers, strongest on the changed words. */
-    --diffs-addition-color-override: var(--add);
-    --diffs-deletion-color-override: var(--del);
-    --diffs-bg-addition-override: var(--add-bg);
-    --diffs-bg-addition-number-override: var(--add-gutter);
-    --diffs-bg-addition-emphasis-override: var(--add-word);
-    --diffs-bg-deletion-override: var(--del-bg);
-    --diffs-bg-deletion-number-override: var(--del-gutter);
-    --diffs-bg-deletion-emphasis-override: var(--del-word);
-    --diffs-fg-number-override: var(--fg-faint);
-    --diffs-fg-number-addition-override: var(--fg-muted);
-    --diffs-fg-number-deletion-override: var(--fg-muted);
-    --diffs-bg-separator-override: var(--hunk-bg);
-  }
-  /* The library blends those colours into the background again (to 20% or less); use them as
-     given, as GitHub does. Unchanged lines blend with the background itself, so stay plain. */
-  [data-diff] :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer]) {
-    --mix-light: 0%;
-    --mix-dark: 0%;
-  }
-  [data-separator] {
-    color: var(--hunk-fg);
-  }
-  [data-diffs-header] {
-    background: var(--bg);
-  }
-  [data-diff] {
-    border: 1px solid var(--border);
-    border-top: 0;
-    border-radius: 0 0 8px 8px;
-    overflow: clip;
-  }
-  /* The app chrome disables selection; code should be selectable. */
-  [data-code] {
-    user-select: text;
-    -webkit-user-select: text;
-    cursor: text;
-  }
-  /* Selected lines (for commenting) and the gutter "+" use the app accent, tinted lightly so
-     the code stays readable. */
-  :host {
-    --diffs-selection-base: var(--accent);
-    --diffs-bg-selection-override: color-mix(in oklab, var(--accent) 30%, var(--bg));
-    --diffs-bg-selection-number-override: color-mix(in oklab, var(--accent) 45%, var(--bg));
-  }
-  [data-utility-button] {
-    background-color: var(--accent);
-    color: var(--accent-fg);
-    border-radius: 5px;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
-  }
-  [data-utility-button]:hover {
-    filter: brightness(1.12);
-  }
-  [data-line-annotation] {
-    --diffs-annotation-bg: var(--bg);
-  }
-  /* ⌘F matches, painted with the CSS Custom Highlight API (see lib/search.ts). */
-  ::highlight(review-find) {
-    background-color: color-mix(in oklab, var(--mod) 38%, transparent);
-  }
-  ::highlight(review-find-current) {
-    background-color: var(--mod);
-    color: oklch(0.2 0.02 70);
-  }
-  /* Other occurrences of the selected text. */
-  ::highlight(review-occurrence) {
-    background-color: color-mix(in oklab, var(--accent) 30%, transparent);
-  }
-`;
 
 const matchKey = (m: SearchMatch) => `${m.path}\n${m.side}\n${m.line}\n${m.start}`;
 
@@ -167,6 +82,8 @@ export function DiffView({
   const viewed = useStore((s) => s.viewed[worktree.id]);
   const collapsedOverrides = useStore((s) => s.collapsed[worktree.id]);
   const setActivePath = useStore((s) => s.setActivePath);
+  const pinActivePath = useStore((s) => s.pinActivePath);
+  const setCollapsed = useStore((s) => s.setCollapsed);
   const startDraft = useStore((s) => s.startDraft);
   const discardDraft = useStore((s) => s.discardDraft);
   // Keys only: typing in a draft mustn't rebuild the items.
@@ -306,9 +223,16 @@ export function DiffView({
       document.removeEventListener("selectionchange", onSelectionChange);
     };
   }, []);
+  // After jumping to a name (see CodeNav.tsx), its occurrences stay highlighted until the next click.
+  const [jumpedTo, setJumpedTo] = useState("");
   const occurrences = useMemo(
-    () => (selected ? findMatches(searchable, selected, { caseSensitive: true }) : []),
-    [searchable, selected],
+    () =>
+      selected
+        ? findMatches(searchable, selected, { caseSensitive: true })
+        : jumpedTo
+          ? findMatches(searchable, jumpedTo, { caseSensitive: true, wholeWord: true })
+          : [],
+    [searchable, selected, jumpedTo],
   );
 
   // Highlights are painted on rendered lines, so repaint whenever the diff renders more of them.
@@ -351,6 +275,28 @@ export function DiffView({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [find.open, step]);
+
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const revealInDiff = useCallback(
+    (path: string, side: Side, line: number) => {
+      const scroll = () =>
+        localRef.current?.scrollTo({ type: "line", id: path, lineNumber: line, side, align: "center", behavior: "instant" });
+      pinActivePath(path);
+      if (itemsRef.current.find((item) => item.id === path)?.collapsed) {
+        setCollapsed(worktree.id, path, false);
+        // Once the expanded file has rendered.
+        requestAnimationFrame(() => requestAnimationFrame(scroll));
+      } else {
+        scroll();
+      }
+    },
+    [worktree.id, pinActivePath, setCollapsed],
+  );
+  const scrollDiff = useCallback(
+    (top: number) => localRef.current?.scrollTo({ type: "position", position: top, behavior: "instant" }),
+    [],
+  );
 
   const loadDiffFiles = useCallback(
     async (fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
@@ -466,8 +412,9 @@ export function DiffView({
     [orphans],
   );
 
+  const rootRef = useRef<HTMLDivElement>(null);
   return (
-    <div className="relative h-full">
+    <div ref={rootRef} className="relative h-full">
       {find.open && (
         <FindBar
           query={find.query}
@@ -491,6 +438,17 @@ export function DiffView({
         renderCodeViewHeader={renderViewHeader}
         className="h-full overflow-auto px-4"
         style={viewStyle}
+      />
+      <CodeNavigation
+        rootRef={rootRef}
+        scrollerRef={containerRef}
+        worktree={worktree}
+        diff={diff}
+        files={files}
+        fileDiffs={fileDiffs}
+        revealInDiff={revealInDiff}
+        scrollDiff={scrollDiff}
+        highlight={setJumpedTo}
       />
     </div>
   );

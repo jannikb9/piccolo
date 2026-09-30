@@ -1,5 +1,17 @@
 // Placeholder data used when the UI runs in a plain browser (`pnpm dev`) instead of the desktop app.
-import type { ChangedFile, DiffPatch, DiffScope, ExcerptRow, FileVersions, LineRange, Repo, Thread, WorktreeStats } from "./types";
+import type {
+  ChangedFile,
+  DiffPatch,
+  DiffScope,
+  ExcerptRow,
+  FileVersions,
+  LineRange,
+  Repo,
+  SymbolHit,
+  SymbolSearch,
+  Thread,
+  WorktreeStats,
+} from "./types";
 
 const minutesAgo = (m: number) => Date.now() - m * 60_000;
 
@@ -219,6 +231,74 @@ export function mockDiffPatch(worktreePath: string, scope: DiffScope): Promise<D
 
 export function mockFileVersions(): Promise<FileVersions> {
   return delay({ old: oldContents, new: newContents });
+}
+
+// --- Code navigation ---------------------------------------------------------------------------
+
+/** Files outside the diff that the changed code refers to. */
+const unchangedFiles: Record<string, string> = {
+  "src/auth/token-utils.ts": [
+    'import type { SessionToken } from "./types";',
+    "",
+    "/** Reads the signed session token from a cookie header. */",
+    "export function readSessionToken(cookie: string): SessionToken | null {",
+    '  const value = cookie.split("; ").find((part) => part.startsWith("sid="));',
+    "  if (!value) return null;",
+    '  const [sessionId, expiresAt] = value.slice(4).split(".");',
+    "  return { sessionId, expiresAt: Number(expiresAt) };",
+    "}",
+    "",
+    "/** Whether the token expires within `windowMs`. */",
+    "export function isExpiringSoon(token: SessionToken, windowMs: number): boolean {",
+    "  return token.expiresAt - Date.now() < windowMs;",
+    "}",
+    "",
+    "export async function refreshSession(token: SessionToken) {",
+    "  return { ...token, expiresAt: Date.now() + 60 * 60 * 1000 };",
+    "}",
+    ...Array.from({ length: 60 }, (_, i) => (i % 4 === 0 ? "" : `export const tokenHelper${i} = (value: number) => value + ${i};`)),
+    "",
+  ].join("\n"),
+  "src/auth/types.ts": [
+    "export interface SessionToken {",
+    "  sessionId: string;",
+    "  expiresAt: number;",
+    "}",
+    "",
+    "export type Session = { id: string; userId: string };",
+    "",
+  ].join("\n"),
+  "src/db/index.ts": ['import { createClient } from "./client";', "", "export const db = createClient();", ""].join("\n"),
+};
+
+function mockFiles(worktreePath: string, rev: string | null): Record<string, string> {
+  const out: Record<string, string> = { ...unchangedFiles };
+  const old = rev === "base";
+  for (const f of files[worktreePath] ?? []) {
+    if (f.binary || f.status === (old ? "added" : "deleted")) continue;
+    out[old ? (f.oldPath ?? f.path) : f.path] = old ? oldContents : newContents;
+  }
+  return out;
+}
+
+export function mockFindSymbol(worktreePath: string, rev: string | null, name: string, from: string): Promise<SymbolSearch> {
+  const ext = from.split(".").pop();
+  const word = new RegExp(`(?<![\\w$])${name.replace(/[$]/g, "\\$")}(?![\\w$])`);
+  const definition = new RegExp(`\\b(?:function|const|let|class|interface|type)\\s+${name}\\b|^\\s*${name}\\??:`);
+  const hits: SymbolHit[] = [];
+  for (const [path, contents] of Object.entries(mockFiles(worktreePath, rev)).sort(([a], [b]) => a.localeCompare(b))) {
+    if (path.split(".").pop()?.replace("tsx", "ts") !== ext?.replace("tsx", "ts")) continue;
+    contents.split("\n").forEach((text, i) => {
+      if (!word.test(text)) return;
+      const isImport = text.trimStart().startsWith("import");
+      hits.push({ path, line: i + 1, text: text.trim(), definition: !isImport && definition.test(text) });
+    });
+  }
+  return delay({ hits, truncated: false });
+}
+
+export function mockFileText(worktreePath: string, rev: string | null, file: string): Promise<string | null> {
+  return delay(mockFiles(worktreePath, rev)[file] ?? null);
 }
 
 // --- Review comments (kept in memory) ----------------------------------------------------------

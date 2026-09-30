@@ -3,6 +3,7 @@ mod comments;
 mod git;
 mod imports;
 mod menu;
+mod navigate;
 mod repos;
 mod watch;
 
@@ -44,6 +45,8 @@ pub fn run() {
             comments::reply_thread,
             comments::set_thread_resolved,
             comments::delete_comment,
+            navigate::find_symbol,
+            navigate::file_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

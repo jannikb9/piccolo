@@ -18,6 +18,8 @@ export type SearchMatch = {
   end: number;
 };
 
+const WORD_CHAR = /[\p{L}\p{N}_$]/u;
+
 /** Enough to keep a huge lockfile-sized match list from freezing the view. */
 export const MAX_MATCHES = 5000;
 
@@ -28,7 +30,7 @@ export const MAX_MATCHES = 5000;
 export function findMatches(
   files: { path: string; fileDiff: FileDiffMetadata }[],
   query: string,
-  { caseSensitive = false } = {},
+  { caseSensitive = false, wholeWord = false } = {},
 ): SearchMatch[] {
   const needle = caseSensitive ? query : query.toLowerCase();
   const matches: SearchMatch[] = [];
@@ -39,6 +41,7 @@ export function findMatches(
     const line = text.replace(/\r?\n$/, "");
     const haystack = caseSensitive ? line : line.toLowerCase();
     for (let i = haystack.indexOf(needle); i !== -1 && matches.length < MAX_MATCHES; i = haystack.indexOf(needle, i + needle.length)) {
+      if (wholeWord && (WORD_CHAR.test(line[i - 1] ?? "") || WORD_CHAR.test(line[i + needle.length] ?? ""))) continue;
       matches.push({ ...match, start: i, end: i + needle.length });
     }
   };
@@ -103,6 +106,17 @@ export function inScreenOrder(matches: SearchMatch[], layout: DiffLayout): Searc
 
 type RenderedLine = { el: HTMLElement; path: string; side: Side; line: number; position: Position };
 
+/** A rendered line of code (not a line number), inside a diff's shadow root. */
+export const LINE_SELECTOR = "[data-content] > [data-line]";
+
+/** Which version a rendered line belongs to; unchanged lines count as the new one. */
+export function lineSide(el: HTMLElement): Side {
+  const code = el.closest("code");
+  return code?.hasAttribute("data-deletions") || (code?.hasAttribute("data-unified") && el.dataset.lineType === "change-deletion")
+    ? "deletions"
+    : "additions";
+}
+
 /** Diff lines currently in the DOM (the diff is virtualized), with where they sit in the diff. */
 function renderedLines(container: HTMLElement, fileIndex: Map<string, number>, layout: DiffLayout): RenderedLine[] {
   const lines: RenderedLine[] = [];
@@ -111,12 +125,8 @@ function renderedLines(container: HTMLElement, fileIndex: Map<string, number>, l
     const root = host.shadowRoot;
     const file = path === undefined ? undefined : fileIndex.get(path);
     if (path === undefined || file === undefined || !root) continue;
-    for (const el of root.querySelectorAll<HTMLElement>("[data-content] > [data-line]")) {
-      const code = el.closest("code");
-      const side: Side =
-        code?.hasAttribute("data-deletions") || (code?.hasAttribute("data-unified") && el.dataset.lineType === "change-deletion")
-          ? "deletions"
-          : "additions";
+    for (const el of root.querySelectorAll<HTMLElement>(LINE_SELECTOR)) {
+      const side = lineSide(el);
       const [row, splitRow] = (el.dataset.lineIndex ?? "0,0").split(",").map(Number);
       const position: Position =
         layout === "split" ? [file, splitRow, side === "deletions" ? 0 : 1] : [file, row, 0];
@@ -226,7 +236,7 @@ export function clearMatches(layer: HighlightLayer) {
 }
 
 /** A range over characters `start`–`end` of an element's text, which is split across token spans. */
-function textRange(el: HTMLElement, start: number, end: number): Range | null {
+export function textRange(el: HTMLElement, start: number, end: number): Range | null {
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
   let offset = 0;
