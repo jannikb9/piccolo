@@ -10,7 +10,7 @@
   color-scheme: dark;
 
   --bg: #0d1117;
-  --bg-sidebar: #010409;
+  --bg-sidebar: #161b22;
   --bg-raised: #161b22;
   --bg-hover: #1f252d;
   --bg-active: #262c36;
@@ -163,11 +163,6 @@
     overflow: hidden;
   }
 
-  /* In the desktop app the window itself provides a native translucent sidebar material. */
-  html[data-tauri] body {
-    background: transparent;
-  }
-
   ::selection {
     background: var(--accent-soft);
   }
@@ -202,9 +197,6 @@
 
 @utility sidebar-surface {
   background: var(--bg-sidebar);
-  html[data-tauri] & {
-    background: transparent;
-  }
 }
 
 @utility selectable {
