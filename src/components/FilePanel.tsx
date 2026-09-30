@@ -91,9 +91,10 @@ function SectionGroup({
         )}
       >
         <ChevronRight className={cn("size-3 shrink-0 transition-transform duration-150", !collapsed && "rotate-90")} />
-        {section.label}
-        <span className="tabular rounded-full bg-bg-hover px-1.5 font-medium tracking-normal">{section.files.length}</span>
-        <DiffCount additions={additions} deletions={deletions} className="ml-auto font-normal tracking-normal normal-case" />
+        {/* In a narrow panel the label gives way, so the counts stay visible. */}
+        <span className="min-w-0 truncate">{section.label}</span>
+        <span className="tabular shrink-0 rounded-full bg-bg-hover px-1.5 font-medium tracking-normal">{section.files.length}</span>
+        <DiffCount additions={additions} deletions={deletions} className="ml-auto shrink-0 font-normal tracking-normal normal-case" />
       </button>
       {!collapsed && <TreeList nodes={section.tree} depth={0} {...rowProps} />}
     </section>
