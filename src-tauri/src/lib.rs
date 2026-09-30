@@ -37,6 +37,7 @@ pub fn run() {
             repos::worktree_stats,
             repos::changed_files,
             repos::diff_patch,
+            repos::remove_worktree,
             repos::file_versions,
             comments::list_threads,
             comments::add_thread,

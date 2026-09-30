@@ -215,6 +215,68 @@ pub fn merge_base(wt: &Path, base: &str) -> Result<String> {
     Ok(git(wt, &["merge-base", base, "HEAD"])?.trim().to_string())
 }
 
+/// Whether HEAD's changes are already in `base`, however they got there: merged, squash-merged or
+/// rebased. Merging HEAD into `base` would then leave `base` as it is. Changesets don't count:
+/// releasing consumes them on `base` after the merge, so merging again would bring them back.
+pub fn is_merged(wt: &Path, base: &str) -> bool {
+    // Exits non-zero when the merge conflicts, which means the branch has something new.
+    let Ok(out) = git(wt, &["merge-tree", "--write-tree", base, "HEAD"]) else { return false };
+    let tree = out.lines().next().unwrap_or_default().trim();
+    git(wt, &["diff", "--quiet", base, tree, "--", ".", ":(exclude).changeset"]).is_ok()
+}
+
+/// Deletes a linked worktree. `force` also discards uncommitted changes; `repo` is any other
+/// worktree of the same repository.
+///
+/// Uses worktrunk's `wt remove` when it's installed: it moves the folder aside and deletes it in
+/// the background (a checkout with `node_modules` takes a while to delete), and deletes the branch
+/// too once it's merged. Otherwise `git worktree remove`, which deletes before returning and
+/// keeps the branch.
+pub fn remove_worktree(repo: &Path, path: &str, force: bool) -> Result<()> {
+    let Some(wt) = worktrunk() else { return git_remove_worktree(repo, path, force) };
+    let mut args = vec!["-C", path_str(repo)?, "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(path);
+    let out = Command::new(wt)
+        .args(&args)
+        // Apps started from the Dock get a minimal PATH; hooks may need the user's tools.
+        .env("PATH", format!("/opt/homebrew/bin:/usr/local/bin:{}", std::env::var("PATH").unwrap_or_default()))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("failed to run wt: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if stderr.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { stderr });
+    }
+    Ok(())
+}
+
+/// worktrunk's `wt`, looked up where package managers install it: apps started from the Dock
+/// don't get the user's shell PATH.
+fn worktrunk() -> Option<PathBuf> {
+    let home = dirs::home_dir().unwrap_or_default();
+    ["/opt/homebrew/bin/wt", "/usr/local/bin/wt"]
+        .map(PathBuf::from)
+        .into_iter()
+        .chain([home.join(".cargo/bin/wt"), home.join(".local/bin/wt")])
+        .find(|p| p.is_file())
+}
+
+fn path_str(path: &Path) -> Result<&str> {
+    path.to_str().ok_or_else(|| format!("not a UTF-8 path: {}", path.display()))
+}
+
+fn git_remove_worktree(repo: &Path, path: &str, force: bool) -> Result<()> {
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(path);
+    git(repo, &args).map(drop)
+}
+
 /// Commits (ahead, behind) of HEAD relative to `base`.
 pub fn ahead_behind(wt: &Path, base: &str) -> Result<(u32, u32)> {
     let out = git(wt, &["rev-list", "--left-right", "--count", &format!("{base}...HEAD")])?;
@@ -830,6 +892,57 @@ mod tests {
         assert!(files.is_empty(), "{files:?}");
         let files = changed_files(&repo, Some("main"), Scope::All, DiffOptions::default()).unwrap();
         assert_eq!(files.len(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A squash merge, followed by a release that consumes the branch's changeset.
+    #[test]
+    fn detects_squash_merges_and_removes_worktrees() {
+        let root = std::env::temp_dir().join(format!("review-git-merged-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        let wt = root.join("feat");
+        fs::create_dir_all(&repo).unwrap();
+        let run = |cwd: &Path, args: &[&str]| git(cwd, args).unwrap();
+        run(&repo, &["init", "-q", "-b", "main"]);
+        run(&repo, &["config", "user.email", "t@example.com"]);
+        run(&repo, &["config", "user.name", "Test"]);
+        fs::write(repo.join("a.txt"), "one\n").unwrap();
+        run(&repo, &["add", "."]);
+        run(&repo, &["commit", "-q", "-m", "init"]);
+        run(&repo, &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()]);
+
+        // Two commits on the branch, one adding a changeset.
+        fs::write(wt.join("a.txt"), "one\ntwo\n").unwrap();
+        run(&wt, &["commit", "-qam", "two"]);
+        fs::create_dir_all(wt.join(".changeset")).unwrap();
+        fs::write(wt.join(".changeset/two.md"), "patch\n").unwrap();
+        run(&wt, &["add", "."]);
+        run(&wt, &["commit", "-qm", "changeset"]);
+        // Meanwhile on main.
+        fs::write(repo.join("b.txt"), "b\n").unwrap();
+        run(&repo, &["add", "."]);
+        run(&repo, &["commit", "-qm", "other"]);
+        assert!(!is_merged(&wt, "main"));
+
+        // Squash-merged, then released.
+        run(&repo, &["merge", "-q", "--squash", "feat"]);
+        run(&repo, &["commit", "-qm", "two (#1)"]);
+        run(&repo, &["rm", "-q", ".changeset/two.md"]);
+        run(&repo, &["commit", "-qm", "Update versions"]);
+        assert!(is_merged(&wt, "main"));
+
+        // New work on the branch makes it unmerged again.
+        fs::write(wt.join("a.txt"), "one\ntwo\nthree\n").unwrap();
+        run(&wt, &["commit", "-qam", "three"]);
+        assert!(!is_merged(&wt, "main"));
+
+        // Uncommitted changes need `force`.
+        fs::write(wt.join("a.txt"), "dirty\n").unwrap();
+        assert!(git_remove_worktree(&repo, wt.to_str().unwrap(), false).is_err());
+        git_remove_worktree(&repo, wt.to_str().unwrap(), true).unwrap();
+        assert!(!wt.exists());
+        assert_eq!(list_worktrees(&repo).unwrap().len(), 1);
         let _ = fs::remove_dir_all(&root);
     }
 

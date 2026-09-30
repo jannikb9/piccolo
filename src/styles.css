@@ -44,6 +44,9 @@
   --del-word: rgb(248 81 73 / 0.4);
   --mod: #d29922;
   --ren: #ab7df8;
+  /* GitHub's "merged" purple. */
+  --merged: #ab7df8;
+  --merged-soft: rgb(171 125 248 / 0.15);
 
   --hunk-bg: rgb(56 139 253 / 0.1);
   --hunk-fg: #9198a1;
@@ -89,6 +92,8 @@
     --del-word: rgb(255 129 130 / 0.4);
     --mod: #9a6700;
     --ren: #8250df;
+    --merged: #8250df;
+    --merged-soft: rgb(130 80 223 / 0.1);
 
     --hunk-bg: #ddf4ff;
     --hunk-fg: #59636e;
@@ -128,6 +133,8 @@
   --color-del-gutter: var(--del-gutter);
   --color-mod: var(--mod);
   --color-ren: var(--ren);
+  --color-merged: var(--merged);
+  --color-merged-soft: var(--merged-soft);
   --color-hunk-bg: var(--hunk-bg);
   --color-hunk-fg: var(--hunk-fg);
   --color-ring: var(--ring);

@@ -74,6 +74,8 @@ pub struct WorktreeStats {
     behind: u32,
     additions: u32,
     deletions: u32,
+    /// Its commits are in the base branch, so the worktree can go.
+    merged: bool,
 }
 
 fn folder_name(path: &str) -> String {
@@ -207,9 +209,12 @@ pub async fn worktree_stats(path: String, base: Option<String>) -> Result<Worktr
             None => (0, 0),
         };
         let files = git::changed_files(&wt, base.as_deref(), Scope::All, DiffOptions::default())?;
+        // A branch without commits of its own is new, not merged.
+        let merged = ahead > 0 && base.as_deref().is_some_and(|base| git::is_merged(&wt, base));
         Ok(WorktreeStats {
             ahead,
             behind,
+            merged,
             additions: files.iter().map(|f| f.additions).sum(),
             deletions: files.iter().map(|f| f.deletions).sum(),
         })
@@ -230,6 +235,11 @@ pub async fn changed_files(
 #[tauri::command]
 pub async fn diff_patch(path: String, base: Option<String>, scope: Scope, options: DiffOptions) -> Result<DiffPatch> {
     blocking(move || git::diff_patch(Path::new(&path), base.as_deref(), scope, options)).await
+}
+
+#[tauri::command]
+pub async fn remove_worktree(repo: String, path: String, force: bool) -> Result<()> {
+    blocking(move || git::remove_worktree(Path::new(&repo), &path, force)).await
 }
 
 /// Full contents of one file on both sides of a diff, for expanding unchanged lines.

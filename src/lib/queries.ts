@@ -2,7 +2,7 @@ import { focusManager, QueryClient, useMutation, useQuery, useQueryClient } from
 import { useEffect } from "react";
 import { useStore } from "../store";
 import type { DiffOptions, DiffScope, LineRange, Repo, Worktree } from "../types";
-import { api, onCommentsChanged, onRepoChanged, onWindowFocusChanged, pickRepoFolder } from "./api";
+import { api, confirmAction, onCommentsChanged, onRepoChanged, onWindowFocusChanged, pickRepoFolder, showError } from "./api";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -126,6 +126,31 @@ export function useRemoveRepo() {
   return useMutation({
     mutationFn: api.removeRepo,
     onSuccess: (_, id) => client.setQueryData<Repo[]>(keys.repos, (repos) => repos?.filter((r) => r.id !== id)),
+  });
+}
+
+/**
+ * Deletes a worktree's folder (keeping its branch) and selects the repository's main worktree.
+ * Asks first, unless the branch is merged and nothing uncommitted would be lost.
+ */
+export function useDeleteWorktree() {
+  const client = useQueryClient();
+  const selectWorktree = useStore((s) => s.selectWorktree);
+  return useMutation({
+    mutationFn: async ({ worktree, merged }: { worktree: Worktree; merged: boolean }) => {
+      if (!merged || worktree.dirty) {
+        const confirmed = await confirmAction(`Are you sure you want to delete ${worktree.name}?`, "", "Delete");
+        if (!confirmed) return false;
+      }
+      await api.removeWorktree(worktree.repoId, worktree.path, worktree.dirty);
+      return true;
+    },
+    onSuccess: async (deleted, { worktree }) => {
+      if (!deleted) return;
+      selectWorktree(worktree.repoId);
+      await client.invalidateQueries({ queryKey: keys.repos });
+    },
+    onError: (error) => showError("Couldn't delete the worktree", String(error)),
   });
 }
 

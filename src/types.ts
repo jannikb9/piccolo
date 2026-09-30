@@ -34,6 +34,8 @@ export type WorktreeStats = {
   behind: number;
   additions: number;
   deletions: number;
+  /** Its commits are in the base branch (merged, squash-merged or rebased), so the worktree can go. */
+  merged: boolean;
 };
 
 export type FileStatus = "added" | "modified" | "deleted" | "renamed";

@@ -1,8 +1,20 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, Columns2, Copy, FolderGit2, GitBranch, GitCompareArrows, Import, Pilcrow, Rows2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Columns2,
+  Copy,
+  FolderGit2,
+  GitBranch,
+  GitCompareArrows,
+  GitMerge,
+  Import,
+  Pilcrow,
+  Rows2,
+} from "lucide-react";
 import type { ReactNode, Ref } from "react";
-import { useAddRepo } from "../lib/queries";
-import { totals } from "../lib/utils";
+import { useAddRepo, useWorktreeStats } from "../lib/queries";
+import { cn, totals } from "../lib/utils";
 import { useStore } from "../store";
 import type { ChangedFile, DiffPatch, Repo, Thread, Worktree } from "../types";
 import { DiffView, type DiffViewHandle } from "./DiffView";
@@ -91,6 +103,7 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
   const toggleHideImports = useStore((s) => s.toggleHideImports);
   const { additions, deletions } = totals(files);
   const branch = worktree.branch ?? worktree.head;
+  const merged = !!useWorktreeStats(worktree, repo.defaultBranch).data?.merged;
 
   return (
     <header
@@ -98,8 +111,19 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
       className="flex h-13 shrink-0 items-center gap-3 border-b border-border-subtle px-4"
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        <span className="group flex h-6 min-w-24 items-center gap-1.5 rounded-md bg-bg-hover pr-1 pl-2 text-[12.5px] font-medium">
-          <GitBranch className="size-3.5 shrink-0 text-fg-subtle" />
+        <span
+          className={cn(
+            "group flex h-6 min-w-24 items-center gap-1.5 rounded-md pr-1 pl-2 text-[12.5px] font-medium",
+            merged ? "bg-merged-soft text-merged" : "bg-bg-hover",
+          )}
+        >
+          {merged ? (
+            <Tooltip label={`Merged into ${repo.defaultBranch}`}>
+              <GitMerge className="size-3.5 shrink-0" />
+            </Tooltip>
+          ) : (
+            <GitBranch className="size-3.5 shrink-0 text-fg-subtle" />
+          )}
           <span className="selectable truncate">{branch}</span>
           <IconButton
             label="Copy branch name"

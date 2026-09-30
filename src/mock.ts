@@ -86,6 +86,9 @@ const aheadBehind: Record<string, [number, number]> = {
   "~/projects/spoke-app/nav": [1, 12],
 };
 
+/** Worktrees whose branch was merged into the base branch. */
+const merged = new Set(["~/projects/spoke-app/nav"]);
+
 const delay = <T>(value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), 150));
 
 const inScope = (worktreePath: string, scope: DiffScope) =>
@@ -103,6 +106,7 @@ export function mockWorktreeStats(worktreePath: string): Promise<WorktreeStats> 
     behind,
     additions: all.reduce((n, f) => n + f.additions, 0),
     deletions: all.reduce((n, f) => n + f.deletions, 0),
+    merged: merged.has(worktreePath),
   });
 }
 

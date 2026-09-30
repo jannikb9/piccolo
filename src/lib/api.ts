@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
+import { ask, message, open } from "@tauri-apps/plugin-dialog";
 import {
   mockAddThread,
   mockChangedFiles,
@@ -54,6 +54,10 @@ export const api = {
   listThreads: (path: string, base: string | null, scope: DiffScope): Promise<Thread[]> =>
     isTauri ? invoke("list_threads", { path, base, scope }) : mockThreads(path),
 
+  /** Deletes a linked worktree's folder; its branch stays. `force` discards uncommitted changes. */
+  removeWorktree: (repo: string, path: string, force: boolean): Promise<void> =>
+    isTauri ? invoke("remove_worktree", { repo, path, force }) : Promise.resolve(),
+
   /** Resolves to the new thread's id. */
   addThread: (args: {
     path: string;
@@ -79,6 +83,17 @@ export async function pickRepoFolder(): Promise<string | null> {
   if (!isTauri) return null;
   const path = await open({ directory: true, title: "Add repository" });
   return typeof path === "string" ? path : null;
+}
+
+/** A native yes/no alert: `title` is its headline, `text` (optional) the detail below it. */
+export function confirmAction(title: string, text: string, okLabel: string): Promise<boolean> {
+  if (!isTauri) return Promise.resolve(window.confirm(text ? `${title}\n\n${text}` : title));
+  return ask(text, { title, kind: "warning", okLabel, cancelLabel: "Cancel" });
+}
+
+export async function showError(title: string, text: string): Promise<void> {
+  if (!isTauri) return window.alert(`${title}\n\n${text}`);
+  await message(text, { title, kind: "error" });
 }
 
 /** Fires when worktrees are added/removed or a worktree switches branch. */
