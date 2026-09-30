@@ -4,12 +4,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open } from "@tauri-apps/plugin-dialog";
 import {
   mockAddThread,
+  mockAddWorktree,
   mockChangedFiles,
   mockDeleteComment,
   mockDiffPatch,
   mockFileText,
   mockFileVersions,
   mockFindSymbol,
+  mockRemoteBranches,
   mockReorderRepos,
   mockReply,
   mockRepos,
@@ -24,6 +26,7 @@ import type {
   DiffScope,
   FileVersions,
   LineRange,
+  RemoteBranch,
   Repo,
   SymbolSearch,
   Thread,
@@ -66,6 +69,18 @@ export const api = {
   /** Comment threads on the worktree's branch, positioned for this diff. */
   listThreads: (path: string, base: string | null, scope: DiffScope): Promise<Thread[]> =>
     isTauri ? invoke("list_threads", { path, base, scope }) : mockThreads(path),
+
+  /** Remote branches as of the last fetch, most recently committed first. */
+  remoteBranches: (repo: string): Promise<RemoteBranch[]> =>
+    isTauri ? invoke("remote_branches", { repo }) : mockRemoteBranches(),
+
+  /** `git fetch` from every remote. */
+  fetchRemotes: (repo: string): Promise<void> =>
+    isTauri ? invoke("fetch_remotes", { repo }) : new Promise((resolve) => setTimeout(resolve, 1200)),
+
+  /** Checks out a branch in a new worktree (or finds the one it's in); resolves to the worktree's id. */
+  addWorktree: (repo: string, branch: RemoteBranch): Promise<string> =>
+    isTauri ? invoke("add_worktree", { repo, branch: branch.name, remoteRef: branch.remoteRef }) : mockAddWorktree(repo, branch.name),
 
   /** Deletes a linked worktree's folder; its branch stays. `force` discards uncommitted changes. */
   removeWorktree: (repo: string, path: string, force: boolean): Promise<void> =>

@@ -10,6 +10,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useState } from "react";
 import {
   AlertTriangle,
   ChevronRight,
@@ -17,6 +18,7 @@ import {
   EllipsisVertical,
   FolderGit2,
   GitBranch,
+  GitBranchPlus,
   GitMerge,
   PanelLeftClose,
   PanelLeftOpen,
@@ -36,6 +38,7 @@ import {
 import { cn, timeAgo } from "../lib/utils";
 import { sortWorktrees, useDiffOptions, useStore } from "../store";
 import type { Repo, Worktree } from "../types";
+import { BranchPicker } from "./BranchPicker";
 import { ContextMenu, DiffCount, DropdownMenu, IconButton, Skeleton, Tooltip, type MenuItem } from "./ui";
 
 /** Shows or hides the worktree sidebar. */
@@ -145,6 +148,7 @@ function RepoSection({ repo, selectedId, shortcuts }: { repo: Repo; selectedId: 
   const collapsed = useStore((s) => !!s.collapsedRepos[repo.id]);
   const toggleRepo = useStore((s) => s.toggleRepo);
   const removeRepo = useRemoveRepo();
+  const [pickingBranch, setPickingBranch] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: repo.id });
 
   return (
@@ -172,6 +176,15 @@ function RepoSection({ repo, selectedId, shortcuts }: { repo: Repo; selectedId: 
             />
           </button>
         </Tooltip>
+        {!repo.error && (
+          <IconButton
+            label="New worktree from branch"
+            className="size-5 opacity-0 group-hover:opacity-100"
+            onClick={() => setPickingBranch(true)}
+          >
+            <GitBranchPlus className="size-3" />
+          </IconButton>
+        )}
         <IconButton
           label="Remove from sidebar"
           className="size-5 opacity-0 group-hover:opacity-100"
@@ -203,6 +216,7 @@ function RepoSection({ repo, selectedId, shortcuts }: { repo: Repo; selectedId: 
           </ul>
         )
       )}
+      <BranchPicker repo={repo} open={pickingBranch} onOpenChange={setPickingBranch} />
     </section>
   );
 }

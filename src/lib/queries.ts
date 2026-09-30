@@ -1,7 +1,7 @@
 import { focusManager, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useStore } from "../store";
-import type { DiffOptions, DiffScope, LineRange, Repo, Worktree } from "../types";
+import type { DiffOptions, DiffScope, LineRange, RemoteBranch, Repo, Worktree } from "../types";
 import { api, confirmAction, onCommentsChanged, onRepoChanged, onWindowFocusChanged, pickRepoFolder, showError } from "./api";
 
 export const queryClient = new QueryClient({
@@ -26,6 +26,8 @@ export const keys = {
     ["threads", path, base, scope, revision] as const,
   symbol: (path: string, rev: string | null, name: string, from: string) => ["symbol", path, rev, name, from] as const,
   fileText: (path: string, rev: string | null, file: string) => ["file-text", path, rev, file] as const,
+  branches: (repoId: string) => ["branches", repoId] as const,
+  fetch: (repoId: string) => ["fetch", repoId] as const,
 };
 
 /** Keeps showing the previous result while switching scope or diff options, but never another worktree's. */
@@ -169,6 +171,41 @@ export function useDeleteWorktree() {
       await client.invalidateQueries({ queryKey: keys.repos });
     },
     onError: (error) => showError("Couldn't delete the worktree", String(error)),
+  });
+}
+
+/**
+ * A repository's remote branches: what's known locally right away, then again once `git fetch`
+ * is done. `fetch.error` is set when fetching failed (e.g. offline); the list still shows.
+ */
+export function useRemoteBranches(repoId: string) {
+  const client = useQueryClient();
+  const branches = useQuery({ queryKey: keys.branches(repoId), queryFn: () => api.remoteBranches(repoId) });
+  const fetch = useQuery({
+    queryKey: keys.fetch(repoId),
+    queryFn: async () => {
+      await api.fetchRemotes(repoId);
+      await client.invalidateQueries({ queryKey: keys.branches(repoId) });
+      return true;
+    },
+    // Opening the picker again within a minute doesn't fetch again.
+    staleTime: 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  return { branches, fetch };
+}
+
+/** Checks out a branch in a new worktree and selects it. */
+export function useAddWorktree(repoId: string) {
+  const client = useQueryClient();
+  const selectWorktree = useStore((s) => s.selectWorktree);
+  return useMutation({
+    mutationFn: (branch: RemoteBranch) => api.addWorktree(repoId, branch),
+    onSuccess: async (path) => {
+      await client.invalidateQueries({ queryKey: keys.repos });
+      selectWorktree(path);
+    },
   });
 }
 

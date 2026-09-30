@@ -81,6 +81,113 @@ fn parse_worktree_list(out: &str) -> Vec<WorktreeEntry> {
     entries
 }
 
+/// A branch on a remote, to check out in a new worktree.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteBranch {
+    /// The local branch name, e.g. `feat/x` for `origin/feat/x`.
+    pub name: String,
+    /// `origin/feat/x`.
+    pub remote_ref: String,
+    pub author: String,
+    pub subject: String,
+    /// Commit date of the tip, epoch ms.
+    pub updated_at: u64,
+}
+
+/// Remote branches as of the last fetch, most recently committed first. A branch on several
+/// remotes is listed once, from the remote where it moved last.
+pub fn remote_branches(repo: &Path) -> Result<Vec<RemoteBranch>> {
+    let format = "%(refname:lstrip=2)%00%(symref)%00%(authorname)%00%(committerdate:unix)%00%(subject)";
+    let out = git(repo, &["for-each-ref", "--sort=-committerdate", &format!("--format={format}"), "refs/remotes"])?;
+    Ok(parse_remote_branches(&out))
+}
+
+fn parse_remote_branches(out: &str) -> Vec<RemoteBranch> {
+    let mut seen = std::collections::HashSet::new();
+    out.lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\0');
+            let remote_ref = fields.next()?;
+            // `origin/HEAD` points at the default branch.
+            if !fields.next()?.is_empty() {
+                return None;
+            }
+            let (_, name) = remote_ref.split_once('/')?;
+            Some(RemoteBranch {
+                name: name.to_string(),
+                remote_ref: remote_ref.to_string(),
+                author: fields.next()?.to_string(),
+                updated_at: fields.next()?.parse::<u64>().ok()? * 1000,
+                subject: fields.next().unwrap_or_default().to_string(),
+            })
+        })
+        .filter(|b| seen.insert(b.name.clone()))
+        .collect()
+}
+
+/// Updates the remote branches from every remote, dropping ones deleted there.
+pub fn fetch(repo: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .current_dir(repo)
+        .args(["fetch", "--all", "--prune", "--quiet"])
+        // Credential helpers (e.g. `gh`) live on the user's PATH; never wait for a password prompt.
+        .env("PATH", user_path())
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// Checks out `branch` in a new worktree (or finds the one it's already checked out in) and
+/// returns the worktree's path. A branch that only exists on a remote gets a local branch
+/// tracking `remote_ref`.
+///
+/// Uses worktrunk's `wt switch` when it's installed, so the worktree lands where the user's other
+/// worktrees do and the project's approved hooks run (e.g. installing dependencies). Hooks that
+/// still need approval are skipped: the app can't ask. Without worktrunk, `git worktree add` into
+/// `<repo>.<branch>` next to the repository, like worktrunk's default.
+pub fn add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<String> {
+    match worktrunk() {
+        Some(wt) => {
+            let switch = |extra: &[&str]| run_worktrunk(&wt, repo, &[&["switch", branch, "--no-cd"], extra].concat());
+            if let Err(e) = switch(&[]) {
+                if !e.contains("approval") {
+                    return Err(e);
+                }
+                switch(&["--no-hooks"])?;
+            }
+        }
+        None => git_add_worktree(repo, branch, remote_ref)?,
+    }
+    // Paths as `git worktree list` spells them, which the sidebar uses as ids.
+    list_worktrees(repo)?
+        .into_iter()
+        .find(|e| e.branch.as_deref() == Some(branch))
+        .map(|e| e.path)
+        .ok_or_else(|| format!("{branch} wasn't checked out"))
+}
+
+fn git_add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<()> {
+    if list_worktrees(repo)?.iter().any(|e| e.branch.as_deref() == Some(branch)) {
+        return Ok(());
+    }
+    let name = repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let path = repo.with_file_name(format!("{name}.{}", branch.replace('/', "-")));
+    let path = path_str(&path)?;
+    let local = git(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok();
+    if local {
+        git(repo, &["worktree", "add", "--quiet", path, branch])?;
+    } else {
+        git(repo, &["worktree", "add", "--quiet", "--track", "-b", branch, path, remote_ref])?;
+    }
+    Ok(())
+}
+
 /// The branch reviews are compared against: the remote's default branch if known, else
 /// `main`/`master`. Prefers `origin/<name>` since local branches go stale unless pulled, which
 /// would show teammates' merged commits as part of the review; falls back to the local branch.
@@ -234,15 +341,19 @@ pub fn is_merged(wt: &Path, base: &str) -> bool {
 /// keeps the branch.
 pub fn remove_worktree(repo: &Path, path: &str, force: bool) -> Result<()> {
     let Some(wt) = worktrunk() else { return git_remove_worktree(repo, path, force) };
-    let mut args = vec!["-C", path_str(repo)?, "remove"];
+    let mut args = vec!["remove"];
     if force {
         args.push("--force");
     }
     args.push(path);
+    run_worktrunk(&wt, repo, &args)
+}
+
+fn run_worktrunk(wt: &Path, repo: &Path, args: &[&str]) -> Result<()> {
     let out = Command::new(wt)
-        .args(&args)
-        // Apps started from the Dock get a minimal PATH; hooks may need the user's tools.
-        .env("PATH", format!("/opt/homebrew/bin:/usr/local/bin:{}", std::env::var("PATH").unwrap_or_default()))
+        .args(["-C", path_str(repo)?])
+        .args(args)
+        .env("PATH", user_path())
         .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| format!("failed to run wt: {e}"))?;
@@ -251,6 +362,11 @@ pub fn remove_worktree(repo: &Path, path: &str, force: bool) -> Result<()> {
         return Err(if stderr.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { stderr });
     }
     Ok(())
+}
+
+/// Apps started from the Dock get a minimal PATH; hooks and credential helpers need the user's tools.
+fn user_path() -> String {
+    format!("/opt/homebrew/bin:/usr/local/bin:{}", std::env::var("PATH").unwrap_or_default())
 }
 
 /// worktrunk's `wt`, looked up where package managers install it: apps started from the Dock
@@ -750,6 +866,55 @@ mod tests {
         assert_eq!(list[2].branch, None);
         assert_eq!(list[2].head, "ccc");
         assert!(list[3].prunable);
+    }
+
+    #[test]
+    fn parses_remote_branches() {
+        let out = "origin/HEAD\0refs/remotes/origin/main\0Ann\01700000000\0Release\n\
+                   origin/feat/x\0\0Bob\01700000100\0Add x\n\
+                   upstream/feat/x\0\0Bob\01600000000\0Older x\n\
+                   upstream/main\0\0Ann\01600000000\0\n";
+        let branches = parse_remote_branches(out);
+        let names: Vec<_> = branches.iter().map(|b| b.remote_ref.as_str()).collect();
+        assert_eq!(names, ["origin/feat/x", "upstream/main"]);
+        assert_eq!(branches[0].name, "feat/x");
+        assert_eq!(branches[0].author, "Bob");
+        assert_eq!(branches[0].subject, "Add x");
+        assert_eq!(branches[0].updated_at, 1_700_000_100_000);
+    }
+
+    /// Without worktrunk: a remote-only branch gets a tracking branch in a sibling folder.
+    #[test]
+    fn adds_worktrees_for_remote_branches() {
+        let root = std::env::temp_dir().join(format!("review-git-add-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let upstream = root.join("upstream");
+        fs::create_dir_all(&upstream).unwrap();
+        let run = |cwd: &Path, args: &[&str]| git(cwd, args).unwrap();
+        run(&upstream, &["init", "-q", "-b", "main"]);
+        run(&upstream, &["config", "user.email", "t@example.com"]);
+        run(&upstream, &["config", "user.name", "Test"]);
+        run(&upstream, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        run(&upstream, &["checkout", "-q", "-b", "feat/rows"]);
+        run(&upstream, &["commit", "-q", "--allow-empty", "-m", "Make rows clickable"]);
+        run(&upstream, &["checkout", "-q", "main"]);
+        run(&root, &["clone", "-q", "upstream", "app"]);
+        let repo = root.join("app");
+
+        let branches = remote_branches(&repo).unwrap();
+        let rows = branches.iter().find(|b| b.name == "feat/rows").unwrap();
+        assert_eq!(rows.remote_ref, "origin/feat/rows");
+        assert_eq!(rows.subject, "Make rows clickable");
+        assert!(!branches.iter().any(|b| b.name == "HEAD"));
+
+        git_add_worktree(&repo, "feat/rows", "origin/feat/rows").unwrap();
+        let wt = root.join("app.feat-rows");
+        assert!(wt.join(".git").exists());
+        assert_eq!(run(&wt, &["rev-parse", "--abbrev-ref", "@{upstream}"]).trim(), "origin/feat/rows");
+        // Already checked out: nothing to do.
+        git_add_worktree(&repo, "feat/rows", "origin/feat/rows").unwrap();
+        assert_eq!(list_worktrees(&repo).unwrap().len(), 2);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! The user's list of repositories and the Tauri commands the UI uses to read them.
 
-use crate::git::{self, ChangedFile, DiffOptions, DiffPatch, Result, Scope};
+use crate::git::{self, ChangedFile, DiffOptions, DiffPatch, RemoteBranch, Result, Scope};
 use crate::watch::Watchers;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -235,6 +235,23 @@ pub async fn changed_files(
 #[tauri::command]
 pub async fn diff_patch(path: String, base: Option<String>, scope: Scope, options: DiffOptions) -> Result<DiffPatch> {
     blocking(move || git::diff_patch(Path::new(&path), base.as_deref(), scope, options)).await
+}
+
+/// Remote branches as of the last fetch, most recently committed first.
+#[tauri::command]
+pub async fn remote_branches(repo: String) -> Result<Vec<RemoteBranch>> {
+    blocking(move || git::remote_branches(Path::new(&repo))).await
+}
+
+#[tauri::command]
+pub async fn fetch_remotes(repo: String) -> Result<()> {
+    blocking(move || git::fetch(Path::new(&repo))).await
+}
+
+/// Checks out a branch in a new worktree; resolves to the worktree's path, which is its id.
+#[tauri::command]
+pub async fn add_worktree(repo: String, branch: String, remote_ref: String) -> Result<String> {
+    blocking(move || git::add_worktree(Path::new(&repo), &branch, &remote_ref)).await
 }
 
 #[tauri::command]

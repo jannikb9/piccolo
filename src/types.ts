@@ -124,3 +124,14 @@ export type SymbolSearch = {
   /** Some references were left out. */
   truncated: boolean;
 };
+
+/** A branch on a remote, to check out in a new worktree. */
+export type RemoteBranch = {
+  /** The local branch name, e.g. `feat/x` for `origin/feat/x`. */
+  name: string;
+  remoteRef: string;
+  author: string;
+  subject: string;
+  /** Commit date of the tip, epoch ms. */
+  updatedAt: number;
+};

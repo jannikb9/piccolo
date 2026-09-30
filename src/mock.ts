@@ -6,6 +6,7 @@ import type {
   ExcerptRow,
   FileVersions,
   LineRange,
+  RemoteBranch,
   Repo,
   SymbolHit,
   SymbolSearch,
@@ -429,4 +430,36 @@ export function mockDeleteComment(messageId: number): Promise<void> {
 export function mockReorderRepos(ids: string[]): Promise<void> {
   mockRepos.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
   return Promise.resolve();
+}
+
+const mockBranches = [
+  ["manage-drivers-row-click-targets", "Priya Raman", "Make the whole row clickable in Manage drivers", 25],
+  ["feat/auth-session-refresh", "Jannik Bertram", "Refresh sessions before they expire", 60 * 2],
+  ["fix/route-eta-rounding", "Sam Okafor", "Round ETAs to the nearest minute", 60 * 7],
+  ["agent/refactor-billing-webhooks", "Claude", "Split webhook handlers by event type", 60 * 20],
+  ["fix/nav-overflow", "Jannik Bertram", "Stop the nav from overflowing on small screens", 60 * 30],
+  ["chore/bump-vite", "renovate[bot]", "Update dependency vite to v7.2.1", 60 * 50],
+  ["feat/stop-photos", "Lena Fischer", "Attach photos to stops", 60 * 24 * 4],
+  ["spike/offline-mode", "Sam Okafor", "Cache the route for offline use", 60 * 24 * 40],
+] as const;
+
+export function mockRemoteBranches(): Promise<RemoteBranch[]> {
+  return delay(
+    mockBranches.map(([name, author, subject, minutes]) => ({
+      name,
+      remoteRef: `origin/${name}`,
+      author,
+      subject,
+      updatedAt: minutesAgo(minutes),
+    })),
+  );
+}
+
+export function mockAddWorktree(repoId: string, branch: string): Promise<string> {
+  const repo = mockRepos.find((r) => r.id === repoId)!;
+  const existing = repo.worktrees.find((w) => w.branch === branch);
+  if (existing) return delay(existing.path);
+  const wt = worktree(repoId, `${repo.name}.${branch.replace(/\//g, "-")}`, branch, { minutes: 0 });
+  repo.worktrees.push(wt);
+  return new Promise((resolve) => setTimeout(() => resolve(wt.path), 800));
 }

@@ -59,6 +59,9 @@ feedback on this branch; after addressing a comment, reply with `review reply <i
 - [x] Code navigation: ⌘-click a name to list its definitions and references (`git grep` in files of the
   same language, definitions recognised by line shape, like GitHub's search-based navigation). Places in
   the diff scroll into view, other files open over it; ⌘[ goes back
+- [x] Check out a remote branch to review: the branch button on a repository lists its remote branches
+  (then fetches), and creates a worktree for the chosen one with worktrunk's `wt switch` (its approved
+  hooks run) or `git worktree add`
 - [ ] M4 — Review flow: viewed state with content fingerprints, keyboard nav, live refresh
 - [ ] M5 — Polish: empty/loading/error states, large-diff performance, transitions
 
@@ -83,6 +86,7 @@ src/
   App.tsx               three-panel layout
   components/
     Sidebar.tsx         repos → worktrees
+    BranchPicker.tsx    remote branches of a repo, checked out in a new worktree
     FilePanel.tsx       changed-file tree in sections + viewed progress
     ReviewPane.tsx      toolbar + loading/error/empty states around the diff
     DiffView.tsx        CodeView from @pierre/diffs with our file headers and comment annotations
