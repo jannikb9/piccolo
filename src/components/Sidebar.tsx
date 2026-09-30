@@ -10,24 +10,44 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, ChevronRight, Copy, FolderGit2, GitBranch, Plus, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, Copy, FolderGit2, GitBranch, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
 import { prefetchWorktree, useAddRepo, useRemoveRepo, useReorderRepos, useRepos, useWorktreeStats } from "../lib/queries";
 import { cn, timeAgo } from "../lib/utils";
 import { sortWorktrees, useDiffOptions, useStore } from "../store";
 import type { Repo, Worktree } from "../types";
 import { ContextMenu, DiffCount, IconButton, Skeleton, Tooltip } from "./ui";
 
-export function Sidebar({ selectedId, shortcuts }: { selectedId: string | null; shortcuts: Map<string, number> }) {
+/** Shows or hides the worktree sidebar. */
+export function SidebarToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const Icon = collapsed ? PanelLeftOpen : PanelLeftClose;
+  return (
+    <IconButton label={collapsed ? "Show sidebar" : "Hide sidebar"} onClick={onToggle}>
+      <Icon className="size-4" />
+    </IconButton>
+  );
+}
+
+export function Sidebar({
+  selectedId,
+  shortcuts,
+  onToggle,
+}: {
+  selectedId: string | null;
+  shortcuts: Map<string, number>;
+  onToggle: () => void;
+}) {
   const repos = useRepos();
   const addRepo = useAddRepo();
 
+  // The minimum width keeps it from reflowing while the panel slides closed.
   return (
-    <aside className="sidebar-surface flex h-full flex-col">
+    <aside className="sidebar-surface flex h-full min-w-[200px] flex-col">
       {/* Titlebar area: the macOS traffic lights sit in the top-left of this strip. */}
-      <div data-tauri-drag-region className="flex h-13 shrink-0 items-center justify-end px-3">
+      <div data-tauri-drag-region className="flex h-13 shrink-0 items-center justify-end gap-1 px-3">
         <IconButton label="Add repository" onClick={() => addRepo.mutate()} disabled={addRepo.isPending}>
           <Plus className="size-4" />
         </IconButton>
+        <SidebarToggle collapsed={false} onToggle={onToggle} />
       </div>
 
       {addRepo.error && (

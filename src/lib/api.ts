@@ -102,6 +102,13 @@ export function onOpenSettings(callback: () => void): () => void {
   return () => void unlisten.then((fn) => fn());
 }
 
+/** Fires when View > Toggle Sidebar is chosen (⌃⌘S). */
+export function onToggleSidebar(callback: () => void): () => void {
+  if (!isTauri) return () => {};
+  const unlisten = listen("toggle-sidebar", () => callback());
+  return () => void unlisten.then((fn) => fn());
+}
+
 export function onWindowFocusChanged(callback: (focused: boolean) => void): () => void {
   if (!isTauri) return () => {};
   const unlisten = getCurrentWindow().onFocusChanged((e) => callback(e.payload));

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { COLLAPSED_BY_DEFAULT, type FileSection } from "../lib/sections";
 import { cn, totals, type TreeNode } from "../lib/utils";
 import { useStore } from "../store";
+import { SidebarToggle } from "./Sidebar";
 import { DiffCount, Skeleton, StatusLetter } from "./ui";
 
 export function FilePanel({
@@ -13,6 +14,8 @@ export function FilePanel({
   commentCounts,
   loading,
   onSelect,
+  sidebarCollapsed,
+  onToggleSidebar,
 }: {
   worktreeId: string;
   /** Non-empty sections (Implementation, Tests, Changesets) in review order. */
@@ -23,19 +26,31 @@ export function FilePanel({
   commentCounts: Map<string, number>;
   loading: boolean;
   onSelect: (path: string) => void;
+  /** With the sidebar hidden, this panel's header holds the traffic lights and the button to show it again. */
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
 }) {
   const progress = fileCount === 0 ? 0 : viewedCount / fileCount;
 
   return (
     <div className="flex h-full flex-col border-r border-border-subtle bg-bg">
-      <header data-tauri-drag-region className="flex h-13 shrink-0 items-center gap-2 border-b border-border-subtle px-4">
+      <header
+        data-tauri-drag-region
+        className={cn(
+          "flex h-13 shrink-0 items-center gap-2 border-b border-border-subtle px-4 transition-[padding] duration-150 ease-out motion-reduce:transition-none",
+          // The macOS traffic lights end 77px in; leave a clear gap after them.
+          sidebarCollapsed && "pl-[86px]",
+        )}
+      >
         <span className="pointer-events-none text-[13px] font-medium">Files</span>
         <span className="tabular pointer-events-none rounded-full bg-bg-hover px-1.5 text-[11px] font-medium text-fg-subtle">
           {fileCount}
         </span>
-        <span className="tabular pointer-events-none ml-auto text-[11px] text-fg-subtle">
-          {viewedCount} / {fileCount} viewed
-        </span>
+        {sidebarCollapsed && (
+          <span className="ml-auto">
+            <SidebarToggle collapsed onToggle={onToggleSidebar} />
+          </span>
+        )}
       </header>
       <div className="h-px shrink-0 bg-border-subtle">
         <div className="h-full bg-accent transition-[width] duration-300 ease-out" style={{ width: `${progress * 100}%` }} />

@@ -1,10 +1,13 @@
-//! The native menu bar: Tauri's default menus plus "Settings…" (⌘,) in the app menu and "Reload" (⌘R) in the View menu.
+//! The native menu bar: Tauri's default menus plus "Settings…" (⌘,) in the app menu, and "Reload" (⌘R)
+//! and "Toggle Sidebar" (⌃⌘S) in the View menu.
 
 use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
 use tauri::{App, Emitter, Manager};
 
 const SETTINGS_ID: &str = "settings";
 const RELOAD_ID: &str = "reload";
+/// Menu item id, and the event asking the UI to show or hide the worktree sidebar.
+const TOGGLE_SIDEBAR: &str = "toggle-sidebar";
 /// Asks the UI to open its settings dialog.
 pub const OPEN_SETTINGS: &str = "open-settings";
 
@@ -23,7 +26,8 @@ pub fn install(app: &App) -> tauri::Result<()> {
         if let MenuItemKind::Submenu(submenu) = item {
             if submenu.text()? == "View" {
                 let reload = MenuItem::with_id(handle, RELOAD_ID, "Reload", true, Some("CmdOrCtrl+R"))?;
-                submenu.insert_items(&[&reload, &PredefinedMenuItem::separator(handle)?], 0)?;
+                let sidebar = MenuItem::with_id(handle, TOGGLE_SIDEBAR, "Toggle Sidebar", true, Some("Ctrl+Cmd+S"))?;
+                submenu.insert_items(&[&reload, &sidebar, &PredefinedMenuItem::separator(handle)?], 0)?;
             }
         }
     }
@@ -32,6 +36,8 @@ pub fn install(app: &App) -> tauri::Result<()> {
     app.on_menu_event(|app, event| {
         if event.id() == SETTINGS_ID {
             let _ = app.emit(OPEN_SETTINGS, ());
+        } else if event.id() == TOGGLE_SIDEBAR {
+            let _ = app.emit(TOGGLE_SIDEBAR, ());
         } else if event.id() == RELOAD_ID {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.reload();

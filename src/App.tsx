@@ -1,13 +1,15 @@
 import { useWorkerPool } from "@pierre/diffs/react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import { useEffect, useMemo, useRef } from "react";
-import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { Group, Panel, Separator, useDefaultLayout, useGroupRef, type PanelSize } from "react-resizable-panels";
 import { FilePanel } from "./components/FilePanel";
 import type { DiffViewHandle } from "./components/DiffView";
 import { ReviewPane, Welcome } from "./components/ReviewPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { shikiThemes } from "./lib/codeThemes";
+import { onToggleSidebar } from "./lib/api";
 import { hashString } from "./lib/diff";
 import { useChangedFiles, useDiffPatch, useLiveGitData, useRepos, useThreads } from "./lib/queries";
 import { groupIntoSections } from "./lib/sections";
@@ -60,6 +62,7 @@ export default function App() {
   const viewedCount = files.filter((f) => viewed?.[f.path]).length;
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: "main-layout", storage: localStorage });
+  const sidebar = useSidebarCollapse();
 
   const jumpTo = (path: string) => {
     pinActivePath(path);
@@ -68,9 +71,22 @@ export default function App() {
 
   return (
     <TooltipPrimitive.Provider delayDuration={500} skipDelayDuration={200}>
-      <Group orientation="horizontal" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged} className="h-full">
-        <Panel id="sidebar" defaultSize={248} minSize={200} maxSize={420} groupResizeBehavior="preserve-pixel-size">
-          <Sidebar selectedId={worktree?.id ?? null} shortcuts={shortcuts} />
+      <Group
+        groupRef={sidebar.groupRef}
+        elementRef={sidebar.groupElement}
+        orientation="horizontal" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged} className="h-full">
+        <Panel
+          id="sidebar"
+          collapsible
+          onResize={sidebar.onResize}
+          // Clip rather than scroll while it slides closed.
+          style={{ overflow: "hidden" }}
+          defaultSize={248}
+          minSize={200}
+          maxSize={420}
+          groupResizeBehavior="preserve-pixel-size"
+        >
+          <Sidebar selectedId={worktree?.id ?? null} shortcuts={shortcuts} onToggle={sidebar.toggle} />
         </Panel>
         <ResizeHandle />
         <Panel id="files" defaultSize={272} minSize={220} maxSize={520} groupResizeBehavior="preserve-pixel-size">
@@ -82,6 +98,8 @@ export default function App() {
             commentCounts={commentCounts}
             loading={!!worktree && filesQuery.isPending}
             onSelect={jumpTo}
+            sidebarCollapsed={sidebar.collapsed}
+            onToggleSidebar={sidebar.toggle}
           />
         </Panel>
         <ResizeHandle />
@@ -104,6 +122,42 @@ export default function App() {
       <SettingsDialog />
     </TooltipPrimitive.Provider>
   );
+}
+
+/**
+ * The worktree sidebar can be hidden with its titlebar button, View > Toggle Sidebar (⌃⌘S), or by
+ * dragging its edge past the minimum width. Whether it's hidden is saved with the panel layout.
+ */
+function useSidebarCollapse() {
+  const groupRef = useGroupRef();
+  const groupElement = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  /** The sidebar's width (% of the window) before it was hidden. */
+  const lastSize = useRef<number | null>(null);
+  const onResize = useCallback((size: PanelSize) => {
+    // Mid-animation sizes aren't the outcome; `toggle` already set it.
+    if (groupElement.current?.hasAttribute("data-animating")) return;
+    setCollapsed(size.inPixels === 0);
+    if (size.inPixels > 0) lastSize.current = size.asPercentage;
+  }, []);
+  const animationEnd = useRef(0);
+  // Hiding gives the width to the diff, not the file list next to it, and showing takes it back.
+  const toggle = useCallback(() => {
+    const group = groupRef.current;
+    const element = groupElement.current;
+    if (!group || !element) return;
+    const { sidebar, files, diff } = group.getLayout();
+    const size = sidebar > 0 ? 0 : (lastSize.current ?? (248 / window.innerWidth) * 100);
+    // The file list's header makes room for the traffic lights before it slides under them.
+    flushSync(() => setCollapsed(size === 0));
+    // Panels animate their widths only while `data-animating` is set, so dragging stays direct.
+    element.dataset.animating = "";
+    window.clearTimeout(animationEnd.current);
+    animationEnd.current = window.setTimeout(() => delete element.dataset.animating, 250);
+    group.setLayout({ sidebar: size, files, diff: diff + sidebar - size });
+  }, [groupRef]);
+  useEffect(() => onToggleSidebar(toggle), [toggle]);
+  return { groupRef, groupElement, collapsed, onResize, toggle };
 }
 
 /** Applies the chosen syntax theme to the highlighter workers, which re-render mounted diffs. */
@@ -143,6 +197,7 @@ function useWorktreeHotkeys(ordered: Worktree[], selectedId: string | undefined)
 
 function ResizeHandle() {
   return (
-    <Separator className="relative w-px bg-border-subtle outline-none after:absolute after:inset-y-0 after:-right-1 after:-left-1 after:transition-colors hover:after:bg-accent/40 data-[separator=active]:after:bg-accent/60" />
+    // The wider `after` strip is the grab area; only the cursor signals it.
+    <Separator className="relative w-px bg-border-subtle outline-none after:absolute after:inset-y-0 after:-right-1 after:-left-1" />
   );
 }
