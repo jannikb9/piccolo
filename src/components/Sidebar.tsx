@@ -13,6 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useState } from "react";
 import {
   AlertTriangle,
+  ArrowRightLeft,
   ChevronRight,
   Copy,
   EllipsisVertical,
@@ -240,6 +241,11 @@ function WorktreeRow({
   const deleteWorktree = useDeleteWorktree();
   // Shared by right-click and the "⋮" button.
   const menu: MenuItem[] = [
+    {
+      label: "Switch to worktree",
+      icon: <ArrowRightLeft className="size-3.5 text-fg-subtle" />,
+      onSelect: () => selectWorktree(wt.id),
+    },
     {
       label: "Copy worktree name",
       icon: <Copy className="size-3.5 text-fg-subtle" />,
