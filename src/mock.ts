@@ -1,5 +1,7 @@
 // Placeholder data used when the UI runs in a plain browser (`pnpm dev`) instead of the desktop app.
+import type { ImageUpload } from "./lib/images";
 import type {
+  Attachment,
   ChangedFile,
   DiffPatch,
   DiffScope,
@@ -344,12 +346,14 @@ const threads: Record<string, Thread[]> = {
           id: 1,
           author: "reviewer",
           body: "Refreshing here makes every read a potential write. Can we refresh in the middleware instead,\nso getSession stays side-effect free?",
+          attachments: [],
           createdAt: minutesAgo(42),
         },
         {
           id: 2,
           author: "agent",
           body: "Moved the refresh into authMiddleware; getSession now only reads. The window check is shared via isExpiringSoon().",
+          attachments: [],
           createdAt: minutesAgo(6),
         },
       ],
@@ -363,7 +367,7 @@ const threads: Record<string, Thread[]> = {
       position: null,
       resolved: false,
       excerpt: excerpt(lines(29, 29)),
-      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.", createdAt: minutesAgo(40) }],
+      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40) }],
       createdAt: minutesAgo(40),
       updatedAt: minutesAgo(40),
     },
@@ -374,7 +378,7 @@ const threads: Record<string, Thread[]> = {
       position: lines(21, 21),
       resolved: true,
       excerpt: excerpt(lines(21, 21)),
-      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.", createdAt: minutesAgo(90) }],
+      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90) }],
       createdAt: minutesAgo(90),
       updatedAt: minutesAgo(30),
     },
@@ -387,7 +391,26 @@ export function mockThreads(worktreePath: string): Promise<Thread[]> {
   return delay(structuredClone(threads[worktreePath] ?? []));
 }
 
-export function mockAddThread(worktreePath: string, file: string, range: LineRange, body: string): Promise<number> {
+/** Pasted images by attachment id, as base64. */
+const mockImages = new Map<number, string>();
+
+function mockAttachments(images: ImageUpload[]): Attachment[] {
+  return images.map(({ width, height, data }) => {
+    const id = nextId++;
+    mockImages.set(id, data);
+    return { id, width, height, path: `~/Library/Application Support/dev.jb.review/attachments/${id}.png` };
+  });
+}
+
+export const mockAttachmentData = (id: number): Promise<string> => delay(mockImages.get(id) ?? "");
+
+export function mockAddThread(
+  worktreePath: string,
+  file: string,
+  range: LineRange,
+  body: string,
+  images: ImageUpload[],
+): Promise<number> {
   const now = Date.now();
   const id = nextId++;
   (threads[worktreePath] ??= []).push({
@@ -397,16 +420,22 @@ export function mockAddThread(worktreePath: string, file: string, range: LineRan
     position: range,
     resolved: false,
     excerpt: excerpt(range),
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), createdAt: now }],
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now }],
     createdAt: now,
     updatedAt: now,
   });
   return delay(id);
 }
 
-export function mockReply(id: number, body: string): Promise<void> {
+export function mockReply(id: number, body: string, images: ImageUpload[]): Promise<void> {
   const thread = findThread(id);
-  thread?.messages.push({ id: nextId++, author: "reviewer", body: body.trim(), createdAt: Date.now() });
+  thread?.messages.push({
+    id: nextId++,
+    author: "reviewer",
+    body: body.trim(),
+    attachments: mockAttachments(images),
+    createdAt: Date.now(),
+  });
   return delay(undefined);
 }
 

@@ -479,8 +479,11 @@ function DraftComposer({
       pending={addThread.isPending}
       error={addThread.error}
       onCancel={() => onClose(key)}
-      onSubmit={(body) =>
-        addThread.mutate({ file: file.path, oldFile: file.oldPath ?? null, range, body }, { onSuccess: () => onClose(key) })
+      onSubmit={(body, images) =>
+        addThread.mutate(
+          { file: file.path, oldFile: file.oldPath ?? null, range, body, images },
+          { onSuccess: () => onClose(key) },
+        )
       }
     />
   );

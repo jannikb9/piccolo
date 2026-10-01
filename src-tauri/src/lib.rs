@@ -48,6 +48,7 @@ pub fn run() {
             comments::reply_thread,
             comments::set_thread_resolved,
             comments::delete_comment,
+            comments::attachment_data,
             navigate::find_symbol,
             navigate::file_text,
         ])

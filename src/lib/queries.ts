@@ -1,6 +1,8 @@
 import { focusManager, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useStore } from "../store";
+import type { DraftImage } from "./images";
+import { toUpload } from "./images";
 import type { DiffOptions, DiffScope, LineRange, RemoteBranch, Repo, Worktree } from "../types";
 import { api, confirmAction, onCommentsChanged, onRepoChanged, onWindowFocusChanged, pickRepoFolder, showError } from "./api";
 
@@ -100,12 +102,25 @@ function useCommentMutation<T>(mutationFn: (args: T) => Promise<unknown>) {
 }
 
 export function useAddThread(worktree: Worktree, base: string | null, scope: DiffScope) {
-  return useCommentMutation((args: { file: string; oldFile: string | null; range: LineRange; body: string }) =>
-    api.addThread({ path: worktree.path, base, scope, ...args }),
+  return useCommentMutation(
+    ({ images, ...args }: { file: string; oldFile: string | null; range: LineRange; body: string; images: DraftImage[] }) =>
+      api.addThread({ path: worktree.path, base, scope, ...args, images: images.map(toUpload) }),
   );
 }
 
-export const useReplyThread = () => useCommentMutation((args: { id: number; body: string }) => api.replyThread(args.id, args.body));
+export const useReplyThread = () =>
+  useCommentMutation((args: { id: number; body: string; images: DraftImage[] }) =>
+    api.replyThread(args.id, args.body, args.images.map(toUpload)),
+  );
+
+/** A pasted image as a data URL. Attachments never change, so it's loaded once. */
+export function useAttachment(id: number) {
+  return useQuery({
+    queryKey: ["attachment", id],
+    queryFn: async () => `data:image/png;base64,${await api.attachmentData(id)}`,
+    staleTime: Infinity,
+  });
+}
 
 export const useSetThreadResolved = () =>
   useCommentMutation((args: { id: number; resolved: boolean }) => api.setThreadResolved(args.id, args.resolved));

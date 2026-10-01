@@ -48,7 +48,7 @@ fn run(command: &str, args: &[String]) -> Result<()> {
                 body.clear();
                 std::io::stdin().read_to_string(&mut body).map_err(|e| e.to_string())?;
             }
-            Store::open()?.reply(id, Author::Agent, &body)?;
+            Store::open()?.reply(id, Author::Agent, &body, &[])?;
             println!("Replied to #{id}.");
             Ok(())
         }
@@ -109,7 +109,12 @@ fn format_threads(target: &Target, threads: &[Thread], include_resolved: bool) -
                 Author::Reviewer => "Reviewer",
                 Author::Agent => "Agent",
             };
-            out.push_str(&format!("\n**{who}:** {}\n", message.body.trim()));
+            let body = message.body.trim();
+            let gap = if body.is_empty() { "" } else { " " };
+            out.push_str(&format!("\n**{who}:**{gap}{body}\n"));
+            for image in &message.attachments {
+                out.push_str(&format!("Attached image ({}×{}): {}\n", image.width, image.height, image.path));
+            }
         }
     }
     out.push_str(
@@ -180,6 +185,7 @@ fn format_excerpt(rows: &[ExcerptRow]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn describes_ranges() {
@@ -205,5 +211,29 @@ mod tests {
             row(LineKind::Add, None, Some(10), "  c", true),
         ]);
         assert_eq!(out, "```\n     9 │   a\n> - 10 │   b\n> + 10 │   c\n```\n");
+    }
+
+    #[test]
+    fn lists_attached_images_with_their_paths() {
+        use crate::comments::tests::{additions, fixture};
+        use crate::comments::{NewImage, NewThread};
+        use crate::git::{DiffRange, Scope};
+
+        let (root, wt, mut store) = fixture("cli-images");
+        let target = Target::of(&wt).unwrap();
+        let range = DiffRange::resolve(&wt, Some("main"), Scope::All).unwrap();
+        let image = NewImage { width: 640, height: 480, data: b"\x89PNG\r\n\x1a\nx".to_vec() };
+        let new = NewThread { path: "a.txt", old_path: None, range: additions(3, 3), body: "Looks off:", images: &[image] };
+        let id = store.add_thread(&target, &wt, &range, new).unwrap();
+        let only_image = NewImage { width: 10, height: 20, data: b"\x89PNG\r\n\x1a\ny".to_vec() };
+        store.reply(id, Author::Reviewer, "", &[only_image]).unwrap();
+
+        let threads = store.threads(&target, false).unwrap();
+        let out = format_threads(&target, &threads, false);
+        let path = |n: usize| threads[0].messages[n].attachments[0].path.clone();
+        assert!(out.contains(&format!("**Reviewer:** Looks off:\nAttached image (640×480): {}\n", path(0))), "{out}");
+        assert!(out.contains(&format!("**Reviewer:**\nAttached image (10×20): {}\n", path(1))), "{out}");
+
+        fs::remove_dir_all(&root).unwrap();
     }
 }

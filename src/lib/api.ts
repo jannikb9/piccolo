@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open } from "@tauri-apps/plugin-dialog";
 import {
   mockAddThread,
+  mockAttachmentData,
   mockAddWorktree,
   mockChangedFiles,
   mockDeleteComment,
@@ -19,6 +20,7 @@ import {
   mockThreads,
   mockWorktreeStats,
 } from "../mock";
+import type { ImageUpload } from "./images";
 import type {
   ChangedFile,
   DiffOptions,
@@ -95,10 +97,16 @@ export const api = {
     oldFile: string | null;
     range: LineRange;
     body: string;
-  }): Promise<number> => (isTauri ? invoke("add_thread", args) : mockAddThread(args.path, args.file, args.range, args.body)),
+    images: ImageUpload[];
+  }): Promise<number> =>
+    isTauri ? invoke("add_thread", args) : mockAddThread(args.path, args.file, args.range, args.body, args.images),
 
-  replyThread: (id: number, body: string): Promise<void> =>
-    isTauri ? invoke("reply_thread", { id, body }) : mockReply(id, body),
+  replyThread: (id: number, body: string, images: ImageUpload[]): Promise<void> =>
+    isTauri ? invoke("reply_thread", { id, body, images }) : mockReply(id, body, images),
+
+  /** An attached image as base64. */
+  attachmentData: (id: number): Promise<string> =>
+    isTauri ? invoke("attachment_data", { id }) : mockAttachmentData(id),
 
   setThreadResolved: (id: number, resolved: boolean): Promise<void> =>
     isTauri ? invoke("set_thread_resolved", { id, resolved }) : mockSetResolved(id, resolved),

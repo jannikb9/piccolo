@@ -27,6 +27,9 @@ rm -rf /Applications/Review.app && cp -R src-tauri/target/release/bundle/macos/R
 Hover a line in the diff and click the **+** (or drag it over several lines) to comment, like on
 GitHub. Comments belong to the branch and are stored in
 `~/Library/Application Support/dev.jb.review/comments.db`, which the `review` command reads too.
+Paste a screenshot (⌘V) into a comment or reply to attach it; images are scaled to at most 2000px,
+saved as PNGs in `attachments/` next to the database, and `review comments` lists their paths so an
+agent can open them.
 
 `review` is the app binary run with a subcommand. Link it onto your PATH once (bundling an installer
 is still open):
@@ -52,7 +55,7 @@ feedback on this branch; after addressing a comment, reply with `review reply <i
 - [x] M2 — Repos & worktrees from git, changed-file lists, switching (⌘1–9, ⌥↑/↓), auto-discovery, drag to reorder repos
 - [x] M3 — Real diffs: `@pierre/diffs` CodeView (virtualized, worker-highlighted), split/unified, expandable context, hide whitespace
 - [x] Syntax themes: GitHub by default, others selectable in Settings (⌘,)
-- [x] Line comments (single and multi-line), replies, resolve; `review` CLI for agents
+- [x] Line comments (single and multi-line), replies, resolve, pasted screenshots; `review` CLI for agents
 - [x] ⌘F find in changes: highlights without scrolling; ⌘G / ⇧⌘G, Enter / ⇧Enter step from the current view
 - [x] Selecting text highlights its other occurrences
 - [x] File list in sections (Implementation, Tests, Changesets); the diff follows that order

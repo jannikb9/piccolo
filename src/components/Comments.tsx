@@ -1,9 +1,12 @@
 import { Bot, CheckCircle2, ChevronRight, RotateCcw, Trash2, User } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
+import { showError } from "../lib/api";
+import { clipboardImages, prepareImage, type DraftImage } from "../lib/images";
 import { useDeleteComment, useReplyThread, useSetThreadResolved } from "../lib/queries";
 import { cn, timeAgo } from "../lib/utils";
-import { useStore } from "../store";
+import { replyKey, useStore } from "../store";
 import type { CommentMessage, ExcerptRow, LineRange, Thread } from "../types";
+import { DraftImages, MessageImages, useDraftImages } from "./Images";
 import { Button, Tooltip } from "./ui";
 
 /** "line 12", "lines 12–14"; ranges across both sides of a unified diff name the sides. */
@@ -26,8 +29,9 @@ function Card({ children, className }: { children: ReactNode; className?: string
   );
 }
 
-/** A textarea that grows with its content; ⌘↩ submits and Esc cancels. */
+/** A textarea that grows with its content; ⌘↩ submits and Esc cancels. Pasted screenshots attach to `imageKey`. */
 function CommentField({
+  imageKey,
   value,
   onChange,
   onSubmit,
@@ -35,6 +39,7 @@ function CommentField({
   placeholder,
   autoFocus,
 }: {
+  imageKey: string;
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
@@ -43,6 +48,8 @@ function CommentField({
   autoFocus?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const addImages = useStore((s) => s.addDraftImages);
+  const hasImages = useDraftImages(imageKey).length > 0;
   useEffect(() => {
     if (autoFocus) ref.current?.focus({ preventScroll: true });
   }, [autoFocus]);
@@ -50,11 +57,21 @@ function CommentField({
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      if (value.trim()) onSubmit();
+      if (value.trim() || hasImages) onSubmit();
     } else if (e.key === "Escape") {
       e.preventDefault();
       onCancel();
     }
+  };
+
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = clipboardImages(e.clipboardData);
+    if (files.length === 0) return;
+    e.preventDefault();
+    Promise.all(files.map(prepareImage)).then(
+      (images: DraftImage[]) => addImages(imageKey, images),
+      (error) => showError("Couldn't paste the image", String(error)),
+    );
   };
 
   // The textarea grows with a hidden copy of its text in the same grid cell, so the height follows
@@ -62,23 +79,27 @@ function CommentField({
   // WebKit draws the caret as tall as the line, so lines are kept fairly tight.
   const shared = "col-start-1 row-start-1 max-h-80 px-3 py-2.5 leading-[18px] break-words whitespace-pre-wrap";
   return (
-    <div className="grid">
-      <div aria-hidden className={cn(shared, "invisible overflow-hidden")}>
-        {value}{" "}
+    <>
+      <div className="grid">
+        <div aria-hidden className={cn(shared, "invisible overflow-hidden")}>
+          {value}{" "}
+        </div>
+        <textarea
+          ref={ref}
+          value={value}
+          rows={3}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          className={cn(
+            shared,
+            "selectable block min-h-[74px] w-full resize-none bg-transparent text-fg caret-accent outline-none placeholder:text-fg-faint",
+          )}
+        />
       </div>
-      <textarea
-        ref={ref}
-        value={value}
-        rows={3}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
-        className={cn(
-          shared,
-          "selectable block min-h-[74px] w-full resize-none bg-transparent text-fg caret-accent outline-none placeholder:text-fg-faint",
-        )}
-      />
-    </div>
+      <DraftImages imageKey={imageKey} />
+    </>
   );
 }
 
@@ -129,14 +150,16 @@ export function Composer({
   range: LineRange;
   pending: boolean;
   error?: unknown;
-  onSubmit: (body: string) => void;
+  onSubmit: (body: string, images: DraftImage[]) => void;
   onCancel: () => void;
 }) {
   const body = useStore((s) => s.drafts[draftKey]?.body ?? "");
   const setDraftBody = useStore((s) => s.setDraftBody);
-  const submit = () => body.trim() && onSubmit(body);
+  const images = useDraftImages(draftKey);
+  const canSubmit = !!body.trim() || images.length > 0;
+  const submit = () => canSubmit && onSubmit(body, images);
   // Esc only closes an empty draft, so a stray keypress can't lose text.
-  const cancel = () => !body.trim() && onCancel();
+  const cancel = () => !canSubmit && onCancel();
 
   return (
     <Card className="focus-within:border-border-strong">
@@ -144,17 +167,18 @@ export function Composer({
         Comment on {describeRange(range)}
       </div>
       <CommentField
+        imageKey={draftKey}
         value={body}
         onChange={(value) => setDraftBody(draftKey, value)}
         onSubmit={submit}
         onCancel={cancel}
-        placeholder="Leave a comment"
+        placeholder="Leave a comment, or paste a screenshot"
         autoFocus
       />
       <FieldActions
         hint="⌘↩ to comment"
         submitLabel="Comment"
-        canSubmit={!!body.trim()}
+        canSubmit={canSubmit}
         pending={pending}
         error={error}
         onSubmit={submit}
@@ -179,7 +203,7 @@ export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode 
         >
           <CheckCircle2 className="size-3.5 shrink-0 text-add" />
           <span className="shrink-0 font-medium">Resolved</span>
-          <span className="min-w-0 flex-1 truncate">{first?.body.split("\n")[0]}</span>
+          <span className="min-w-0 flex-1 truncate">{first?.body.split("\n")[0] || (first?.attachments.length ? "Image" : "")}</span>
           <span className="tabular shrink-0 text-fg-faint">
             {thread.messages.length > 1 && `${thread.messages.length} comments`}
           </span>
@@ -238,7 +262,10 @@ function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: bo
         </Tooltip>
         <DeleteButton messageId={message.id} label={isFirst ? "Delete thread" : "Delete comment"} />
       </div>
-      <p className="selectable mt-1 pl-7 leading-5 break-words whitespace-pre-wrap text-fg-muted">{message.body}</p>
+      {message.body && (
+        <p className="selectable mt-1 pl-7 leading-5 break-words whitespace-pre-wrap text-fg-muted">{message.body}</p>
+      )}
+      <MessageImages attachments={message.attachments} />
     </div>
   );
 }
@@ -273,6 +300,8 @@ function ReplyBox({ threadId }: { threadId: number }) {
   const draft = useStore((s) => s.replyDrafts[threadId]);
   const setReplyDraft = useStore((s) => s.setReplyDraft);
   const reply = useReplyThread();
+  const key = replyKey(threadId);
+  const images = useDraftImages(key);
 
   if (draft === undefined) {
     return (
@@ -286,22 +315,24 @@ function ReplyBox({ threadId }: { threadId: number }) {
     );
   }
 
+  const canSubmit = !!draft.trim() || images.length > 0;
   const submit = () =>
-    reply.mutate({ id: threadId, body: draft }, { onSuccess: () => setReplyDraft(threadId, null) });
+    canSubmit && reply.mutate({ id: threadId, body: draft, images }, { onSuccess: () => setReplyDraft(threadId, null) });
   return (
     <div className="min-w-0 flex-1 rounded-md border border-border bg-bg focus-within:border-border-strong">
       <CommentField
+        imageKey={key}
         value={draft}
         onChange={(value) => setReplyDraft(threadId, value)}
         onSubmit={submit}
-        onCancel={() => !draft.trim() && setReplyDraft(threadId, null)}
-        placeholder="Reply"
+        onCancel={() => !canSubmit && setReplyDraft(threadId, null)}
+        placeholder="Reply, or paste a screenshot"
         autoFocus
       />
       <FieldActions
         hint="⌘↩ to reply"
         submitLabel="Reply"
-        canSubmit={!!draft.trim()}
+        canSubmit={canSubmit}
         pending={reply.isPending}
         error={reply.error}
         onSubmit={submit}

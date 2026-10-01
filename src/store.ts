@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CodeThemeId } from "./lib/codeThemes";
+import type { DraftImage } from "./lib/images";
 import type { SectionId } from "./lib/sections";
 import type { DiffLayout, DiffOptions, DiffScope, LineRange, Repo, Worktree } from "./types";
 
@@ -13,6 +14,9 @@ export type Draft = { worktreeId: string; path: string; oldPath: string | null; 
 /** Drafts are keyed by where their composer shows: below the last selected line. */
 export const draftKey = (worktreeId: string, path: string, range: LineRange) =>
   `${worktreeId}\n${path}\n${range.endSide}:${range.endLine}`;
+
+/** Where a thread's reply keeps its pasted images (see `draftImages`). */
+export const replyKey = (threadId: number) => `reply:${threadId}`;
 
 type State = {
   selectedWorktreeId: string | null;
@@ -38,6 +42,8 @@ type State = {
   drafts: Record<string, Draft>;
   /** Draft replies by thread id. */
   replyDrafts: Record<number, string>;
+  /** Pasted screenshots of drafts, by draft key (see `replyKey` for replies). */
+  draftImages: Record<string, DraftImage[]>;
 
   selectWorktree: (id: string) => void;
   toggleRepo: (id: string) => void;
@@ -55,6 +61,8 @@ type State = {
   setDraftBody: (key: string, body: string) => void;
   discardDraft: (key: string) => void;
   setReplyDraft: (threadId: number, body: string | null) => void;
+  addDraftImages: (key: string, images: DraftImage[]) => void;
+  removeDraftImage: (key: string, id: string) => void;
 };
 
 function toggle(set: PathSet | undefined, key: string, on: boolean): PathSet {
@@ -81,6 +89,7 @@ export const useStore = create<State>()(
       activePinnedUntil: 0,
       drafts: {},
       replyDrafts: {},
+      draftImages: {},
 
       selectWorktree: (id) => set({ selectedWorktreeId: id, activePath: null }),
       toggleRepo: (id) => set((s) => ({ collapsedRepos: toggle(s.collapsedRepos, id, !s.collapsedRepos[id]) })),
@@ -119,12 +128,23 @@ export const useStore = create<State>()(
       discardDraft: (key) =>
         set((s) => {
           const { [key]: _, ...drafts } = s.drafts;
-          return { drafts };
+          const { [key]: __, ...draftImages } = s.draftImages;
+          return { drafts, draftImages };
         }),
       setReplyDraft: (threadId, body) =>
         set((s) => {
           const { [threadId]: _, ...rest } = s.replyDrafts;
-          return { replyDrafts: body === null ? rest : { ...rest, [threadId]: body } };
+          if (body !== null) return { replyDrafts: { ...rest, [threadId]: body } };
+          const { [replyKey(threadId)]: __, ...draftImages } = s.draftImages;
+          return { replyDrafts: rest, draftImages };
+        }),
+      addDraftImages: (key, images) =>
+        set((s) => ({ draftImages: { ...s.draftImages, [key]: [...(s.draftImages[key] ?? []), ...images] } })),
+      removeDraftImage: (key, id) =>
+        set((s) => {
+          const { [key]: _, ...rest } = s.draftImages;
+          const images = (s.draftImages[key] ?? []).filter((image) => image.id !== id);
+          return { draftImages: images.length ? { ...rest, [key]: images } : rest };
         }),
     }),
     {

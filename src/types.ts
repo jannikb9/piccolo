@@ -85,10 +85,20 @@ export type ExcerptRow = {
   commented: boolean;
 };
 
+/** An image pasted into a message, saved as a file the agent can open. */
+export type Attachment = {
+  id: number;
+  width: number;
+  height: number;
+  /** Where the PNG is on disk. */
+  path: string;
+};
+
 export type CommentMessage = {
   id: number;
   author: "reviewer" | "agent";
   body: string;
+  attachments: Attachment[];
   createdAt: number;
 };
 

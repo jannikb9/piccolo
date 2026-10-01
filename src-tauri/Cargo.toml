@@ -29,6 +29,7 @@ notify-debouncer-mini = "0.7.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 dirs = "7.0.0"
 regex = "1.13.1"
+base64 = "0.22"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
