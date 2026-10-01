@@ -1,9 +1,8 @@
 import type { CodeViewItem, FileDiffMetadata } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
-import { ArrowLeft, ExternalLink, X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { api, showError } from "../lib/api";
 import { unsafeCSS, viewStyle } from "../lib/codeViewStyle";
 import { hashString } from "../lib/diff";
 import { useFileText, useSymbolSearch } from "../lib/queries";
@@ -281,11 +280,6 @@ export function CodeNavigation({
 // Search results
 
 const POPOVER_WIDTH = 520;
-
-function openInCursor(worktreePath: string, file: string, line: number) {
-  api.openInCursor(worktreePath, file, line).catch((e) => showError("Couldn't open Cursor", String(e)));
-}
-
 /** Definitions listed before "Show more"; a common local name can have many. */
 const SHOWN_DEFINITIONS = 6;
 
@@ -358,25 +352,15 @@ function SymbolPopover({
   };
 
   const row = (hit: SymbolHit, content: ReactNode, className?: string) => (
-    <div key={`${hit.path}:${hit.line}`} className="group relative">
-      <button
-        type="button"
-        data-hit
-        onClick={() => onPick(hit)}
-        className={cn("block w-full pr-3 text-left outline-none hover:bg-bg-hover focus-visible:bg-bg-hover", className)}
-      >
-        {content}
-      </button>
-      {!isBase && (
-        <IconButton
-          label="Open in Cursor"
-          onClick={() => openInCursor(worktree.path, hit.path, hit.line)}
-          className="absolute top-0.5 right-1.5 size-6 bg-bg-raised opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-        >
-          <ExternalLink className="size-3.5" />
-        </IconButton>
-      )}
-    </div>
+    <button
+      key={`${hit.path}:${hit.line}`}
+      type="button"
+      data-hit
+      onClick={() => onPick(hit)}
+      className={cn("block w-full pr-3 text-left outline-none hover:bg-bg-hover focus-visible:bg-bg-hover", className)}
+    >
+      {content}
+    </button>
   );
   const shownDefinitions = allDefinitions ? definitions : definitions.slice(0, SHOWN_DEFINITIONS);
 
@@ -582,16 +566,7 @@ function FileView({
           <span className="shrink-0 text-fg-faint">:{place.line}</span>
         </span>
         {isBase && <span className="shrink-0 rounded bg-bg-hover px-1.5 py-px text-[11px] text-fg-muted">Base version</span>}
-        {!isBase && (
-          <IconButton
-            label="Open in Cursor"
-            onClick={() => openInCursor(worktree.path, place.path, place.line)}
-            className="ml-auto shrink-0"
-          >
-            <ExternalLink className="size-4" />
-          </IconButton>
-        )}
-        <IconButton label="Close (Esc)" onClick={onClose} className={cn("shrink-0", isBase && "ml-auto")}>
+        <IconButton label="Close (Esc)" onClick={onClose} className="ml-auto shrink-0">
           <X className="size-4" />
         </IconButton>
       </header>

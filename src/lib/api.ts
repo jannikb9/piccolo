@@ -113,10 +113,6 @@ export const api = {
   /** `null` when the file doesn't exist at `rev` or isn't text. */
   fileText: (path: string, rev: string | null, file: string): Promise<string | null> =>
     isTauri ? invoke("file_text", { path, rev, file }) : mockFileText(path, rev, file),
-
-  /** Opens a worktree's file at a line in Cursor. */
-  openInCursor: (path: string, file: string, line: number): Promise<void> =>
-    isTauri ? invoke("open_in_cursor", { path, file, line }) : Promise.resolve(),
 };
 
 export async function pickRepoFolder(): Promise<string | null> {

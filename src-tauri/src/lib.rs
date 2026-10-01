@@ -50,7 +50,6 @@ pub fn run() {
             comments::delete_comment,
             navigate::find_symbol,
             navigate::file_text,
-            navigate::open_in_cursor,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

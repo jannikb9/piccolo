@@ -295,42 +295,10 @@ pub async fn file_text(path: String, rev: Option<String>, file: String) -> Resul
     blocking(move || git::file_contents(Path::new(&path), rev.as_deref(), &file)).await
 }
 
-/// Opens `file` (relative to the worktree) at `line` in Cursor, through its `cursor://` URL.
-#[tauri::command]
-pub async fn open_in_cursor(path: String, file: String, line: u32) -> Result<()> {
-    let url = cursor_url(&Path::new(&path).join(file), line);
-    blocking(move || {
-        let status = Command::new("open").arg(&url).status().map_err(|e| e.to_string())?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err("Couldn't open Cursor. Is it installed?".to_string())
-        }
-    })
-    .await
-}
-
-fn cursor_url(file: &Path, line: u32) -> String {
-    let mut url = String::from("cursor://file");
-    for byte in file.to_string_lossy().bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => url.push(byte as char),
-            _ => url.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    format!("{url}:{line}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
-
-    #[test]
-    fn cursor_urls_escape_the_path() {
-        let url = cursor_url(Path::new("/Users/jb/my repo/src/a#b.rs"), 12);
-        assert_eq!(url, "cursor://file/Users/jb/my%20repo/src/a%23b.rs:12");
-    }
 
     fn is_def(lang: Lang, name: &str, line: &str) -> bool {
         Definitions::new(name, lang).matches(line)

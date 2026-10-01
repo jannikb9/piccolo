@@ -244,6 +244,7 @@ function WorktreeRow({
     {
       label: "Switch to worktree",
       icon: <ArrowRightLeft className="size-3.5 text-fg-subtle" />,
+      shortcut: "S",
       onSelect: () => selectWorktree(wt.id),
     },
     {
