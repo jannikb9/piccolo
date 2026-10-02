@@ -385,6 +385,7 @@ const threads: Record<string, Thread[]> = {
           body: "Refreshing here makes every read a potential write. Can we refresh in the middleware instead,\nso getSession stays side-effect free?",
           attachments: [],
           createdAt: minutesAgo(42),
+          editedAt: null,
         },
         {
           id: 2,
@@ -392,6 +393,7 @@ const threads: Record<string, Thread[]> = {
           body: "Moved the refresh into authMiddleware; getSession now only reads. The window check is shared via isExpiringSoon().",
           attachments: [],
           createdAt: minutesAgo(6),
+          editedAt: null,
         },
       ],
       createdAt: minutesAgo(42),
@@ -404,7 +406,7 @@ const threads: Record<string, Thread[]> = {
       position: null,
       resolved: false,
       excerpt: excerpt(lines(29, 29)),
-      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40) }],
+      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null }],
       createdAt: minutesAgo(40),
       updatedAt: minutesAgo(40),
     },
@@ -415,7 +417,7 @@ const threads: Record<string, Thread[]> = {
       position: lines(21, 21),
       resolved: true,
       excerpt: excerpt(lines(21, 21)),
-      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90) }],
+      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null }],
       createdAt: minutesAgo(90),
       updatedAt: minutesAgo(30),
     },
@@ -457,7 +459,7 @@ export function mockAddThread(
     position: range,
     resolved: false,
     excerpt: excerpt(range),
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now }],
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null }],
     createdAt: now,
     updatedAt: now,
   });
@@ -472,7 +474,21 @@ export function mockReply(id: number, body: string, images: ImageUpload[]): Prom
     body: body.trim(),
     attachments: mockAttachments(images),
     createdAt: Date.now(),
+    editedAt: null,
   });
+  return delay(undefined);
+}
+
+export function mockEditComment(messageId: number, body: string, images: ImageUpload[]): Promise<void> {
+  const thread = Object.values(threads)
+    .flat()
+    .find((t) => t.messages.some((m) => m.id === messageId));
+  const message = thread?.messages.find((m) => m.id === messageId);
+  if (thread && message) {
+    message.body = body.trim();
+    message.attachments.push(...mockAttachments(images));
+    message.editedAt = thread.updatedAt = Date.now();
+  }
   return delay(undefined);
 }
 

@@ -111,7 +111,8 @@ fn format_threads(target: &Target, threads: &[Thread], include_resolved: bool) -
             };
             let body = message.body.trim();
             let gap = if body.is_empty() { "" } else { " " };
-            out.push_str(&format!("\n**{who}:**{gap}{body}\n"));
+            let edited = if message.edited_at.is_some() { " (edited)" } else { "" };
+            out.push_str(&format!("\n**{who}{edited}:**{gap}{body}\n"));
             for image in &message.attachments {
                 out.push_str(&format!("Attached image ({}×{}): {}\n", image.width, image.height, image.path));
             }

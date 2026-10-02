@@ -144,6 +144,11 @@ export function useAttachment(id: number) {
   });
 }
 
+export const useEditComment = () =>
+  useCommentMutation((args: { id: number; body: string; images: DraftImage[] }) =>
+    api.editComment(args.id, args.body, args.images.map(toUpload)),
+  );
+
 export const useSetThreadResolved = () =>
   useCommentMutation((args: { id: number; resolved: boolean }) => api.setThreadResolved(args.id, args.resolved));
 

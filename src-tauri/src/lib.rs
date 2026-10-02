@@ -47,6 +47,7 @@ pub fn run() {
             comments::list_threads,
             comments::add_thread,
             comments::reply_thread,
+            comments::edit_comment,
             comments::set_thread_resolved,
             comments::delete_comment,
             comments::attachment_data,

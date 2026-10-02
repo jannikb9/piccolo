@@ -114,6 +114,8 @@ pub struct Message {
     pub body: String,
     pub attachments: Vec<Attachment>,
     pub created_at: i64,
+    /// When the text was last changed, if it was.
+    pub edited_at: Option<i64>,
 }
 
 /// A PNG to attach to a new message.
@@ -255,6 +257,15 @@ impl Store {
             );
             CREATE INDEX IF NOT EXISTS attachments_by_message ON attachments (message_id);",
         ))?;
+        // Columns added after the first release.
+        let has_edited_at: bool = sql(conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'edited_at'",
+            [],
+            |r| r.get(0),
+        ))?;
+        if !has_edited_at {
+            sql(conn.execute("ALTER TABLE messages ADD COLUMN edited_at INTEGER", []))?;
+        }
         let images_dir = path.parent().unwrap_or(Path::new(".")).join(IMAGES_DIR);
         Ok(Self { conn, images_dir })
     }
@@ -295,7 +306,7 @@ impl Store {
         }
         // Ids are integers, so inlining them is safe.
         let mut stmt = sql(self.conn.prepare(&format!(
-            "SELECT id, thread_id, author, body, created_at FROM messages WHERE thread_id IN ({}) ORDER BY id",
+            "SELECT id, thread_id, author, body, created_at, edited_at FROM messages WHERE thread_id IN ({}) ORDER BY id",
             ids.join(",")
         )))?;
         let rows = sql(stmt.query_map([], |row| {
@@ -308,6 +319,7 @@ impl Store {
                     body: row.get(3)?,
                     attachments: Vec::new(),
                     created_at: row.get(4)?,
+                    edited_at: row.get(5)?,
                 },
             ))
         }))?;
@@ -409,6 +421,25 @@ impl Store {
         let tx = sql(self.conn.transaction())?;
         let message = insert_message(&tx, thread_id, author, body, now)?;
         save_images(&tx, &self.images_dir, message, images)?;
+        sql(tx.execute("UPDATE threads SET updated_at = ?2 WHERE id = ?1", params![thread_id, now]))?;
+        sql(tx.commit())
+    }
+
+    /// Replaces a message's text and attaches more images; the ones it has stay.
+    pub fn edit_message(&mut self, message_id: i64, body: &str, images: &[NewImage]) -> Result<()> {
+        let body = body.trim();
+        let thread_id: Option<i64> = sql(self
+            .conn
+            .query_row("SELECT thread_id FROM messages WHERE id = ?1", [message_id], |r| r.get(0))
+            .optional())?;
+        let Some(thread_id) = thread_id else { return Err(format!("No message #{message_id}")) };
+        if body.is_empty() && images.is_empty() && self.image_ids("m.id", message_id)?.is_empty() {
+            return Err("A comment can't be empty".into());
+        }
+        let now = now_ms();
+        let tx = sql(self.conn.transaction())?;
+        sql(tx.execute("UPDATE messages SET body = ?2, edited_at = ?3 WHERE id = ?1", params![message_id, body, now]))?;
+        save_images(&tx, &self.images_dir, message_id, images)?;
         sql(tx.execute("UPDATE threads SET updated_at = ?2 WHERE id = ?1", params![thread_id, now]))?;
         sql(tx.commit())
     }
@@ -704,6 +735,11 @@ pub async fn attachment_data(id: i64) -> Result<String> {
 }
 
 #[tauri::command]
+pub async fn edit_comment(id: i64, body: String, images: Vec<ImageUpload>) -> Result<()> {
+    blocking(move || Store::open()?.edit_message(id, &body, &decode_images(images)?)).await
+}
+
+#[tauri::command]
 pub async fn set_thread_resolved(id: i64, resolved: bool) -> Result<()> {
     blocking(move || Store::open()?.set_resolved(id, resolved)).await
 }
@@ -860,6 +896,13 @@ pub(crate) mod tests {
         assert_eq!(store.thread(id).unwrap().messages.len(), 2);
         let on_disk = || std::fs::read_dir(root.join(IMAGES_DIR)).unwrap().count();
         assert_eq!(on_disk(), 3);
+
+        // Editing keeps the images and adds pasted ones; a message with images may lose its text.
+        store.edit_message(thread.messages[1].id, "", &[png(b"fourth")]).unwrap();
+        let edited = &store.thread(id).unwrap().messages[1];
+        assert_eq!((edited.body.as_str(), edited.attachments.len()), ("", 3));
+        assert!(edited.edited_at.is_some() && thread.messages[1].edited_at.is_none());
+        assert_eq!(on_disk(), 4);
 
         // Deleting a reply removes its files; deleting the thread removes the rest.
         store.delete_message(thread.messages[1].id).unwrap();

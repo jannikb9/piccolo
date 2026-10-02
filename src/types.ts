@@ -113,6 +113,8 @@ export type CommentMessage = {
   body: string;
   attachments: Attachment[];
   createdAt: number;
+  /** When the text was last changed, if it was. */
+  editedAt: number | null;
 };
 
 /** A comment on some lines and its replies. Stored per branch; agents answer via the `review` CLI. */

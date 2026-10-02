@@ -17,6 +17,8 @@ export const draftKey = (worktreeId: string, path: string, range: LineRange) =>
 
 /** Where a thread's reply keeps its pasted images (see `draftImages`). */
 export const replyKey = (threadId: number) => `reply:${threadId}`;
+/** Where an edit of a message keeps its newly pasted images. */
+export const editKey = (messageId: number) => `edit:${messageId}`;
 
 type State = {
   selectedWorktreeId: string | null;
@@ -44,6 +46,8 @@ type State = {
   drafts: Record<string, Draft>;
   /** Draft replies by thread id. */
   replyDrafts: Record<number, string>;
+  /** Text of messages being edited, by message id. */
+  editDrafts: Record<number, string>;
   /** Pasted screenshots of drafts, by draft key (see `replyKey` for replies). */
   draftImages: Record<string, DraftImage[]>;
 
@@ -65,6 +69,8 @@ type State = {
   setDraftBody: (key: string, body: string) => void;
   discardDraft: (key: string) => void;
   setReplyDraft: (threadId: number, body: string | null) => void;
+  /** Starts or updates an edit of a message; `null` ends it. */
+  setEditDraft: (messageId: number, body: string | null) => void;
   addDraftImages: (key: string, images: DraftImage[]) => void;
   removeDraftImage: (key: string, id: string) => void;
 };
@@ -94,6 +100,7 @@ export const useStore = create<State>()(
       activePinnedUntil: 0,
       drafts: {},
       replyDrafts: {},
+      editDrafts: {},
       draftImages: {},
 
       selectWorktree: (id) => set({ selectedWorktreeId: id, activePath: null }),
@@ -147,6 +154,13 @@ export const useStore = create<State>()(
           if (body !== null) return { replyDrafts: { ...rest, [threadId]: body } };
           const { [replyKey(threadId)]: __, ...draftImages } = s.draftImages;
           return { replyDrafts: rest, draftImages };
+        }),
+      setEditDraft: (messageId, body) =>
+        set((s) => {
+          const { [messageId]: _, ...rest } = s.editDrafts;
+          if (body !== null) return { editDrafts: { ...rest, [messageId]: body } };
+          const { [editKey(messageId)]: __, ...draftImages } = s.draftImages;
+          return { editDrafts: rest, draftImages };
         }),
       addDraftImages: (key, images) =>
         set((s) => ({ draftImages: { ...s.draftImages, [key]: [...(s.draftImages[key] ?? []), ...images] } })),

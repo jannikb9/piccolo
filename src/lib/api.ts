@@ -10,6 +10,7 @@ import {
   mockCommits,
   mockDeleteComment,
   mockDiffPatch,
+  mockEditComment,
   mockFileText,
   mockFileVersions,
   mockFindSymbol,
@@ -109,6 +110,10 @@ export const api = {
 
   replyThread: (id: number, body: string, images: ImageUpload[]): Promise<void> =>
     isTauri ? invoke("reply_thread", { id, body, images }) : mockReply(id, body, images),
+
+  /** Replaces a message's text and attaches more images. */
+  editComment: (id: number, body: string, images: ImageUpload[]): Promise<void> =>
+    isTauri ? invoke("edit_comment", { id, body, images }) : mockEditComment(id, body, images),
 
   /** An attached image as base64. */
   attachmentData: (id: number): Promise<string> =>

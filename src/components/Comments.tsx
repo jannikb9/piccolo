@@ -1,10 +1,10 @@
-import { Bot, CheckCircle2, ChevronRight, RotateCcw, Trash2, User } from "lucide-react";
+import { Bot, CheckCircle2, ChevronRight, Pencil, RotateCcw, Trash2, User } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { showError } from "../lib/api";
 import { clipboardImages, prepareImage, type DraftImage } from "../lib/images";
-import { useDeleteComment, useReplyThread, useSetThreadResolved } from "../lib/queries";
+import { useDeleteComment, useEditComment, useReplyThread, useSetThreadResolved } from "../lib/queries";
 import { cn, timeAgo } from "../lib/utils";
-import { replyKey, useStore } from "../store";
+import { editKey, replyKey, useStore } from "../store";
 import type { CommentMessage, ExcerptRow, LineRange, Thread } from "../types";
 import { DraftImages, MessageImages, useDraftImages } from "./Images";
 import { Button, Tooltip } from "./ui";
@@ -51,7 +51,11 @@ function CommentField({
   const addImages = useStore((s) => s.addDraftImages);
   const hasImages = useDraftImages(imageKey).length > 0;
   useEffect(() => {
-    if (autoFocus) ref.current?.focus({ preventScroll: true });
+    const field = ref.current;
+    if (!autoFocus || !field) return;
+    field.focus({ preventScroll: true });
+    // After any text it starts with (an edit).
+    field.setSelectionRange(field.value.length, field.value.length);
   }, [autoFocus]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -253,6 +257,8 @@ export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode 
 function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: boolean }) {
   const isAgent = message.author === "agent";
   const Icon = isAgent ? Bot : User;
+  const editing = useStore((s) => s.editDrafts[message.id] !== undefined);
+  const setEditDraft = useStore((s) => s.setEditDraft);
   return (
     <div className="group border-border-subtle px-3 py-2.5 [&+&]:border-t">
       <div className="flex h-5 items-center gap-2 text-[12px]">
@@ -268,10 +274,32 @@ function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: bo
         <Tooltip label={new Date(message.createdAt).toLocaleString()}>
           <span className="tabular text-fg-subtle">{timeAgo(message.createdAt)}</span>
         </Tooltip>
-        <DeleteButton messageId={message.id} label={isFirst ? "Delete thread" : "Delete comment"} />
+        {message.editedAt && (
+          <Tooltip label={`Edited ${new Date(message.editedAt).toLocaleString()}`}>
+            <span className="text-fg-faint">edited</span>
+          </Tooltip>
+        )}
+        <span className="ml-auto flex items-center gap-0.5">
+          {/* Only your own comments; an agent's answer stays as it wrote it. */}
+          {!isAgent && !editing && (
+            <button
+              type="button"
+              aria-label="Edit comment"
+              onClick={() => setEditDraft(message.id, message.body)}
+              className="flex h-5 items-center rounded px-1 text-fg-faint opacity-0 transition-[opacity,colors] group-hover:opacity-100 hover:text-fg-muted"
+            >
+              <Pencil className="size-3" />
+            </button>
+          )}
+          <DeleteButton messageId={message.id} label={isFirst ? "Delete thread" : "Delete comment"} />
+        </span>
       </div>
-      {message.body && (
-        <p className="selectable mt-1 pl-7 leading-5 break-words whitespace-pre-wrap text-fg-muted">{message.body}</p>
+      {editing ? (
+        <MessageEditor message={message} />
+      ) : (
+        message.body && (
+          <p className="selectable mt-1 pl-7 leading-5 break-words whitespace-pre-wrap text-fg-muted">{message.body}</p>
+        )
       )}
       <MessageImages attachments={message.attachments} />
     </div>
@@ -294,13 +322,52 @@ function DeleteButton({ messageId, label }: { messageId: number; label: string }
       aria-label={label}
       onClick={() => (armed ? remove.mutate(messageId) : setArmed(true))}
       className={cn(
-        "ml-auto flex h-5 items-center gap-1 rounded px-1 text-[11px] transition-[opacity,colors]",
+        "flex h-5 items-center gap-1 rounded px-1 text-[11px] transition-[opacity,colors]",
         armed ? "bg-del-bg text-del opacity-100" : "text-fg-faint opacity-0 group-hover:opacity-100 hover:text-fg-muted",
       )}
     >
       <Trash2 className="size-3" />
       {armed && (label === "Delete thread" ? "Delete thread?" : "Delete?")}
     </button>
+  );
+}
+
+/** Edits a message in place; pasted screenshots are added to the ones it has. */
+function MessageEditor({ message }: { message: CommentMessage }) {
+  const draft = useStore((s) => s.editDrafts[message.id] ?? "");
+  const setEditDraft = useStore((s) => s.setEditDraft);
+  const editComment = useEditComment();
+  const key = editKey(message.id);
+  const images = useDraftImages(key);
+  const canSubmit = !!draft.trim() || images.length > 0 || message.attachments.length > 0;
+  const changed = draft.trim() !== message.body.trim() || images.length > 0;
+  const close = () => setEditDraft(message.id, null);
+  const submit = () => {
+    if (!canSubmit) return;
+    if (!changed) return close();
+    editComment.mutate({ id: message.id, body: draft, images }, { onSuccess: close });
+  };
+  return (
+    <div className="mt-1.5 ml-7 rounded-md border border-border bg-bg focus-within:border-border-strong">
+      <CommentField
+        imageKey={key}
+        value={draft}
+        onChange={(value) => setEditDraft(message.id, value)}
+        onSubmit={submit}
+        onCancel={() => !changed && close()}
+        placeholder="Edit the comment, or paste a screenshot"
+        autoFocus
+      />
+      <FieldActions
+        hint="⌘↩ to save"
+        submitLabel="Save"
+        canSubmit={canSubmit}
+        pending={editComment.isPending}
+        error={editComment.error}
+        onSubmit={submit}
+        onCancel={close}
+      />
+    </div>
   );
 }
 
