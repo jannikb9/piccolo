@@ -15,6 +15,9 @@ export function timeAgo(ms: number, now = Date.now()): string {
   return `${Math.round(d / 30)}mo`;
 }
 
+/** An agent as it signs (`codex`, `claude`), as shown: "Codex". */
+export const agentLabel = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
+
 /** A string that identifies a scope, e.g. for React keys. */
 export const scopeKey = (scope: DiffScope) => (typeof scope === "string" ? scope : `commit:${scope.commit}`);
 

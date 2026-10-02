@@ -6,6 +6,7 @@
 //! still makes sense once the code has changed.
 
 use crate::git::{self, DiffLine, DiffRange, LineKind, Result, Scope};
+use crate::sessions;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -129,6 +130,8 @@ pub struct Message {
     pub created_at: i64,
     /// When the text was last changed, if it was.
     pub edited_at: Option<i64>,
+    /// When the reviewer sent it to an agent's session; `None` until then (and for agents').
+    pub sent_at: Option<i64>,
 }
 
 /// A PNG to attach to a new message.
@@ -153,6 +156,8 @@ pub struct Thread {
     /// The diff around the commented lines when the comment was made.
     pub excerpt: Vec<ExcerptRow>,
     pub messages: Vec<Message>,
+    /// Open, and the reviewer has the last word but hasn't sent it to an agent yet.
+    pub pending: bool,
     pub created_at: i64,
     pub updated_at: i64,
     /// First line number and text of the commented lines on the end side, for relocating them.
@@ -170,6 +175,14 @@ pub struct Target {
     pub repo: String,
     pub branch: Option<String>,
     pub worktree: String,
+}
+
+impl Thread {
+    fn set_messages(&mut self, messages: Vec<Message>) {
+        self.pending = !self.resolved
+            && messages.last().is_some_and(|m| m.author == Author::Reviewer && m.sent_at.is_none());
+        self.messages = messages;
+    }
 }
 
 impl Target {
@@ -201,11 +214,11 @@ pub struct NewThread<'a> {
     pub images: &'a [NewImage],
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
-fn sql<T>(result: rusqlite::Result<T>) -> Result<T> {
+pub(crate) fn sql<T>(result: rusqlite::Result<T>) -> Result<T> {
     result.map_err(|e| format!("comments database: {e}"))
 }
 
@@ -216,13 +229,18 @@ pub fn db_path() -> PathBuf {
     app_data_dir().join(DB_FILE)
 }
 
-/// Where the app keeps its data: the comments and its settings.
+/// Where the app keeps its data: the comments and its settings. `REVIEW_DATA_DIR` moves it, to
+/// try the `review` command without touching the real data.
 pub fn app_data_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("REVIEW_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
     dirs::data_dir().unwrap_or_else(std::env::temp_dir).join(APP_IDENTIFIER)
 }
 
 pub struct Store {
-    conn: Connection,
+    /// Shared with sessions.rs: sending comments marks them sent, and sessions leave traces.
+    pub(crate) conn: Connection,
     images_dir: PathBuf,
 }
 
@@ -276,8 +294,9 @@ impl Store {
             );
             CREATE INDEX IF NOT EXISTS attachments_by_message ON attachments (message_id);",
         ))?;
+        sql(conn.execute_batch(sessions::SCHEMA))?;
         // Columns added after the first release.
-        for (column, definition) in [("edited_at", "INTEGER"), ("author_name", "TEXT")] {
+        for (column, definition) in [("edited_at", "INTEGER"), ("author_name", "TEXT"), ("sent_at", "INTEGER")] {
             let exists: bool = sql(conn.query_row(
                 "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = ?1",
                 [column],
@@ -285,6 +304,10 @@ impl Store {
             ))?;
             if !exists {
                 sql(conn.execute(&format!("ALTER TABLE messages ADD COLUMN {column} {definition}"), []))?;
+                // Comments from before sending existed were read with /local-review: count them as sent.
+                if column == "sent_at" {
+                    sql(conn.execute("UPDATE messages SET sent_at = created_at WHERE author = 'reviewer'", []))?;
+                }
             }
         }
         let images_dir = path.parent().unwrap_or(Path::new(".")).join(IMAGES_DIR);
@@ -307,7 +330,7 @@ impl Store {
         let mut threads = sql(rows.collect::<rusqlite::Result<Vec<_>>>())?;
         let mut messages = self.messages(threads.iter().map(|t| t.id))?;
         for thread in &mut threads {
-            thread.messages = messages.remove(&thread.id).unwrap_or_default();
+            thread.set_messages(messages.remove(&thread.id).unwrap_or_default());
         }
         Ok(threads)
     }
@@ -315,7 +338,7 @@ impl Store {
     pub fn thread(&self, id: i64) -> Result<Thread> {
         let thread = sql(self.conn.query_row("SELECT * FROM threads WHERE id = ?1", [id], thread_from_row).optional())?;
         let mut thread = thread.ok_or_else(|| format!("No comment #{id}"))?;
-        thread.messages = self.messages([id])?.remove(&id).unwrap_or_default();
+        thread.set_messages(self.messages([id])?.remove(&id).unwrap_or_default());
         Ok(thread)
     }
 
@@ -327,7 +350,7 @@ impl Store {
         }
         // Ids are integers, so inlining them is safe.
         let mut stmt = sql(self.conn.prepare(&format!(
-            "SELECT id, thread_id, author, body, created_at, edited_at, author_name FROM messages WHERE thread_id IN ({}) ORDER BY id",
+            "SELECT id, thread_id, author, body, created_at, edited_at, author_name, sent_at FROM messages WHERE thread_id IN ({}) ORDER BY id",
             ids.join(",")
         )))?;
         let rows = sql(stmt.query_map([], |row| {
@@ -342,6 +365,7 @@ impl Store {
                     attachments: Vec::new(),
                     created_at: row.get(4)?,
                     edited_at: row.get(5)?,
+                    sent_at: row.get(7)?,
                 },
             ))
         }))?;
@@ -460,7 +484,13 @@ impl Store {
         }
         let now = now_ms();
         let tx = sql(self.conn.transaction())?;
-        sql(tx.execute("UPDATE messages SET body = ?2, edited_at = ?3 WHERE id = ?1", params![message_id, body, now]))?;
+        // A changed comment is new to the agent: it goes out again with the next send.
+        sql(tx.execute(
+            "UPDATE messages SET body = ?2, edited_at = ?3,
+                sent_at = CASE WHEN author = 'reviewer' THEN NULL ELSE sent_at END
+             WHERE id = ?1",
+            params![message_id, body, now],
+        ))?;
         save_images(&tx, &self.images_dir, message_id, images)?;
         sql(tx.execute("UPDATE threads SET updated_at = ?2 WHERE id = ?1", params![thread_id, now]))?;
         sql(tx.commit())
@@ -577,6 +607,7 @@ fn thread_from_row(row: &Row) -> rusqlite::Result<Thread> {
         resolved: row.get("resolved")?,
         excerpt: serde_json::from_str(&json("excerpt")?).unwrap_or_default(),
         messages: Vec::new(),
+        pending: false,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
         anchor_start: row.get("anchor_start")?,

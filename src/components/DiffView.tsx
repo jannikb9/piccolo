@@ -34,6 +34,7 @@ import type { ChangedFile, DiffPatch, LineRange, Side, Thread, Worktree } from "
 import { CodeNavigation } from "./CodeNav";
 import { Composer, DetachedNote, ThreadCard } from "./Comments";
 import { FindBar } from "./FindBar";
+import { WorktreeContext } from "./SendToAgent";
 import { DiffBlocks, DiffCount, IconButton, StatusBadge, Tooltip, ViewedToggle } from "./ui";
 
 /** What an annotation row under a diff line holds. */
@@ -60,7 +61,8 @@ function toLineRange(selection: SelectedLineRange): LineRange {
 
 /** Changes whenever an annotation would render differently, to bump the item's version. */
 function annotationSignature(annotations: DiffLineAnnotation<Note>[]): string {
-  const thread = (t: Thread) => `${t.id}.${t.updatedAt}.${t.resolved ? 1 : 0}.${t.messages.map((m) => m.id).join(",")}`;
+  const thread = (t: Thread) =>
+    `${t.id}.${t.updatedAt}.${t.resolved ? 1 : 0}.${t.pending ? 1 : 0}.${t.messages.map((m) => m.id).join(",")}`;
   return annotations
     .map(({ side, lineNumber, metadata: note }) => {
       const detail =
@@ -462,18 +464,20 @@ export function DiffView({
           onClose={closeFind}
         />
       )}
-      <CodeView<Note>
-        ref={setRefs}
-        containerRef={containerRef}
-        items={items}
-        options={options}
-        onScroll={onScroll}
-        renderCustomHeader={renderHeader}
-        renderAnnotation={renderAnnotation}
-        renderCodeViewHeader={renderViewHeader}
-        className="h-full overflow-auto px-4"
-        style={viewStyle}
-      />
+      <WorktreeContext.Provider value={worktree}>
+        <CodeView<Note>
+          ref={setRefs}
+          containerRef={containerRef}
+          items={items}
+          options={options}
+          onScroll={onScroll}
+          renderCustomHeader={renderHeader}
+          renderAnnotation={renderAnnotation}
+          renderCodeViewHeader={renderViewHeader}
+          className="h-full overflow-auto px-4"
+          style={viewStyle}
+        />
+      </WorktreeContext.Provider>
       <CodeNavigation
         rootRef={rootRef}
         scrollerRef={containerRef}

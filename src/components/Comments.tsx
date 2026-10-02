@@ -1,12 +1,14 @@
-import { Bot, CheckCircle2, ChevronRight, Pencil, RotateCcw, Trash2, User } from "lucide-react";
+import { CheckCircle2, ChevronRight, Pencil, RotateCcw, Trash2, User } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { showError } from "../lib/api";
 import { clipboardImages, prepareImage, type DraftImage } from "../lib/images";
 import { useDeleteComment, useEditComment, useReplyThread, useSetThreadResolved } from "../lib/queries";
-import { cn, timeAgo } from "../lib/utils";
+import { agentLabel, cn, timeAgo } from "../lib/utils";
 import { editKey, replyKey, useStore } from "../store";
 import type { CommentMessage, ExcerptRow, LineRange, Thread } from "../types";
 import { DraftImages, MessageImages, useDraftImages } from "./Images";
+import { AgentIcon } from "./AgentIcon";
+import { SendThreadButton } from "./SendToAgent";
 import { Button, Tooltip } from "./ui";
 
 /** "line 12", "lines 12–14"; ranges across both sides of a unified diff name the sides. */
@@ -237,6 +239,7 @@ export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode 
       ))}
       <div className="flex items-start gap-2 border-t border-border-subtle p-2">
         <ReplyBox threadId={thread.id} />
+        <SendThreadButton thread={thread} />
         {thread.resolved ? (
           <Button
             onClick={() => {
@@ -261,13 +264,13 @@ export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode 
 /** "You", or the agent's name as it signed ("Codex"), or "Agent". */
 function authorLabel(message: CommentMessage): string {
   if (message.author === "reviewer") return "You";
-  const name = message.authorName;
-  return name ? name[0].toUpperCase() + name.slice(1) : "Agent";
+  return message.authorName ? agentLabel(message.authorName) : "Agent";
 }
 
 function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: boolean }) {
   const isAgent = message.author === "agent";
-  const Icon = isAgent ? Bot : User;
+  // Known agents show their own mark; others a bot, the reviewer a person.
+  const brand = isAgent && (message.authorName === "claude" || message.authorName === "codex");
   const editing = useStore((s) => s.editDrafts[message.id] !== undefined);
   const setEditDraft = useStore((s) => s.setEditDraft);
   return (
@@ -276,10 +279,10 @@ function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: bo
         <span
           className={cn(
             "grid size-5 shrink-0 place-items-center rounded-full",
-            isAgent ? "bg-accent-soft text-accent" : "bg-bg-active text-fg-muted",
+            brand ? "" : isAgent ? "bg-accent-soft text-accent" : "bg-bg-active text-fg-muted",
           )}
         >
-          <Icon className="size-3" />
+          {isAgent ? <AgentIcon name={message.authorName} className={brand ? "size-4" : "size-3"} /> : <User className="size-3" />}
         </span>
         <span className="font-medium text-fg">{authorLabel(message)}</span>
         <Tooltip label={new Date(message.createdAt).toLocaleString()}>

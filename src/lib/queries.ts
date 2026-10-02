@@ -3,8 +3,17 @@ import { useEffect, useMemo } from "react";
 import { useStore } from "../store";
 import type { DraftImage } from "./images";
 import { toUpload } from "./images";
-import type { DiffOptions, DiffScope, LineRange, RemoteBranch, Repo, Worktree } from "../types";
-import { api, confirmAction, onCommentsChanged, onRepoChanged, onWindowFocusChanged, pickRepoFolder, showError } from "./api";
+import type { AgentSession, DiffOptions, DiffScope, LineRange, RemoteBranch, Repo, Worktree } from "../types";
+import {
+  api,
+  confirmAction,
+  onCommentsChanged,
+  onRepoChanged,
+  onSessionsChanged,
+  onWindowFocusChanged,
+  pickRepoFolder,
+  showError,
+} from "./api";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,6 +36,7 @@ export const keys = {
   /** `revision` identifies the diff; threads are re-positioned whenever it changes. */
   threads: (path: string, base: string | null, scope: DiffScope, revision: number) =>
     ["threads", path, base, scope, revision] as const,
+  sessions: (paths: string[]) => ["sessions", paths] as const,
   symbol: (path: string, rev: string | null, name: string, from: string) => ["symbol", path, rev, name, from] as const,
   fileText: (path: string, rev: string | null, file: string) => ["file-text", path, rev, file] as const,
   branches: (repoId: string) => ["branches", repoId] as const,
@@ -95,6 +105,44 @@ export function useThreads(worktree: Worktree | undefined, base: string | null, 
     queryFn: () => api.listThreads(worktree!.path, base, scope),
     enabled: !!worktree,
     placeholderData: sameWorktree(worktree?.path),
+  });
+}
+
+const NO_SESSIONS: AgentSession[] = [];
+
+/**
+ * Claude Code sessions working on each worktree, read from Claude Code's registry whenever it
+ * changes (see `useLiveGitData`). The slow poll only catches sessions that crashed, which leave
+ * their registry file behind.
+ */
+function useAllSessions() {
+  const repos = useRepos().data;
+  const paths = useMemo(() => repos?.flatMap((r) => r.worktrees.map((w) => w.path)).sort() ?? [], [repos]);
+  return useQuery({
+    queryKey: keys.sessions(paths),
+    queryFn: () => api.listSessions(paths),
+    enabled: paths.length > 0,
+    refetchInterval: 30_000,
+    placeholderData: (previous) => previous,
+  });
+}
+
+/** Claude Code sessions working on the worktree: in it, or having run `review` on it. */
+export function useSessions(worktree: Worktree): AgentSession[] {
+  return useAllSessions().data?.[worktree.path] ?? NO_SESSIONS;
+}
+
+/** Sends the worktree's pending comments, or `threads` of them, to a session. */
+export function useSendComments(worktree: Worktree) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ session, threads }: { session: string; threads: number[] | null }) =>
+      api.sendComments(worktree.path, session, threads),
+    onError: (error) => showError("Couldn't send the comments", String(error)),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: ["threads"] });
+      client.invalidateQueries({ queryKey: ["sessions"] });
+    },
   });
 }
 
@@ -285,11 +333,17 @@ export function useLiveGitData() {
       client.invalidateQueries({ queryKey: ["patch"] });
       client.invalidateQueries({ queryKey: ["threads"] });
     });
-    const offComments = onCommentsChanged(() => client.invalidateQueries({ queryKey: ["threads"] }));
+    // A `review` command run by a session also records that it works on the worktree.
+    const offComments = onCommentsChanged(() => {
+      client.invalidateQueries({ queryKey: ["threads"] });
+      client.invalidateQueries({ queryKey: ["sessions"] });
+    });
+    const offSessions = onSessionsChanged(() => client.invalidateQueries({ queryKey: ["sessions"] }));
     return () => {
       offFocus();
       offRepo();
       offComments();
+      offSessions();
     };
   }, [client]);
 }

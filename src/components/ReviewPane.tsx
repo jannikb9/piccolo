@@ -18,6 +18,7 @@ import { useStore } from "../store";
 import type { ChangedFile, DiffPatch, DiffScope, Repo, Thread, Worktree } from "../types";
 import { CommitPicker } from "./CommitPicker";
 import { DiffView, type DiffViewHandle } from "./DiffView";
+import { SendToAgent } from "./SendToAgent";
 import { DiffCount, IconButton, Segmented, Skeleton, Tooltip } from "./ui";
 
 export function ReviewPane({
@@ -44,7 +45,7 @@ export function ReviewPane({
 
   return (
     <main className="@container flex h-full min-w-0 flex-col bg-bg">
-      <Toolbar repo={repo} worktree={worktree} scope={scope} files={files} />
+      <Toolbar repo={repo} worktree={worktree} scope={scope} files={files} threads={threads} />
       <div className="min-h-0 flex-1">
         {filesQuery.isPending || patchQuery.isPending ? (
           <DiffSkeleton />
@@ -95,7 +96,19 @@ export function ReviewPane({
   );
 }
 
-function Toolbar({ repo, worktree, scope, files }: { repo: Repo; worktree: Worktree; scope: DiffScope; files: ChangedFile[] }) {
+function Toolbar({
+  repo,
+  worktree,
+  scope,
+  files,
+  threads,
+}: {
+  repo: Repo;
+  worktree: Worktree;
+  scope: DiffScope;
+  files: ChangedFile[];
+  threads: Thread[];
+}) {
   const layout = useStore((s) => s.layout);
   const setLayout = useStore((s) => s.setLayout);
   const setScope = useStore((s) => s.setScope);
@@ -199,6 +212,7 @@ function Toolbar({ repo, worktree, scope, files }: { repo: Repo; worktree: Workt
             { value: "unified", label: <Rows2 className="size-3.5" />, tooltip: "Unified" },
           ]}
         />
+        <SendToAgent worktree={worktree} threads={threads} />
       </div>
     </header>
   );

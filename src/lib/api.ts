@@ -17,6 +17,8 @@ import {
   mockRemoteBranches,
   mockReorderRepos,
   mockReply,
+  mockSendComments,
+  mockSessions,
   mockRepos,
   mockSetResolved,
   mockThreads,
@@ -24,6 +26,7 @@ import {
 } from "../mock";
 import type { ImageUpload } from "./images";
 import type {
+  AgentSession,
   ChangedFile,
   Commit,
   DiffOptions,
@@ -122,6 +125,14 @@ export const api = {
   setThreadResolved: (id: number, resolved: boolean): Promise<void> =>
     isTauri ? invoke("set_thread_resolved", { id, resolved }) : mockSetResolved(id, resolved),
 
+  /** Claude Code sessions working on each worktree (by path); worktrees without one are left out. */
+  listSessions: (paths: string[]): Promise<Record<string, AgentSession[]>> =>
+    isTauri ? invoke("list_sessions", { paths }) : mockSessions(paths),
+
+  /** Sends the worktree's pending comments (or `threads` of them) to `session`; resolves to the threads sent. */
+  sendComments: (path: string, session: string, threads: number[] | null): Promise<number[]> =>
+    isTauri ? invoke("send_comments", { path, session, threads }) : mockSendComments(path, session, threads),
+
   /** Deletes a message; deleting a thread's first message deletes the thread. */
   deleteComment: (id: number): Promise<void> => (isTauri ? invoke("delete_comment", { id }) : mockDeleteComment(id)),
 
@@ -162,6 +173,13 @@ export function onRepoChanged(callback: (repoId: string) => void): () => void {
 export function onCommentsChanged(callback: () => void): () => void {
   if (!isTauri) return () => {};
   const unlisten = listen("comments-changed", () => callback());
+  return () => void unlisten.then((fn) => fn());
+}
+
+/** Fires when Claude Code sessions start, end, or change status or title. */
+export function onSessionsChanged(callback: () => void): () => void {
+  if (!isTauri) return () => {};
+  const unlisten = listen("sessions-changed", () => callback());
   return () => void unlisten.then((fn) => fn());
 }
 

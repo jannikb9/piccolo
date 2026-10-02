@@ -1,8 +1,9 @@
 //! Watches each repository's git directory so the sidebar updates when worktrees are added or
 //! removed, or a worktree switches branch — typically done by an agent in a terminal. Also watches
-//! the comments database, so replies written with the `review` command show up right away.
+//! the comments database, so replies written with the `review` command show up right away, and
+//! Claude Code's session registry, so sessions appear and go as they start and end.
 
-use crate::{comments, git};
+use crate::{comments, git, sessions};
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use std::collections::HashMap;
@@ -13,11 +14,13 @@ use tauri::{AppHandle, Emitter};
 
 pub const REPO_CHANGED: &str = "repo-changed";
 pub const COMMENTS_CHANGED: &str = "comments-changed";
+pub const SESSIONS_CHANGED: &str = "sessions-changed";
 
 #[derive(Default)]
 pub struct Watchers {
     repos: Mutex<HashMap<String, Debouncer<RecommendedWatcher>>>,
     comments: Mutex<Option<Debouncer<RecommendedWatcher>>>,
+    sessions: Mutex<Option<Debouncer<RecommendedWatcher>>>,
 }
 
 impl Watchers {
@@ -64,6 +67,22 @@ impl Watchers {
         let Ok(mut debouncer) = debouncer else { return };
         if debouncer.watcher().watch(&dir, RecursiveMode::NonRecursive).is_ok() {
             *self.comments.lock().unwrap() = Some(debouncer);
+        }
+    }
+
+    /// Each session's file there is written when it starts, changes status or title, and removed
+    /// when it ends. Without Claude Code installed there's nothing to watch.
+    pub fn watch_sessions(&self, app: &AppHandle) {
+        let dir = sessions::registry_dir();
+        let app = app.clone();
+        let debouncer = new_debouncer(Duration::from_millis(200), move |res: DebounceEventResult| {
+            if res.is_ok() {
+                let _ = app.emit(SESSIONS_CHANGED, ());
+            }
+        });
+        let Ok(mut debouncer) = debouncer else { return };
+        if debouncer.watcher().watch(&dir, RecursiveMode::NonRecursive).is_ok() {
+            *self.sessions.lock().unwrap() = Some(debouncer);
         }
     }
 }

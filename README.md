@@ -41,13 +41,34 @@ ln -sf /Applications/Review.app/Contents/MacOS/review ~/.local/bin/review
 Then in any worktree:
 
 ```bash
-review comments            # open comments on this branch, with the code they're about (--all, --json)
+review comments            # open comments on this branch, with the code they're about (--all, --json, or ids)
 review reply 12 "Fixed"    # answer as the agent; shows up in the app right away
 review resolve 12          # or: review reopen 12
+review comment src/a.ts:40-42 "Why?"   # an agent reviewing starts a thread (--removed for removed lines)
+review guide               # instructions for an agent reviewing the branch, e.g. Codex
 ```
+
+Agents sign with `--as <name>` (or `REVIEW_AUTHOR`; Claude Code signs as `claude` by itself), and
+the app shows the name. Every command takes `-C <worktree>`: a path, or a branch or worktree folder
+name from the repositories added to the app, for agents working from a parent folder.
 
 Tell your agent about it, e.g. in `CLAUDE.md` / `AGENTS.md`: *Run `review comments` to see review
 feedback on this branch; after addressing a comment, reply with `review reply <id> "<what changed>"`.*
+
+### Sending comments to a Claude session
+
+Comments you write stay unsent until you send them, like a GitHub review. **Send to Claude** in the
+toolbar (or **Send** on one comment) hands them to a running Claude Code session working on the
+worktree (with several, pick one by its title). A session works on a worktree when it runs in it,
+or when it ran a `review` command on it: run inside Claude Code, `review` records the session
+(`CLAUDE_CODE_SESSION_ID`) against the worktree, so a session in a folder above several
+repositories counts too once it has used `/local-review` there. The sidebar and toolbar show the
+sessions' icons, live: the app watches Claude Code's registry, `~/.claude/sessions/*.json`.
+
+Sending writes one message to the session's inbox socket, as Spock does to pair sessions; the
+session then addresses the comments with the `local-review` skill. Nothing to install, and nothing
+runs while you aren't sending. The socket format is Claude Code's own and undocumented, and a send
+isn't confirmed.
 
 ## Status
 
@@ -98,6 +119,8 @@ src/
     DiffView.tsx        CodeView from @pierre/diffs with our file headers and comment annotations
     CodeNav.tsx         ⌘-click lookup: results popover, file view over the diff, back history
     Comments.tsx        comment threads, composer, replies
+    SendToAgent.tsx     sending comments to a Claude Code session working on the worktree
+    AgentIcon.tsx       Claude and Codex marks for agents' messages and sessions
     SettingsDialog.tsx  settings (⌘, / app menu): syntax theme
     ui.tsx              primitives: Tooltip, Segmented, badges, Viewed toggle
   lib/
@@ -117,8 +140,10 @@ src-tauri/src/
   git.rs                git CLI wrapper: worktrees, status, changed files, patches, file contents (+ tests)
   comments.rs           comment store (SQLite), anchoring to lines as files change, Tauri commands (+ tests)
   cli.rs                the `review` command (the app binary run with a subcommand)
+  sessions.rs           Claude Code sessions from its registry; sending comments to their inbox socket (+ tests)
   navigate.rs           definitions and references via `git grep` (+ tests)
   repos.rs              saved repo list and the Tauri commands
-  watch.rs              watches .git for worktree changes, and the comments database for agent replies
+  watch.rs              watches .git for worktree changes, the comments database for agent replies, and
+                        Claude Code's session registry
   menu.rs               native menu bar with Settings… (⌘,)
 ```

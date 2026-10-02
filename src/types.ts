@@ -117,6 +117,8 @@ export type CommentMessage = {
   createdAt: number;
   /** When the text was last changed, if it was. */
   editedAt: number | null;
+  /** When the reviewer sent it to an agent's session; `null` until then (and for agents'). */
+  sentAt: number | null;
 };
 
 /** A comment on some lines and its replies. Stored per branch; agents answer via the `review` CLI. */
@@ -132,8 +134,25 @@ export type Thread = {
   /** The diff around the commented lines when the comment was made. */
   excerpt: ExcerptRow[];
   messages: CommentMessage[];
+  /** Open, and the reviewer has the last word but hasn't sent it to an agent yet. */
+  pending: boolean;
   createdAt: number;
   updatedAt: number;
+};
+
+/** A running Claude Code session that works on a worktree, from Claude Code's session registry. */
+export type AgentSession = {
+  id: string;
+  /** Who runs it; only `claude` so far. */
+  agent: string;
+  /** Its title, as Claude Code shows it in its sidebar. */
+  title: string | null;
+  /** `busy` while a turn runs (comments sent then wait for it to end), else `idle`. */
+  status: string | null;
+  /** The folder it runs in: the worktree, or a folder above it holding several repositories. */
+  cwd: string;
+  inWorktree: boolean;
+  startedAt: number;
 };
 
 /** A line mentioning a name, from a whole-word search (src-tauri/src/navigate.rs). */

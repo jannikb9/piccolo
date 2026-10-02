@@ -2,6 +2,7 @@
 import { hashString } from "./lib/diff";
 import type { ImageUpload } from "./lib/images";
 import type {
+  AgentSession,
   Attachment,
   ChangedFile,
   Commit,
@@ -378,6 +379,7 @@ const threads: Record<string, Thread[]> = {
       position: lines(24, 26),
       resolved: false,
       excerpt: excerpt(lines(24, 26)),
+      pending: false,
       messages: [
         {
           id: 1,
@@ -387,6 +389,7 @@ const threads: Record<string, Thread[]> = {
           createdAt: minutesAgo(42),
           editedAt: null,
           authorName: null,
+          sentAt: minutesAgo(41),
         },
         {
           id: 2,
@@ -396,6 +399,7 @@ const threads: Record<string, Thread[]> = {
           createdAt: minutesAgo(6),
           editedAt: null,
           authorName: "claude",
+          sentAt: null,
         },
       ],
       createdAt: minutesAgo(42),
@@ -408,7 +412,8 @@ const threads: Record<string, Thread[]> = {
       position: null,
       resolved: false,
       excerpt: excerpt(lines(29, 29)),
-      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null }],
+      pending: false,
+      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null, sentAt: null }],
       createdAt: minutesAgo(40),
       updatedAt: minutesAgo(40),
     },
@@ -419,6 +424,7 @@ const threads: Record<string, Thread[]> = {
       position: lines(21, 22),
       resolved: false,
       excerpt: excerpt(lines(21, 22)),
+      pending: false,
       messages: [
         {
           id: 5,
@@ -428,6 +434,7 @@ const threads: Record<string, Thread[]> = {
           createdAt: minutesAgo(3),
           editedAt: null,
           authorName: "codex",
+          sentAt: null,
         },
       ],
       createdAt: minutesAgo(3),
@@ -440,7 +447,8 @@ const threads: Record<string, Thread[]> = {
       position: lines(21, 21),
       resolved: true,
       excerpt: excerpt(lines(21, 21)),
-      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null }],
+      pending: false,
+      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null, sentAt: minutesAgo(90) }],
       createdAt: minutesAgo(90),
       updatedAt: minutesAgo(30),
     },
@@ -449,8 +457,53 @@ const threads: Record<string, Thread[]> = {
 
 const findThread = (id: number) => Object.values(threads).flat().find((t) => t.id === id);
 
+/** As the backend decides it: open, with an unsent message from the reviewer last. */
+const isPending = (t: Thread) => {
+  const last = t.messages[t.messages.length - 1];
+  return !t.resolved && last?.author === "reviewer" && last.sentAt === null;
+};
+
 export function mockThreads(worktreePath: string): Promise<Thread[]> {
-  return delay(structuredClone(threads[worktreePath] ?? []));
+  return delay(structuredClone(threads[worktreePath] ?? []).map((t) => ({ ...t, pending: isPending(t) })));
+}
+
+/**
+ * A Claude session in the first worktree, so sending can be tried in the browser; plus one in the
+ * folder above it that reviewed it, after `localStorage["mock-sessions"] = "2"`.
+ */
+export function mockSessions(paths: string[]): Promise<Record<string, AgentSession[]>> {
+  const worktreePath = "~/projects/spoke-app/auth-session";
+  if (!paths.includes(worktreePath)) return delay({});
+  const sessions: AgentSession[] = [
+    {
+      id: "mock-1",
+      agent: "claude",
+      title: "Refresh sessions in the auth middleware",
+      status: "idle",
+      cwd: worktreePath,
+      inWorktree: true,
+      startedAt: minutesAgo(12),
+    },
+  ];
+  if (localStorage.getItem("mock-sessions") === "2") {
+    sessions.push({
+      id: "mock-2",
+      agent: "claude",
+      title: "Write tests for token expiry",
+      status: "busy",
+      cwd: "~/projects",
+      inWorktree: false,
+      startedAt: minutesAgo(48),
+    });
+  }
+  return delay({ [worktreePath]: sessions });
+}
+
+export function mockSendComments(worktreePath: string, _session: string, only: number[] | null): Promise<number[]> {
+  const sent = (threads[worktreePath] ?? []).filter((t) => isPending(t) && (!only || only.includes(t.id)));
+  if (sent.length === 0) return Promise.reject("There are no comments to send");
+  for (const t of sent) t.messages[t.messages.length - 1].sentAt = Date.now();
+  return delay(sent.map((t) => t.id));
 }
 
 /** Pasted images by attachment id, as base64. */
@@ -482,7 +535,8 @@ export function mockAddThread(
     position: range,
     resolved: false,
     excerpt: excerpt(range),
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null }],
+    pending: false,
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null }],
     createdAt: now,
     updatedAt: now,
   });
@@ -499,6 +553,7 @@ export function mockReply(id: number, body: string, images: ImageUpload[]): Prom
     createdAt: Date.now(),
     editedAt: null,
     authorName: null,
+    sentAt: null,
   });
   return delay(undefined);
 }
@@ -512,6 +567,7 @@ export function mockEditComment(messageId: number, body: string, images: ImageUp
     message.body = body.trim();
     message.attachments.push(...mockAttachments(images));
     message.editedAt = thread.updatedAt = Date.now();
+    if (message.author === "reviewer") message.sentAt = null;
   }
   return delay(undefined);
 }

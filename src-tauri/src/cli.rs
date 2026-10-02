@@ -11,7 +11,9 @@ const HELP: &str = "\
 review — read, answer and write review comments on the current branch
 
 Usage:
-  review comments [--all] [--json]   Open comments on this branch (--all includes resolved ones)
+  review comments [<id>...] [--all] [--json]
+                                     Open comments on this branch (--all includes resolved ones),
+                                     or only the ones whose ids are given
   review reply <id> <message>        Reply to a comment
   review comment <file>:<line>[-<end>] [--removed] <message>
                                      Comment on lines of a file as it is now (--removed: lines the
@@ -39,7 +41,10 @@ pub fn run_if_command() -> Option<i32> {
         eprintln!("review: missing command\n\n{HELP}");
         return Some(1);
     }
-    let result = Folder::resolve(worktree.as_deref()).and_then(|folder| run(command, &args[1..], &folder));
+    let result = Folder::resolve(worktree.as_deref()).and_then(|folder| {
+        note_session(&folder);
+        run(command, &args[1..], &folder)
+    });
     Some(match result {
         Ok(()) => 0,
         Err(e) => {
@@ -47,6 +52,16 @@ pub fn run_if_command() -> Option<i32> {
             1
         }
     })
+}
+
+/// Run inside a Claude Code session, records that the session works on this worktree, so the
+/// app offers it comments for the worktree even when it runs in a folder above it. Best effort:
+/// the command itself doesn't depend on it.
+fn note_session(folder: &Folder) {
+    let Some(session) = std::env::var("CLAUDE_CODE_SESSION_ID").ok().filter(|id| !id.trim().is_empty()) else { return };
+    if let (Ok(target), Ok(store)) = (folder.target(), Store::open()) {
+        let _ = store.note_session(&session, &target.worktree);
+    }
 }
 
 /// Removes `-C <worktree>` from anywhere in the arguments.
@@ -129,10 +144,8 @@ fn run(command: &str, args: &[String], folder: &Folder) -> Result<()> {
     match command {
         "comments" => {
             let args = Args::parse(args, &["--all", "--json"])?;
-            if !args.positional.is_empty() {
-                return Err(format!("unexpected argument {}\n\n{HELP}", args.positional[0]));
-            }
-            list(folder, args.has("--all"), args.has("--json"))
+            let only = args.positional.iter().map(|id| thread_id(std::slice::from_ref(id))).collect::<Result<Vec<_>>>()?;
+            list(folder, &only, args.has("--all"), args.has("--json"))
         }
         "reply" => {
             let args = Args::parse(args, &["--as"])?;
@@ -202,6 +215,7 @@ impl Args {
     fn has(&self, flag: &str) -> bool {
         self.flags.iter().any(|f| f == flag)
     }
+
 }
 
 fn thread_id(args: &[String]) -> Result<i64> {
@@ -246,9 +260,12 @@ fn author_label(author: Author, name: Option<&str>) -> String {
     }
 }
 
-fn list(folder: &Folder, include_resolved: bool, json: bool) -> Result<()> {
+fn list(folder: &Folder, only: &[i64], include_resolved: bool, json: bool) -> Result<()> {
     let target = folder.target()?;
-    let mut threads = Store::open()?.threads(&target, include_resolved)?;
+    let mut threads = Store::open()?.threads(&target, include_resolved || !only.is_empty())?;
+    if !only.is_empty() {
+        threads.retain(|t| only.contains(&t.id));
+    }
     comments::locate_in_worktree(&mut threads, Path::new(&target.worktree));
     if json {
         println!("{}", serde_json::to_string_pretty(&threads).map_err(|e| e.to_string())?);

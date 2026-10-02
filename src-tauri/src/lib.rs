@@ -5,6 +5,7 @@ mod imports;
 mod menu;
 mod navigate;
 mod repos;
+mod sessions;
 mod watch;
 
 use repos::Repos;
@@ -26,6 +27,7 @@ pub fn run() {
                 watchers.watch(handle, &path);
             }
             watchers.watch_comments(handle);
+            watchers.watch_sessions(handle);
             app.manage(repos);
             app.manage(watchers);
             Ok(())
@@ -51,6 +53,8 @@ pub fn run() {
             comments::set_thread_resolved,
             comments::delete_comment,
             comments::attachment_data,
+            sessions::list_sessions,
+            sessions::send_comments,
             navigate::find_symbol,
             navigate::file_text,
         ])

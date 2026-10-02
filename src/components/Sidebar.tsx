@@ -34,11 +34,13 @@ import {
   useRemoveRepo,
   useReorderRepos,
   useRepos,
+  useSessions,
   useWorktreeStats,
 } from "../lib/queries";
-import { cn, timeAgo } from "../lib/utils";
+import { agentLabel, cn, timeAgo } from "../lib/utils";
 import { sortWorktrees, useDiffOptions, useStore } from "../store";
 import type { Repo, Worktree } from "../types";
+import { AgentIcon } from "./AgentIcon";
 import { BranchPicker } from "./BranchPicker";
 import { ContextMenu, DiffCount, DropdownMenu, IconButton, Skeleton, Tooltip, type MenuItem } from "./ui";
 
@@ -238,6 +240,7 @@ function WorktreeRow({
   const scope = useStore((s) => s.scope);
   const diffOptions = useDiffOptions();
   const stats = useWorktreeStats(wt, base);
+  const sessions = useSessions(wt);
   const deleteWorktree = useDeleteWorktree();
   // Shared by right-click and the "⋮" button.
   const menu: MenuItem[] = [
@@ -271,9 +274,18 @@ function WorktreeRow({
       <Tooltip
         side="right"
         label={
-          <span className="flex items-center gap-3">
-            <span className="font-mono">{wt.path}</span>
-            {shortcut && <kbd className="font-sans text-fg-subtle">⌘{shortcut}</kbd>}
+          <span className="flex flex-col gap-1">
+            <span className="flex items-center gap-3">
+              <span className="font-mono">{wt.path}</span>
+              {shortcut && <kbd className="font-sans text-fg-subtle">⌘{shortcut}</kbd>}
+            </span>
+            {sessions.map((s) => (
+              <span key={s.id} className="flex max-w-80 items-center gap-1.5">
+                <AgentIcon name={s.agent} className="size-3.5" />
+                <span className="truncate text-fg">{s.title ?? `${agentLabel(s.agent)} session`}</span>
+                {s.status === "busy" && <span className="shrink-0 text-fg-subtle">working</span>}
+              </span>
+            ))}
           </span>
         }
       >
@@ -293,8 +305,14 @@ function WorktreeRow({
             ) : (
               <GitBranch className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} />
             )}
-            <span className={cn("truncate text-[13px] font-medium", selected ? "text-fg" : "text-fg-muted group-hover:text-fg")}>
-              {wt.branch ?? `detached @ ${wt.head}`}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className={cn("truncate text-[13px] font-medium", selected ? "text-fg" : "text-fg-muted group-hover:text-fg")}>
+                {wt.branch ?? `detached @ ${wt.head}`}
+              </span>
+              {/* Agent sessions working on it, named in the tooltip. */}
+              {[...new Set(sessions.map((s) => s.agent))].map((agent) => (
+                <AgentIcon key={agent} name={agent} className="size-3 shrink-0" />
+              ))}
             </span>
             {/* The "⋮" button takes its place on hover and while its menu is open. */}
             <span className="tabular text-[11px] text-fg-faint group-hover/row:invisible group-has-[[data-state=open]]/row:invisible">
