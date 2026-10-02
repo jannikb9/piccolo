@@ -1,8 +1,10 @@
 // Placeholder data used when the UI runs in a plain browser (`pnpm dev`) instead of the desktop app.
+import { hashString } from "./lib/diff";
 import type { ImageUpload } from "./lib/images";
 import type {
   Attachment,
   ChangedFile,
+  Commit,
   DiffPatch,
   DiffScope,
   ExcerptRow,
@@ -106,8 +108,43 @@ const merged = new Set(["~/projects/spoke-app/nav"]);
 
 const delay = <T>(value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), 150));
 
-const inScope = (worktreePath: string, scope: DiffScope) =>
-  (files[worktreePath] ?? []).filter((f) => scope === "all" || f.committed === (scope === "committed"));
+/** Each worktree's commits, newest first. */
+const commitLog: Record<string, [subject: string, author: string, minutes: number][]> = {
+  "~/projects/spoke-app/auth-session": [
+    ["Refresh the session before it expires", "Claude", 4],
+    ["Retry requests once after a token refresh", "Claude", 21],
+    ["Move tokens out of the legacy cookie", "Jannik Bertram", 95],
+  ],
+  "~/projects/spoke-app/billing": [
+    ["Regenerate the billing schema", "Claude", 38],
+    ["Handle invoice.paid in the webhook handler", "Claude", 52],
+    ["Split webhook events into their own module", "Claude", 70],
+  ],
+  "~/projects/spoke-app/nav": [["Keep the nav from overflowing on small screens", "Jannik Bertram", 60 * 26]],
+  "~/projects/spoke-app/codemod": [
+    ["Migrate the remaining modules to the new logger", "Claude", 60 * 3],
+    ["Migrate the first modules to the new logger", "Claude", 60 * 4],
+  ],
+};
+
+const commitsOf = (worktreePath: string): Commit[] =>
+  (commitLog[worktreePath] ?? []).map(([subject, author, minutes]) => {
+    const sha = hashString(worktreePath + subject).toString(16).padStart(8, "0").repeat(5);
+    return { sha, shortSha: sha.slice(0, 7), subject, author, time: minutesAgo(minutes) };
+  });
+
+export function mockCommits(worktreePath: string): Promise<Commit[]> {
+  return delay(commitsOf(worktreePath));
+}
+
+const inScope = (worktreePath: string, scope: DiffScope) => {
+  const all = files[worktreePath] ?? [];
+  if (typeof scope === "string") return all.filter((f) => scope === "all" || f.committed === (scope === "committed"));
+  // Committed files are spread over the commits in turn.
+  const commits = commitsOf(worktreePath);
+  const index = commits.findIndex((c) => c.sha === scope.commit);
+  return all.filter((f) => f.committed).filter((_, i) => i % commits.length === index);
+};
 
 export function mockChangedFiles(worktreePath: string, scope: DiffScope): Promise<ChangedFile[]> {
   return delay(inScope(worktreePath, scope).map(({ committed: _, ...f }) => f));

@@ -645,7 +645,7 @@ pub async fn list_threads(path: String, base: Option<String>, scope: Scope) -> R
     blocking(move || {
         let wt = Path::new(&path);
         let mut threads = Store::open()?.threads(&Target::of(wt)?, true)?;
-        let range = DiffRange::resolve(wt, base.as_deref(), scope)?;
+        let range = DiffRange::resolve(wt, base.as_deref(), &scope)?;
         locate_in_view(&mut threads, wt, &range);
         Ok(threads)
     })
@@ -666,7 +666,7 @@ pub async fn add_thread(
 ) -> Result<i64> {
     blocking(move || {
         let wt = Path::new(&path);
-        let diff_range = DiffRange::resolve(wt, base.as_deref(), scope)?;
+        let diff_range = DiffRange::resolve(wt, base.as_deref(), &scope)?;
         let images = decode_images(images)?;
         let new = NewThread { path: &file, old_path: old_file.as_deref(), range, body: &body, images: &images };
         Store::open()?.add_thread(&Target::of(wt)?, wt, &diff_range, new)
@@ -750,7 +750,7 @@ pub(crate) mod tests {
         let (root, wt, mut store) = fixture("follow");
         let target = Target::of(&wt).unwrap();
         assert_eq!(target.branch.as_deref(), Some("feat/x"));
-        let range = DiffRange::resolve(&wt, Some("main"), Scope::All).unwrap();
+        let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
 
         let new = NewThread { path: "a.txt", old_path: None, range: additions(3, 4), body: " Why uppercase? ", images: &[] };
         let id = store.add_thread(&target, &wt, &range, new).unwrap();
@@ -798,7 +798,7 @@ pub(crate) mod tests {
     fn anchors_ranges_across_sides_and_untracked_files() {
         let (root, wt, mut store) = fixture("sides");
         let target = Target::of(&wt).unwrap();
-        let range = DiffRange::resolve(&wt, Some("main"), Scope::All).unwrap();
+        let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
 
         // From the removed "three" to the added "FOUR", as a drag in the unified view would select.
         let across = LineRange { start_side: Side::Deletions, start_line: 3, end_side: Side::Additions, end_line: 4 };
@@ -836,7 +836,7 @@ pub(crate) mod tests {
     fn stores_pasted_images_as_files() {
         let (root, wt, mut store) = fixture("images");
         let target = Target::of(&wt).unwrap();
-        let range = DiffRange::resolve(&wt, Some("main"), Scope::All).unwrap();
+        let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
         let png = |extra: &[u8]| NewImage { width: 4, height: 3, data: [PNG_SIGNATURE, extra].concat() };
 
         // A comment can be only an image.

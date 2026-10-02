@@ -1,5 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
-import type { ChangedFile } from "../types";
+import type { ChangedFile, DiffScope } from "../types";
 
 export const cn = (...inputs: ClassValue[]) => clsx(inputs);
 
@@ -14,6 +14,9 @@ export function timeAgo(ms: number, now = Date.now()): string {
   if (d < 30) return `${d}d`;
   return `${Math.round(d / 30)}mo`;
 }
+
+/** A string that identifies a scope, e.g. for React keys. */
+export const scopeKey = (scope: DiffScope) => (typeof scope === "string" ? scope : `commit:${scope.commit}`);
 
 export function splitPath(path: string): { dir: string; base: string } {
   const i = path.lastIndexOf("/");

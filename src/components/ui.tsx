@@ -139,7 +139,8 @@ export function Segmented<T extends string>({
   options,
   label,
 }: {
-  value: T;
+  /** `null` when none of the options applies. */
+  value: T | null;
   onChange: (value: T) => void;
   options: SegmentedOption<T>[];
   label: string;
@@ -148,7 +149,7 @@ export function Segmented<T extends string>({
     <ToggleGroup.Root
       type="single"
       aria-label={label}
-      value={value}
+      value={value ?? ""}
       // Radix emits "" when the active item is clicked again; a segmented control always has a value.
       onValueChange={(v) => v && onChange(v as T)}
       className="flex h-7 items-center gap-px rounded-lg border border-border-subtle bg-bg-inset p-0.5"

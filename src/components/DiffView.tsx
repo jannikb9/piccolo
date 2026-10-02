@@ -6,7 +6,7 @@ import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
 import { unsafeCSS, viewStyle } from "../lib/codeViewStyle";
 import { emptyDiff, hashString, isCollapsedByDefault, parsePatch } from "../lib/diff";
-import { useAddThread } from "../lib/queries";
+import { useAddThread, useDiffScope } from "../lib/queries";
 import {
   clearMatches,
   FIND_LAYER,
@@ -469,7 +469,7 @@ function DraftComposer({
   range: LineRange;
   onClose: (key: string) => void;
 }) {
-  const scope = useStore((s) => s.scope);
+  const scope = useDiffScope(worktree, base);
   const addThread = useAddThread(worktree, base, scope);
   if (!file) return null;
   return (

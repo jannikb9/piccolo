@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 import type { CodeThemeId } from "./lib/codeThemes";
 import type { DraftImage } from "./lib/images";
 import type { SectionId } from "./lib/sections";
-import type { DiffLayout, DiffOptions, DiffScope, LineRange, Repo, Worktree } from "./types";
+import type { DiffLayout, DiffOptions, LineRange, Repo, ScopeMode, Worktree } from "./types";
 
 type PathSet = Record<string, true>;
 
@@ -24,7 +24,9 @@ type State = {
   /** File list sections the user opened or closed; others use `COLLAPSED_BY_DEFAULT`. */
   collapsedSections: Partial<Record<SectionId, boolean>>;
   layout: DiffLayout;
-  scope: DiffScope;
+  scope: ScopeMode;
+  /** worktreeId → the commit being viewed on its own, instead of `scope`. */
+  commits: Record<string, string>;
   hideWhitespace: boolean;
   hideImports: boolean;
   codeTheme: CodeThemeId;
@@ -49,7 +51,9 @@ type State = {
   toggleRepo: (id: string) => void;
   setSectionCollapsed: (id: SectionId, collapsed: boolean) => void;
   setLayout: (layout: DiffLayout) => void;
-  setScope: (scope: DiffScope) => void;
+  setScope: (scope: ScopeMode) => void;
+  /** Shows only what `sha` changed in the worktree; `null` goes back to `scope`. */
+  selectCommit: (worktreeId: string, sha: string | null) => void;
   toggleHideWhitespace: () => void;
   toggleHideImports: () => void;
   setCodeTheme: (theme: CodeThemeId) => void;
@@ -80,6 +84,7 @@ export const useStore = create<State>()(
       collapsedSections: {},
       layout: "split",
       scope: "all",
+      commits: {},
       hideWhitespace: false,
       hideImports: false,
       codeTheme: "github",
@@ -96,6 +101,11 @@ export const useStore = create<State>()(
       setSectionCollapsed: (id, collapsed) => set((s) => ({ collapsedSections: { ...s.collapsedSections, [id]: collapsed } })),
       setLayout: (layout) => set({ layout }),
       setScope: (scope) => set({ scope }),
+      selectCommit: (wt, sha) =>
+        set((s) => {
+          const { [wt]: _, ...rest } = s.commits;
+          return { commits: sha ? { ...rest, [wt]: sha } : rest };
+        }),
       toggleHideWhitespace: () => set((s) => ({ hideWhitespace: !s.hideWhitespace })),
       toggleHideImports: () => set((s) => ({ hideImports: !s.hideImports })),
       setCodeTheme: (codeTheme) => set({ codeTheme }),

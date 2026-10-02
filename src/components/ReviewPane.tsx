@@ -1,7 +1,6 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  ArrowLeft,
   Columns2,
   Copy,
   FolderGit2,
@@ -14,15 +13,17 @@ import {
 } from "lucide-react";
 import type { ReactNode, Ref } from "react";
 import { useAddRepo, useWorktreeStats } from "../lib/queries";
-import { cn, totals } from "../lib/utils";
+import { cn, scopeKey, totals } from "../lib/utils";
 import { useStore } from "../store";
-import type { ChangedFile, DiffPatch, Repo, Thread, Worktree } from "../types";
+import type { ChangedFile, DiffPatch, DiffScope, Repo, Thread, Worktree } from "../types";
+import { CommitPicker } from "./CommitPicker";
 import { DiffView, type DiffViewHandle } from "./DiffView";
 import { DiffCount, IconButton, Segmented, Skeleton, Tooltip } from "./ui";
 
 export function ReviewPane({
   repo,
   worktree,
+  scope,
   files,
   filesQuery,
   patchQuery,
@@ -31,6 +32,7 @@ export function ReviewPane({
 }: {
   repo: Repo;
   worktree: Worktree;
+  scope: DiffScope;
   /** `filesQuery.data` in display order. */
   files: ChangedFile[];
   filesQuery: UseQueryResult<ChangedFile[]>;
@@ -38,12 +40,11 @@ export function ReviewPane({
   threads: Thread[];
   viewRef: Ref<DiffViewHandle>;
 }) {
-  const scope = useStore((s) => s.scope);
   const query = filesQuery.isError ? filesQuery : patchQuery;
 
   return (
     <main className="@container flex h-full min-w-0 flex-col bg-bg">
-      <Toolbar repo={repo} worktree={worktree} files={files} />
+      <Toolbar repo={repo} worktree={worktree} scope={scope} files={files} />
       <div className="min-h-0 flex-1">
         {filesQuery.isPending || patchQuery.isPending ? (
           <DiffSkeleton />
@@ -65,7 +66,9 @@ export function ReviewPane({
           </CenteredMessage>
         ) : files.length === 0 ? (
           <CenteredMessage icon={<GitCompareArrows className="size-5" />} title="No changes">
-            {repo.defaultBranch && !(scope === "uncommitted") ? (
+            {typeof scope === "object" ? (
+              "This commit doesn't change any files."
+            ) : repo.defaultBranch && !(scope === "uncommitted") ? (
               <>
                 <span className="font-mono">{worktree.branch ?? worktree.head}</span> has no differences from{" "}
                 <span className="font-mono">{repo.defaultBranch}</span>
@@ -78,7 +81,7 @@ export function ReviewPane({
         ) : (
           // Remounted per worktree and scope so each starts at the top.
           <DiffView
-            key={`${worktree.id}:${scope}`}
+            key={`${worktree.id}:${scopeKey(scope)}`}
             worktree={worktree}
             base={repo.defaultBranch}
             files={files}
@@ -92,11 +95,11 @@ export function ReviewPane({
   );
 }
 
-function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; files: ChangedFile[] }) {
+function Toolbar({ repo, worktree, scope, files }: { repo: Repo; worktree: Worktree; scope: DiffScope; files: ChangedFile[] }) {
   const layout = useStore((s) => s.layout);
   const setLayout = useStore((s) => s.setLayout);
-  const scope = useStore((s) => s.scope);
   const setScope = useStore((s) => s.setScope);
+  const selectCommit = useStore((s) => s.selectCommit);
   const hideWhitespace = useStore((s) => s.hideWhitespace);
   const toggleHideWhitespace = useStore((s) => s.toggleHideWhitespace);
   const hideImports = useStore((s) => s.hideImports);
@@ -124,7 +127,19 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
           ) : (
             <GitBranch className="size-3.5 shrink-0 text-fg-subtle" />
           )}
-          <span className="selectable truncate">{branch}</span>
+          <Tooltip
+            label={
+              repo.defaultBranch ? (
+                <>
+                  Into <span className="font-mono">{repo.defaultBranch}</span>
+                </>
+              ) : (
+                "No main or master branch found; showing uncommitted changes"
+              )
+            }
+          >
+            <span className="selectable truncate">{branch}</span>
+          </Tooltip>
           <IconButton
             label="Copy branch name"
             className="size-5 opacity-0 group-hover:opacity-100"
@@ -133,12 +148,6 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
             <Copy className="size-3" />
           </IconButton>
         </span>
-        <ArrowLeft className="size-3.5 shrink-0 text-fg-faint" aria-label="into" />
-        <Tooltip label={repo.defaultBranch ? "Base branch" : "No main or master branch found; showing uncommitted changes"}>
-          <span className="flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-[12.5px] font-medium text-fg-muted">
-            {repo.defaultBranch ?? "HEAD"}
-          </span>
-        </Tooltip>
         <span className="pointer-events-none ml-2 hidden shrink-0 items-center gap-2 text-[12px] text-fg-subtle @4xl:flex">
           <span className="tabular">
             {files.length} {files.length === 1 ? "file" : "files"}
@@ -148,6 +157,21 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        <CommitPicker worktree={worktree} base={repo.defaultBranch} scope={scope} />
+        <Segmented
+          label="Changes to show"
+          // Nothing is chosen while a single commit is shown; choosing a mode leaves the commit.
+          value={typeof scope === "string" ? scope : null}
+          onChange={(mode) => {
+            setScope(mode);
+            selectCommit(worktree.id, null);
+          }}
+          options={[
+            { value: "all", label: "All", tooltip: "Committed and uncommitted changes" },
+            { value: "committed", label: "Committed", tooltip: "Commits on this branch only" },
+            { value: "uncommitted", label: "Uncommitted", tooltip: "Working tree changes only" },
+          ]}
+        />
         <div className="flex items-center gap-0.5">
           <IconButton
             label={hideWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
@@ -166,16 +190,6 @@ function Toolbar({ repo, worktree, files }: { repo: Repo; worktree: Worktree; fi
             <Import className="size-3.5" />
           </IconButton>
         </div>
-        <Segmented
-          label="Changes to show"
-          value={scope}
-          onChange={setScope}
-          options={[
-            { value: "all", label: "All", tooltip: "Committed and uncommitted changes" },
-            { value: "committed", label: "Committed", tooltip: "Commits on this branch only" },
-            { value: "uncommitted", label: "Uncommitted", tooltip: "Working tree changes only" },
-          ]}
-        />
         <Segmented
           label="Diff layout"
           value={layout}

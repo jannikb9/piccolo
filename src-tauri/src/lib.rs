@@ -38,6 +38,7 @@ pub fn run() {
             repos::worktree_stats,
             repos::changed_files,
             repos::diff_patch,
+            repos::commits,
             repos::remote_branches,
             repos::fetch_remotes,
             repos::add_worktree,

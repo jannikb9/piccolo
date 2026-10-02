@@ -286,13 +286,15 @@ pub fn common_git_dir(repo: &Path) -> Result<PathBuf> {
 // ---------------------------------------------------------------------------------------------
 // Diffs
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     /// Everything since the branch forked from base, including uncommitted work.
     All,
     Committed,
     Uncommitted,
+    /// What one commit changed, compared with its (first) parent. Sent as `{ "commit": "<sha>" }`.
+    Commit(String),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -402,6 +404,42 @@ pub fn ahead_behind(wt: &Path, base: &str) -> Result<(u32, u32)> {
     Ok((ahead, behind))
 }
 
+/// A commit on the branch under review.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Commit {
+    pub sha: String,
+    pub short_sha: String,
+    pub subject: String,
+    pub author: String,
+    /// Commit date, epoch ms.
+    pub time: u64,
+}
+
+/// Commits on HEAD that aren't in `base`, newest first. Without a base there are none to list.
+pub fn commits(wt: &Path, base: Option<&str>) -> Result<Vec<Commit>> {
+    let Some(base) = base else { return Ok(Vec::new()) };
+    let out = git(wt, &["log", "-z", "--max-count=500", "--format=%H%x00%h%x00%an%x00%ct%x00%s", &format!("{base}..HEAD"), "--"])?;
+    Ok(parse_commits(&out))
+}
+
+fn parse_commits(out: &str) -> Vec<Commit> {
+    // `-z` ends each commit with a NUL, so the fields of every commit are five NUL-separated tokens.
+    let tokens: Vec<&str> = out.split('\0').collect();
+    tokens
+        .chunks_exact(5)
+        .filter_map(|c| {
+            Some(Commit {
+                sha: c[0].trim().to_string(),
+                short_sha: c[1].to_string(),
+                author: c[2].to_string(),
+                time: c[3].parse::<u64>().ok()? * 1000,
+                subject: c[4].to_string(),
+            })
+        })
+        .collect()
+}
+
 /// The two sides being compared. `new == None` means the working tree (including untracked files).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -412,7 +450,10 @@ pub struct DiffRange {
 
 impl DiffRange {
     /// Without a base, only uncommitted changes are compared.
-    pub fn resolve(wt: &Path, base: Option<&str>, scope: Scope) -> Result<Self> {
+    pub fn resolve(wt: &Path, base: Option<&str>, scope: &Scope) -> Result<Self> {
+        if let Scope::Commit(rev) = scope {
+            return Self::of_commit(wt, rev);
+        }
         let head = git(wt, &["rev-parse", "HEAD"])?.trim().to_string();
         let fork_point = match base {
             Some(base) => merge_base(wt, base)?,
@@ -422,7 +463,18 @@ impl DiffRange {
             Scope::All => Self { old_rev: fork_point, new_rev: None },
             Scope::Committed => Self { old_rev: fork_point, new_rev: Some(head) },
             Scope::Uncommitted => Self { old_rev: head, new_rev: None },
+            Scope::Commit(_) => unreachable!(),
         })
+    }
+
+    /// One commit against its first parent; a root commit against the empty tree.
+    fn of_commit(wt: &Path, rev: &str) -> Result<Self> {
+        let sha = git(wt, &["rev-parse", "--verify", "--end-of-options", &format!("{rev}^{{commit}}")])?.trim().to_string();
+        let parent = match git(wt, &["rev-parse", "--verify", "--quiet", &format!("{sha}^")]) {
+            Ok(parent) => parent.trim().to_string(),
+            Err(_) => git(wt, &["hash-object", "-t", "tree", "/dev/null"])?.trim().to_string(),
+        };
+        Ok(Self { old_rev: parent, new_rev: Some(sha) })
     }
 
     fn args(&self) -> Vec<&str> {
@@ -453,7 +505,7 @@ fn diff_flags(ignore_whitespace: bool) -> Vec<&'static str> {
 
 /// Files changed in the worktree relative to where it forked from `base`.
 pub fn changed_files(wt: &Path, base: Option<&str>, scope: Scope, options: DiffOptions) -> Result<Vec<ChangedFile>> {
-    let range = DiffRange::resolve(wt, base, scope)?;
+    let range = DiffRange::resolve(wt, base, &scope)?;
     let diff = |format: &str| {
         let mut args = diff_flags(options.ignore_whitespace);
         args.extend(["-z", format]);
@@ -563,7 +615,7 @@ pub struct DiffPatch {
 }
 
 pub fn diff_patch(wt: &Path, base: Option<&str>, scope: Scope, options: DiffOptions) -> Result<DiffPatch> {
-    let range = DiffRange::resolve(wt, base, scope)?;
+    let range = DiffRange::resolve(wt, base, &scope)?;
     let (mut patch, _) = tracked_patch(wt, &range, options)?;
 
     if range.includes_untracked() {
@@ -1022,6 +1074,25 @@ mod tests {
         let all = changed_files(&wt, Some("main"), Scope::All, DiffOptions::default()).unwrap();
         assert!(find(&all, "untracked.md").unwrap().generated);
         assert!(!find(&all, "new.txt").unwrap().generated);
+
+        // The branch's commits, newest first, each viewable on its own.
+        let log = commits(&wt, Some("main")).unwrap();
+        assert_eq!(log.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), vec!["ts", "rename"]);
+        assert_eq!(log[1].author, "Test");
+        assert!(log[1].sha.starts_with(&log[1].short_sha) && log[1].time > 0);
+        let only = |sha: &str| {
+            let files = changed_files(&wt, Some("main"), Scope::Commit(sha.into()), DiffOptions::default()).unwrap();
+            files.into_iter().map(|f| f.path).collect::<Vec<_>>()
+        };
+        assert_eq!(only(&log[0].sha), vec!["app.ts", "util.ts"]);
+        assert_eq!(only(&log[1].short_sha), vec!["new.txt"]);
+        let diff = diff_patch(&wt, Some("main"), Scope::Commit(log[1].sha.clone()), DiffOptions::default()).unwrap();
+        assert_eq!(diff.range.new_rev.as_deref(), Some(log[1].sha.as_str()));
+        assert!(diff.patch.contains("rename from old.txt") && !diff.patch.contains("untracked.md"));
+        // The repository's first commit is compared with the empty tree.
+        let root_commit = git(&wt, &["rev-list", "--max-parents=0", "HEAD"]).unwrap();
+        assert_eq!(only(root_commit.trim()), vec!["a.txt", "old.txt"]);
+        assert!(commits(&wt, None).unwrap().is_empty());
 
         fs::remove_dir_all(&root).unwrap();
     }

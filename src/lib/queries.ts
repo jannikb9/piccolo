@@ -1,5 +1,5 @@
 import { focusManager, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useStore } from "../store";
 import type { DraftImage } from "./images";
 import { toUpload } from "./images";
@@ -19,6 +19,7 @@ export const queryClient = new QueryClient({
 export const keys = {
   repos: ["repos"] as const,
   stats: (path: string, base: string | null) => ["stats", path, base] as const,
+  commits: (path: string, base: string | null) => ["commits", path, base] as const,
   files: (path: string, base: string | null, scope: DiffScope, options: DiffOptions) =>
     ["files", path, base, scope, options] as const,
   patch: (path: string, base: string | null, scope: DiffScope, options: DiffOptions) =>
@@ -47,6 +48,27 @@ export function useWorktreeStats(worktree: Worktree, base: string | null) {
     queryKey: keys.stats(worktree.path, base),
     queryFn: () => api.worktreeStats(worktree.path, base),
   });
+}
+
+/** The branch's own commits, newest first. */
+export function useCommits(worktree: Worktree | undefined, base: string | null) {
+  return useQuery({
+    queryKey: keys.commits(worktree?.path ?? "", base),
+    queryFn: () => api.commits(worktree!.path, base),
+    enabled: !!worktree,
+  });
+}
+
+/**
+ * What the diff shows: the commit chosen for this worktree, or else the scope mode. A commit that
+ * left the branch (amended, rebased away) falls back to the mode.
+ */
+export function useDiffScope(worktree: Worktree | undefined, base: string | null): DiffScope {
+  const mode = useStore((s) => s.scope);
+  const sha = useStore((s) => (worktree ? s.commits[worktree.id] : undefined));
+  const commits = useCommits(worktree, base).data;
+  const known = !!sha && (!commits || commits.some((c) => c.sha === sha));
+  return useMemo(() => (known ? { commit: sha! } : mode), [known, sha, mode]);
 }
 
 export function useChangedFiles(worktree: Worktree | undefined, base: string | null, scope: DiffScope, options: DiffOptions) {
@@ -253,6 +275,7 @@ export function useLiveGitData() {
     const offRepo = onRepoChanged(() => {
       client.invalidateQueries({ queryKey: keys.repos });
       client.invalidateQueries({ queryKey: ["stats"] });
+      client.invalidateQueries({ queryKey: ["commits"] });
       client.invalidateQueries({ queryKey: ["files"] });
       client.invalidateQueries({ queryKey: ["patch"] });
       client.invalidateQueries({ queryKey: ["threads"] });

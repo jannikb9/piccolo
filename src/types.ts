@@ -65,7 +65,20 @@ export type FileVersions = {
   new: string | null;
 };
 
-export type DiffScope = "all" | "committed" | "uncommitted";
+/** Which of the branch's changes to show; chosen with the toolbar's segmented control. */
+export type ScopeMode = "all" | "committed" | "uncommitted";
+/** A scope mode, or what a single commit changed. */
+export type DiffScope = ScopeMode | { commit: string };
+
+/** A commit on the branch under review (src-tauri/src/git.rs). */
+export type Commit = {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  author: string;
+  /** Commit date, epoch ms. */
+  time: number;
+};
 
 /** Changes the reviewer chose to leave out of the diff. */
 export type DiffOptions = { ignoreWhitespace: boolean; hideImports: boolean };

@@ -221,7 +221,7 @@ mod tests {
 
         let (root, wt, mut store) = fixture("cli-images");
         let target = Target::of(&wt).unwrap();
-        let range = DiffRange::resolve(&wt, Some("main"), Scope::All).unwrap();
+        let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
         let image = NewImage { width: 640, height: 480, data: b"\x89PNG\r\n\x1a\nx".to_vec() };
         let new = NewThread { path: "a.txt", old_path: None, range: additions(3, 3), body: "Looks off:", images: &[image] };
         let id = store.add_thread(&target, &wt, &range, new).unwrap();

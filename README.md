@@ -65,6 +65,8 @@ feedback on this branch; after addressing a comment, reply with `review reply <i
 - [x] Check out a remote branch to review: the branch button on a repository lists its remote branches
   (then fetches), and creates a worktree for the chosen one with worktrunk's `wt switch` (its approved
   hooks run) or `git worktree add`
+- [x] One commit at a time: the commits button in the toolbar lists the branch's commits (newest first)
+  and shows what one of them changed; ‹ / › step to the previous and next commit
 - [ ] M4 — Review flow: viewed state with content fingerprints, keyboard nav, live refresh
 - [ ] M5 — Polish: empty/loading/error states, large-diff performance, transitions
 
@@ -90,6 +92,7 @@ src/
   components/
     Sidebar.tsx         repos → worktrees
     BranchPicker.tsx    remote branches of a repo, checked out in a new worktree
+    CommitPicker.tsx    the branch's commits, to review one at a time
     FilePanel.tsx       changed-file tree in sections + viewed progress
     ReviewPane.tsx      toolbar + loading/error/empty states around the diff
     DiffView.tsx        CodeView from @pierre/diffs with our file headers and comment annotations

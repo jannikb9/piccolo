@@ -1,6 +1,6 @@
 //! The user's list of repositories and the Tauri commands the UI uses to read them.
 
-use crate::git::{self, ChangedFile, DiffOptions, DiffPatch, RemoteBranch, Result, Scope};
+use crate::git::{self, ChangedFile, Commit, DiffOptions, DiffPatch, RemoteBranch, Result, Scope};
 use crate::watch::Watchers;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -235,6 +235,12 @@ pub async fn changed_files(
 #[tauri::command]
 pub async fn diff_patch(path: String, base: Option<String>, scope: Scope, options: DiffOptions) -> Result<DiffPatch> {
     blocking(move || git::diff_patch(Path::new(&path), base.as_deref(), scope, options)).await
+}
+
+/// The branch's own commits, newest first.
+#[tauri::command]
+pub async fn commits(path: String, base: Option<String>) -> Result<Vec<Commit>> {
+    blocking(move || git::commits(Path::new(&path), base.as_deref())).await
 }
 
 /// Remote branches as of the last fetch, most recently committed first.

@@ -7,6 +7,7 @@ import {
   mockAttachmentData,
   mockAddWorktree,
   mockChangedFiles,
+  mockCommits,
   mockDeleteComment,
   mockDiffPatch,
   mockFileText,
@@ -23,6 +24,7 @@ import {
 import type { ImageUpload } from "./images";
 import type {
   ChangedFile,
+  Commit,
   DiffOptions,
   DiffPatch,
   DiffScope,
@@ -57,6 +59,10 @@ export const api = {
 
   diffPatch: (path: string, base: string | null, scope: DiffScope, options: DiffOptions): Promise<DiffPatch> =>
     isTauri ? invoke("diff_patch", { path, base, scope, options }) : mockDiffPatch(path, scope),
+
+  /** The branch's own commits (not in `base`), newest first. */
+  commits: (path: string, base: string | null): Promise<Commit[]> =>
+    isTauri ? invoke("commits", { path, base }) : mockCommits(path),
 
   fileVersions: (
     path: string,
