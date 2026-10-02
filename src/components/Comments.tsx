@@ -18,10 +18,14 @@ export function describeRange(range: LineRange): string {
   return startLine === endLine ? `line ${prefix}${startLine}` : `lines ${prefix}${startLine}–${prefix}${endLine}`;
 }
 
-/** Card chrome shared by threads and the composer, inset from the diff's edges. */
+/**
+ * Card chrome shared by threads and the composer, inset from the diff's edges. Cards sit in a diff
+ * column, so their content (an excerpt's long lines, an image) mustn't widen it: inline-size
+ * containment makes them take the column's width instead of their content's.
+ */
 function Card({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className="px-3 py-2 font-sans">
+    <div className="px-3 py-2 font-sans [contain:inline-size]">
       <div className={cn("max-w-[760px] overflow-hidden rounded-lg border border-border bg-bg-raised text-[13px]", className)}>
         {children}
       </div>
@@ -199,7 +203,7 @@ export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode 
 
   if (thread.resolved && !expanded) {
     return (
-      <div className="px-3 py-1.5 font-sans">
+      <div className="px-3 py-1.5 font-sans [contain:inline-size]">
         <button
           type="button"
           onClick={() => setExpanded(true)}
