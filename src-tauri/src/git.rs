@@ -515,18 +515,15 @@ pub fn changed_files(wt: &Path, base: Option<&str>, scope: Scope, options: DiffO
     };
 
     let counts = parse_numstat(&diff("--numstat")?);
-    let hidden = if options.hide_imports { tracked_patch(wt, &range, options)?.1 } else { HashMap::new() };
     let mut files: Vec<ChangedFile> = parse_name_status(&diff("--name-status")?)
         .into_iter()
         .map(|(path, status, old_path)| {
             let (additions, deletions, binary) = counts.get(&path).copied().unwrap_or_default();
-            let (hidden_additions, hidden_deletions) = hidden.get(&path).copied().unwrap_or_default();
-            let (additions, deletions) = (additions.saturating_sub(hidden_additions), deletions.saturating_sub(hidden_deletions));
             ChangedFile { path, old_path, status, additions, deletions, binary, generated: false }
         })
-        // Files whose only changes were whitespace or imports have no lines left.
+        // Files whose only changes were whitespace have no lines left.
         .filter(|f| {
-            !(options.ignore_whitespace || options.hide_imports)
+            !options.ignore_whitespace
                 || f.binary
                 || f.additions + f.deletions > 0
                 || f.status != FileStatus::Modified
@@ -616,7 +613,7 @@ pub struct DiffPatch {
 
 pub fn diff_patch(wt: &Path, base: Option<&str>, scope: Scope, options: DiffOptions) -> Result<DiffPatch> {
     let range = DiffRange::resolve(wt, base, &scope)?;
-    let (mut patch, _) = tracked_patch(wt, &range, options)?;
+    let mut patch = git(wt, &patch_args(&range, options))?;
 
     if range.includes_untracked() {
         for path in untracked_files(wt)? {
@@ -625,22 +622,20 @@ pub fn diff_patch(wt: &Path, base: Option<&str>, scope: Scope, options: DiffOpti
             }
         }
     }
+    if options.hide_imports {
+        patch = imports::filter_patch(wt, &range, &patch)?;
+    }
     Ok(DiffPatch { range, patch })
 }
 
-/// `git diff` of tracked files, and the lines left out of each file's counts to hide imports.
-fn tracked_patch(wt: &Path, range: &DiffRange, options: DiffOptions) -> Result<(String, HashMap<String, (u32, u32)>)> {
+/// Arguments for `git diff` of tracked files.
+fn patch_args<'a>(range: &'a DiffRange, options: DiffOptions) -> Vec<&'a str> {
     let mut args = diff_flags(options.ignore_whitespace);
     // Explicit prefixes override `diff.noprefix` / `diff.mnemonicPrefix` in the user's config.
     args.extend(["--src-prefix=a/", "--dst-prefix=b/"]);
     args.extend(range.args());
     args.push("--");
-    let patch = git(wt, &args)?;
-    if options.hide_imports {
-        imports::filter_patch(wt, range, &patch)
-    } else {
-        Ok((patch, HashMap::new()))
-    }
+    args
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -1049,7 +1044,7 @@ mod tests {
         let ws = changed_files(&wt, Some("main"), Scope::Uncommitted, DiffOptions { ignore_whitespace: true, ..Default::default() }).unwrap();
         assert!(ws.iter().all(|f| f.path != "a.txt"));
 
-        // Import-only hunks are left out; files with nothing else changed disappear.
+        // Import changes are left out of the patch but still counted.
         let src = |imports: &str, body: &str| format!("import {{\n  a,\n{imports}}} from \"x\";\n\n{body}");
         // The code change is far enough below the imports to be its own hunk.
         let body = "run(a);\n".repeat(12);
@@ -1061,11 +1056,10 @@ mod tests {
         fs::write(wt.join("util.ts"), src("  b,\n", &body)).unwrap();
         let hide = DiffOptions { hide_imports: true, ..Default::default() };
         let files = changed_files(&wt, Some("main"), Scope::Uncommitted, hide).unwrap();
-        assert!(find(&files, "util.ts").is_none(), "{files:?}");
-        let app = find(&files, "app.ts").unwrap();
-        assert_eq!((app.additions, app.deletions), (1, 1));
+        let (app, util) = (find(&files, "app.ts").unwrap(), find(&files, "util.ts").unwrap());
+        assert_eq!((app.additions, app.deletions, util.additions), (2, 1, 1));
         let patch = diff_patch(&wt, Some("main"), Scope::Uncommitted, hide).unwrap().patch;
-        assert!(!patch.contains("+  b,") && patch.contains("+run(b);"), "{patch}");
+        assert!(!patch.contains("+  b,") && patch.contains("+run(b);") && !patch.contains("util.ts"), "{patch}");
         let shown = changed_files(&wt, Some("main"), Scope::Uncommitted, DiffOptions::default()).unwrap();
         assert_eq!((find(&shown, "app.ts").unwrap().additions, find(&shown, "util.ts").unwrap().additions), (2, 1));
 

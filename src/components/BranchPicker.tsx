@@ -154,10 +154,12 @@ function Picker({ repo, onDone }: { repo: Repo; onDone: () => void }) {
                   ) : (
                     <GitBranch className="size-3.5 text-fg-subtle" />
                   )}
-                  <span className="truncate text-[13px] font-medium text-fg">{b.name}</span>
+                  <span title={b.name} className="truncate text-[13px] font-medium text-fg">
+                    {b.name}
+                  </span>
                   <span className="tabular text-[11px] text-fg-faint">{timeAgo(b.updatedAt)}</span>
                   <span />
-                  <span className="truncate text-[12px] text-fg-subtle">
+                  <span title={`${b.author} · ${b.subject}`} className="truncate text-[12px] text-fg-subtle">
                     {b.author} · {b.subject}
                   </span>
                   {worktreeOf.has(b.name) ? (

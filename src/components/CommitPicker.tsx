@@ -103,7 +103,9 @@ function Item({ value, title, detail, time }: { value: string; title: string; de
       <DropdownMenuPrimitive.ItemIndicator>
         <Check className="size-3.5 text-accent" />
       </DropdownMenuPrimitive.ItemIndicator>
-      <span className="col-start-2 truncate font-medium text-fg">{title}</span>
+      <span title={title} className="col-start-2 truncate font-medium text-fg">
+        {title}
+      </span>
       {time && <span className="tabular text-[11px] text-fg-faint">{time}</span>}
       {detail && <span className="col-start-2 truncate text-[11.5px] text-fg-subtle">{detail}</span>}
     </DropdownMenuPrimitive.RadioItem>
