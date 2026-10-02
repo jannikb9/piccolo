@@ -318,7 +318,7 @@ export function DiffView({
       diffIndicators: "classic",
       hunkSeparators: "line-info",
       lineDiffType: "word-alt",
-      overflow: "scroll",
+      overflow: "wrap",
       expansionLineCount: 20,
       stickyHeaders: true,
       layout: { paddingTop: 12, paddingBottom: 240, gap: 12 },

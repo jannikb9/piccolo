@@ -167,7 +167,7 @@ const newBody = [
   '  const cookie = req.headers.get("cookie");',
   "  if (!cookie) return null;",
   "",
-  "  const token = readSessionToken(cookie);",
+  "  const token = readSessionToken(cookie); // Parses the signed cookie, verifies its signature against the rotating keys and rejects anything issued before the last global logout.",
   "  if (!token) return null;",
   "",
   "  if (isExpiringSoon(token, REFRESH_WINDOW_MS)) {",

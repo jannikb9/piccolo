@@ -531,7 +531,7 @@ function FileView({
   const selectedLines = useMemo(() => ({ id: place.path, range: { start: place.line, end: place.line } }), [place]);
   const options = useMemo(
     (): CodeViewReactOptions<undefined, undefined> => ({
-      overflow: "scroll",
+      overflow: "wrap",
       disableFileHeader: true,
       layout: { paddingTop: 12, paddingBottom: 240, gap: 12 },
       unsafeCSS,
