@@ -258,6 +258,13 @@ export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode 
   );
 }
 
+/** "You", or the agent's name as it signed ("Codex"), or "Agent". */
+function authorLabel(message: CommentMessage): string {
+  if (message.author === "reviewer") return "You";
+  const name = message.authorName;
+  return name ? name[0].toUpperCase() + name.slice(1) : "Agent";
+}
+
 function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: boolean }) {
   const isAgent = message.author === "agent";
   const Icon = isAgent ? Bot : User;
@@ -274,7 +281,7 @@ function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: bo
         >
           <Icon className="size-3" />
         </span>
-        <span className="font-medium text-fg">{isAgent ? "Agent" : "You"}</span>
+        <span className="font-medium text-fg">{authorLabel(message)}</span>
         <Tooltip label={new Date(message.createdAt).toLocaleString()}>
           <span className="tabular text-fg-subtle">{timeAgo(message.createdAt)}</span>
         </Tooltip>

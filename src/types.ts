@@ -110,6 +110,8 @@ export type Attachment = {
 export type CommentMessage = {
   id: number;
   author: "reviewer" | "agent";
+  /** The agent's name when it gave one (`review … --as codex`); Claude Code signs as `claude`. */
+  authorName: string | null;
   body: string;
   attachments: Attachment[];
   createdAt: number;

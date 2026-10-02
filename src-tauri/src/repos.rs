@@ -12,6 +12,17 @@ use tauri_plugin_store::StoreExt;
 const STORE_FILE: &str = "settings.json";
 const STORE_KEY: &str = "repos";
 
+/// The repositories added to the app, read from its settings file, for the `review` command
+/// (which runs without the app).
+pub fn saved_paths() -> Vec<String> {
+    let file = crate::comments::app_data_dir().join(STORE_FILE);
+    std::fs::read_to_string(file)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|settings| serde_json::from_value(settings.get(STORE_KEY)?.clone()).ok())
+        .unwrap_or_default()
+}
+
 /// Root paths of the main worktree of each added repository, in the order they were added.
 pub struct Repos(Mutex<Vec<String>>);
 

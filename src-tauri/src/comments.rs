@@ -96,6 +96,17 @@ pub enum Author {
     Agent,
 }
 
+/// Who writes a message: the reviewer, or an agent, under the name it gives (`codex`, `claude`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct By<'a> {
+    pub author: Author,
+    pub name: Option<&'a str>,
+}
+
+impl By<'_> {
+    pub const REVIEWER: By<'static> = By { author: Author::Reviewer, name: None };
+}
+
 /// An image pasted into a message, saved as a file the agent can open.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -111,6 +122,8 @@ pub struct Attachment {
 pub struct Message {
     pub id: i64,
     pub author: Author,
+    /// The agent's name, when it gave one.
+    pub author_name: Option<String>,
     pub body: String,
     pub attachments: Vec<Attachment>,
     pub created_at: i64,
@@ -180,6 +193,7 @@ impl Target {
 }
 
 pub struct NewThread<'a> {
+    pub by: By<'a>,
     pub path: &'a str,
     pub old_path: Option<&'a str>,
     pub range: LineRange,
@@ -199,7 +213,12 @@ pub fn db_path() -> PathBuf {
     if let Some(path) = std::env::var_os("REVIEW_DB") {
         return PathBuf::from(path);
     }
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join(APP_IDENTIFIER).join(DB_FILE)
+    app_data_dir().join(DB_FILE)
+}
+
+/// Where the app keeps its data: the comments and its settings.
+pub fn app_data_dir() -> PathBuf {
+    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join(APP_IDENTIFIER)
 }
 
 pub struct Store {
@@ -258,13 +277,15 @@ impl Store {
             CREATE INDEX IF NOT EXISTS attachments_by_message ON attachments (message_id);",
         ))?;
         // Columns added after the first release.
-        let has_edited_at: bool = sql(conn.query_row(
-            "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'edited_at'",
-            [],
-            |r| r.get(0),
-        ))?;
-        if !has_edited_at {
-            sql(conn.execute("ALTER TABLE messages ADD COLUMN edited_at INTEGER", []))?;
+        for (column, definition) in [("edited_at", "INTEGER"), ("author_name", "TEXT")] {
+            let exists: bool = sql(conn.query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = ?1",
+                [column],
+                |r| r.get(0),
+            ))?;
+            if !exists {
+                sql(conn.execute(&format!("ALTER TABLE messages ADD COLUMN {column} {definition}"), []))?;
+            }
         }
         let images_dir = path.parent().unwrap_or(Path::new(".")).join(IMAGES_DIR);
         Ok(Self { conn, images_dir })
@@ -306,7 +327,7 @@ impl Store {
         }
         // Ids are integers, so inlining them is safe.
         let mut stmt = sql(self.conn.prepare(&format!(
-            "SELECT id, thread_id, author, body, created_at, edited_at FROM messages WHERE thread_id IN ({}) ORDER BY id",
+            "SELECT id, thread_id, author, body, created_at, edited_at, author_name FROM messages WHERE thread_id IN ({}) ORDER BY id",
             ids.join(",")
         )))?;
         let rows = sql(stmt.query_map([], |row| {
@@ -316,6 +337,7 @@ impl Store {
                 Message {
                     id: row.get(0)?,
                     author: if author == "agent" { Author::Agent } else { Author::Reviewer },
+                    author_name: row.get(6)?,
                     body: row.get(3)?,
                     attachments: Vec::new(),
                     created_at: row.get(4)?,
@@ -380,7 +402,7 @@ impl Store {
             return Err("A comment can't be empty".into());
         }
         let rows = git::full_file_diff(wt, range, new.old_path.unwrap_or(new.path), new.path)?;
-        let snapshot = Snapshot::build(&rows, new.range)?;
+        let snapshot = Snapshot::build(new.path, &rows, new.range)?;
         let range = snapshot.range;
         let now = now_ms();
         let tx = sql(self.conn.transaction())?;
@@ -405,13 +427,13 @@ impl Store {
             ],
         ))?;
         let id = tx.last_insert_rowid();
-        let message = insert_message(&tx, id, Author::Reviewer, body, now)?;
+        let message = insert_message(&tx, id, new.by, body, now)?;
         save_images(&tx, &self.images_dir, message, new.images)?;
         sql(tx.commit())?;
         Ok(id)
     }
 
-    pub fn reply(&mut self, thread_id: i64, author: Author, body: &str, images: &[NewImage]) -> Result<()> {
+    pub fn reply(&mut self, thread_id: i64, by: By, body: &str, images: &[NewImage]) -> Result<()> {
         let body = body.trim();
         if body.is_empty() && images.is_empty() {
             return Err("A reply can't be empty".into());
@@ -419,7 +441,7 @@ impl Store {
         self.thread(thread_id)?;
         let now = now_ms();
         let tx = sql(self.conn.transaction())?;
-        let message = insert_message(&tx, thread_id, author, body, now)?;
+        let message = insert_message(&tx, thread_id, by, body, now)?;
         save_images(&tx, &self.images_dir, message, images)?;
         sql(tx.execute("UPDATE threads SET updated_at = ?2 WHERE id = ?1", params![thread_id, now]))?;
         sql(tx.commit())
@@ -526,14 +548,14 @@ fn save_images(conn: &Connection, dir: &Path, message_id: i64, images: &[NewImag
 }
 
 /// Inserts a message and returns its id.
-fn insert_message(conn: &Connection, thread_id: i64, author: Author, body: &str, now: i64) -> Result<i64> {
-    let author = match author {
+fn insert_message(conn: &Connection, thread_id: i64, by: By, body: &str, now: i64) -> Result<i64> {
+    let author = match by.author {
         Author::Reviewer => "reviewer",
         Author::Agent => "agent",
     };
     sql(conn.execute(
-        "INSERT INTO messages (thread_id, author, body, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![thread_id, author, body, now],
+        "INSERT INTO messages (thread_id, author, author_name, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![thread_id, author, by.name, body, now],
     ))?;
     Ok(conn.last_insert_rowid())
 }
@@ -574,11 +596,16 @@ struct Snapshot {
 }
 
 impl Snapshot {
-    fn build(rows: &[DiffLine], range: LineRange) -> Result<Self> {
-        let find = |side: Side, line: u32| rows.iter().position(|r| side.line_of(r) == Some(line));
-        let not_found = || "Those lines aren't in the diff any more; refresh and try again".to_string();
-        let a = find(range.start_side, range.start_line).ok_or_else(not_found)?;
-        let b = find(range.end_side, range.end_line).ok_or_else(not_found)?;
+    fn build(path: &str, rows: &[DiffLine], range: LineRange) -> Result<Self> {
+        let find = |side: Side, line: u32| {
+            rows.iter().position(|r| side.line_of(r) == Some(line)).ok_or_else(|| {
+                let version = if side == Side::Deletions { " in its old version" } else { "" };
+                format!("{path} has no line {line}{version} (any more)")
+            })
+        };
+        let not_found = || format!("{path} has no lines to comment on");
+        let a = find(range.start_side, range.start_line)?;
+        let b = find(range.end_side, range.end_line)?;
         let (first, last) = (a.min(b), a.max(b));
         let range = if a <= b {
             range
@@ -699,7 +726,7 @@ pub async fn add_thread(
         let wt = Path::new(&path);
         let diff_range = DiffRange::resolve(wt, base.as_deref(), &scope)?;
         let images = decode_images(images)?;
-        let new = NewThread { path: &file, old_path: old_file.as_deref(), range, body: &body, images: &images };
+        let new = NewThread { by: By::REVIEWER, path: &file, old_path: old_file.as_deref(), range, body: &body, images: &images };
         Store::open()?.add_thread(&Target::of(wt)?, wt, &diff_range, new)
     })
     .await
@@ -707,7 +734,7 @@ pub async fn add_thread(
 
 #[tauri::command]
 pub async fn reply_thread(id: i64, body: String, images: Vec<ImageUpload>) -> Result<()> {
-    blocking(move || Store::open()?.reply(id, Author::Reviewer, &body, &decode_images(images)?)).await
+    blocking(move || Store::open()?.reply(id, By::REVIEWER, &body, &decode_images(images)?)).await
 }
 
 /// A pasted image as the app sends it: a base64 PNG.
@@ -788,15 +815,17 @@ pub(crate) mod tests {
         assert_eq!(target.branch.as_deref(), Some("feat/x"));
         let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
 
-        let new = NewThread { path: "a.txt", old_path: None, range: additions(3, 4), body: " Why uppercase? ", images: &[] };
+        let new = NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: additions(3, 4), body: " Why uppercase? ", images: &[] };
         let id = store.add_thread(&target, &wt, &range, new).unwrap();
-        store.reply(id, Author::Agent, "Changed it back", &[]).unwrap();
+        store.reply(id, By { author: Author::Agent, name: Some("codex") }, "Changed it back", &[]).unwrap();
 
         let threads = store.threads(&target, false).unwrap();
         assert_eq!(threads.len(), 1);
         let thread = &threads[0];
         assert_eq!(thread.messages.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), ["Why uppercase?", "Changed it back"]);
         assert_eq!(thread.messages[1].author, Author::Agent);
+        assert_eq!(thread.messages[1].author_name.as_deref(), Some("codex"));
+        assert_eq!(thread.messages[0].author_name, None);
         // Snapshot: the removed and added lines, marked, with context around them.
         let commented: Vec<_> = thread.excerpt.iter().filter(|r| r.commented).map(|r| r.text.as_str()).collect();
         assert_eq!(commented, ["THREE", "FOUR"]);
@@ -839,7 +868,7 @@ pub(crate) mod tests {
         // From the removed "three" to the added "FOUR", as a drag in the unified view would select.
         let across = LineRange { start_side: Side::Deletions, start_line: 3, end_side: Side::Additions, end_line: 4 };
         let id = store
-            .add_thread(&target, &wt, &range, NewThread { path: "a.txt", old_path: None, range: across, body: "x", images: &[] })
+            .add_thread(&target, &wt, &range, NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: across, body: "x", images: &[] })
             .unwrap();
         let thread = store.thread(id).unwrap();
         let commented: Vec<_> = thread.excerpt.iter().filter(|r| r.commented).map(|r| r.text.as_str()).collect();
@@ -849,20 +878,20 @@ pub(crate) mod tests {
         // A selection dragged upwards is stored top to bottom.
         let upwards = LineRange { start_side: Side::Additions, start_line: 4, end_side: Side::Deletions, end_line: 3 };
         let id = store
-            .add_thread(&target, &wt, &range, NewThread { path: "a.txt", old_path: None, range: upwards, body: "x", images: &[] })
+            .add_thread(&target, &wt, &range, NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: upwards, body: "x", images: &[] })
             .unwrap();
         assert_eq!(store.thread(id).unwrap().range, across);
 
         fs::write(wt.join("new.md"), "hello\nworld\n").unwrap();
         let id = store
-            .add_thread(&target, &wt, &range, NewThread { path: "new.md", old_path: None, range: additions(2, 2), body: "y", images: &[] })
+            .add_thread(&target, &wt, &range, NewThread { by: By::REVIEWER, path: "new.md", old_path: None, range: additions(2, 2), body: "y", images: &[] })
             .unwrap();
         let mut threads = vec![store.thread(id).unwrap()];
         assert!(threads[0].excerpt.iter().all(|r| r.kind == LineKind::Add));
         locate_in_view(&mut threads, &wt, &range);
         assert_eq!(threads[0].position, Some(additions(2, 2)));
 
-        let missing = NewThread { path: "a.txt", old_path: None, range: additions(40, 40), body: "z", images: &[] };
+        let missing = NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: additions(40, 40), body: "z", images: &[] };
         assert!(store.add_thread(&target, &wt, &range, missing).is_err());
 
         fs::remove_dir_all(&root).unwrap();
@@ -877,10 +906,10 @@ pub(crate) mod tests {
 
         // A comment can be only an image.
         let images = [png(b"first")];
-        let new = NewThread { path: "a.txt", old_path: None, range: additions(3, 3), body: "  ", images: &images };
+        let new = NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: additions(3, 3), body: "  ", images: &images };
         let id = store.add_thread(&target, &wt, &range, new).unwrap();
         let reply = [png(b"second"), png(b"third")];
-        store.reply(id, Author::Reviewer, "and these", &reply).unwrap();
+        store.reply(id, By::REVIEWER, "and these", &reply).unwrap();
 
         let thread = store.thread(id).unwrap();
         let attachments: Vec<_> = thread.messages.iter().map(|m| m.attachments.len()).collect();
@@ -892,7 +921,7 @@ pub(crate) mod tests {
 
         // Anything but a PNG is refused, and nothing is left behind.
         let bad = [png(b"ok"), NewImage { width: 1, height: 1, data: b"GIF89a".to_vec() }];
-        assert!(store.reply(id, Author::Reviewer, "x", &bad).is_err());
+        assert!(store.reply(id, By::REVIEWER, "x", &bad).is_err());
         assert_eq!(store.thread(id).unwrap().messages.len(), 2);
         let on_disk = || std::fs::read_dir(root.join(IMAGES_DIR)).unwrap().count();
         assert_eq!(on_disk(), 3);

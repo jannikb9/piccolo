@@ -386,6 +386,7 @@ const threads: Record<string, Thread[]> = {
           attachments: [],
           createdAt: minutesAgo(42),
           editedAt: null,
+          authorName: null,
         },
         {
           id: 2,
@@ -394,6 +395,7 @@ const threads: Record<string, Thread[]> = {
           attachments: [],
           createdAt: minutesAgo(6),
           editedAt: null,
+          authorName: "claude",
         },
       ],
       createdAt: minutesAgo(42),
@@ -406,9 +408,30 @@ const threads: Record<string, Thread[]> = {
       position: null,
       resolved: false,
       excerpt: excerpt(lines(29, 29)),
-      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null }],
+      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null }],
       createdAt: minutesAgo(40),
       updatedAt: minutesAgo(40),
+    },
+    {
+      id: 5,
+      path: "src/auth/session.ts",
+      range: lines(21, 22),
+      position: lines(21, 22),
+      resolved: false,
+      excerpt: excerpt(lines(21, 22)),
+      messages: [
+        {
+          id: 5,
+          author: "agent",
+          body: "readSessionToken returns null for an expired token too, so this drops the old \"expired\" error path: callers can't tell a missing session from an expired one. Return a reason, or keep the expiry check here.",
+          attachments: [],
+          createdAt: minutesAgo(3),
+          editedAt: null,
+          authorName: "codex",
+        },
+      ],
+      createdAt: minutesAgo(3),
+      updatedAt: minutesAgo(3),
     },
     {
       id: 3,
@@ -417,7 +440,7 @@ const threads: Record<string, Thread[]> = {
       position: lines(21, 21),
       resolved: true,
       excerpt: excerpt(lines(21, 21)),
-      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null }],
+      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null }],
       createdAt: minutesAgo(90),
       updatedAt: minutesAgo(30),
     },
@@ -459,7 +482,7 @@ export function mockAddThread(
     position: range,
     resolved: false,
     excerpt: excerpt(range),
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null }],
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null }],
     createdAt: now,
     updatedAt: now,
   });
@@ -475,6 +498,7 @@ export function mockReply(id: number, body: string, images: ImageUpload[]): Prom
     attachments: mockAttachments(images),
     createdAt: Date.now(),
     editedAt: null,
+    authorName: null,
   });
   return delay(undefined);
 }
