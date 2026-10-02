@@ -1,10 +1,18 @@
-import type { CodeViewItem, DiffLineAnnotation, FileDiffLoadedFiles, FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
+import type {
+  CodeViewItem,
+  DiffLineAnnotation,
+  FileDiffLoadedFiles,
+  FileDiffMetadata,
+  PostRenderPhase,
+  SelectedLineRange,
+} from "@pierre/diffs";
 import { CodeView, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
 import { ChevronRight, Copy, MessageSquare } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
 import { unsafeCSS, viewStyle } from "../lib/codeViewStyle";
+import { markCommentedLines } from "../lib/commentedLines";
 import { emptyDiff, hashString, isCollapsedByDefault, parsePatch } from "../lib/diff";
 import { useAddThread, useDiffScope } from "../lib/queries";
 import {
@@ -133,6 +141,21 @@ export function DiffView({
     return map;
   }, [threads, draftKeys]);
 
+  // The lines of open threads and drafts are marked in the gutter.
+  const commentedRanges = useMemo(() => {
+    const map = new Map<string, LineRange[]>();
+    const add = (path: string, range: LineRange) => map.set(path, [...(map.get(path) ?? []), range]);
+    for (const thread of threads) {
+      if (thread.position && !thread.resolved) add(thread.path, thread.position);
+    }
+    const drafts = useStore.getState().drafts;
+    for (const key of draftKeys) {
+      const draft = drafts[key];
+      if (draft) add(draft.path, draft.range);
+    }
+    return map;
+  }, [threads, draftKeys]);
+
   const items = useMemo(
     () =>
       files.map((file): CodeViewItem<Note> => {
@@ -253,6 +276,18 @@ export function DiffView({
   useEffect(() => {
     paint.current();
   }, [matches, current, occurrences]);
+  const markCommented = useRef<(host: Element) => void>(() => {});
+  markCommented.current = (host) => markCommentedLines(host, commentedRanges, fileDiffs);
+  useEffect(() => {
+    for (const host of containerRef.current?.querySelectorAll("diffs-container") ?? []) markCommented.current(host);
+  }, [commentedRanges]);
+  const onPostRender = useCallback(
+    (node: HTMLElement, _instance: unknown, phase: PostRenderPhase) => {
+      if (phase !== "unmount") markCommented.current(node);
+      schedulePaint();
+    },
+    [schedulePaint],
+  );
   useEffect(
     () => () => {
       clearMatches(FIND_LAYER);
@@ -328,9 +363,9 @@ export function DiffView({
       enableGutterUtility: true,
       onGutterUtilityClick: (selection: SelectedLineRange, context: { item: CodeViewItem<Note> }) =>
         startComment.current?.(selection, context.item.id),
-      onPostRender: schedulePaint,
+      onPostRender,
     }),
-    [layout, loadDiffFiles, schedulePaint],
+    [layout, loadDiffFiles, onPostRender],
   );
 
   // Highlights the file in the tree whose header is at the top of the viewport.

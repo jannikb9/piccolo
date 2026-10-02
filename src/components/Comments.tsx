@@ -213,9 +213,17 @@ export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode 
     );
   }
 
+  // Like GitHub, a comment on several lines names them (the card sits under the last one).
+  const { position } = thread;
+  const multiLine = !!position && (position.startSide !== position.endSide || position.startLine !== position.endLine);
   return (
     <Card>
-      {note}
+      {note ??
+        (multiLine && (
+          <div className="border-b border-border-subtle px-3 py-1.5 text-[12px] text-fg-subtle">
+            Comment on {describeRange(position)}
+          </div>
+        ))}
       {thread.messages.map((message, i) => (
         <MessageRow key={message.id} message={message} isFirst={i === 0} />
       ))}

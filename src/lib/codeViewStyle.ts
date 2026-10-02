@@ -82,6 +82,10 @@ export const unsafeCSS = /* css */ `
   [data-line-annotation] {
     --diffs-annotation-bg: var(--bg);
   }
+  /* Lines with comments on them (see lib/commentedLines.ts): a bar beside their numbers. */
+  [data-column-number][data-commented] {
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
   /* ⌘F matches, painted with the CSS Custom Highlight API (see lib/search.ts). */
   ::highlight(review-find) {
     background-color: color-mix(in oklab, var(--mod) 38%, transparent);
