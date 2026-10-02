@@ -499,6 +499,9 @@ export function mockSessions(paths: string[]): Promise<Record<string, AgentSessi
   return delay({ [worktreePath]: sessions });
 }
 
+export const mockStartSession = (worktreePath: string, _agent: string, only: number[] | null) =>
+  mockSendComments(worktreePath, "new", only);
+
 export function mockSendComments(worktreePath: string, _session: string, only: number[] | null): Promise<number[]> {
   const sent = (threads[worktreePath] ?? []).filter((t) => isPending(t) && (!only || only.includes(t.id)));
   if (sent.length === 0) return Promise.reject("There are no comments to send");

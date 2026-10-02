@@ -18,6 +18,7 @@ import {
   mockReorderRepos,
   mockReply,
   mockSendComments,
+  mockStartSession,
   mockSessions,
   mockRepos,
   mockSetResolved,
@@ -26,6 +27,7 @@ import {
 } from "../mock";
 import type { ImageUpload } from "./images";
 import type {
+  AgentKind,
   AgentSession,
   ChangedFile,
   Commit,
@@ -132,6 +134,10 @@ export const api = {
   /** Sends the worktree's pending comments (or `threads` of them) to `session`; resolves to the threads sent. */
   sendComments: (path: string, session: string, threads: number[] | null): Promise<number[]> =>
     isTauri ? invoke("send_comments", { path, session, threads }) : mockSendComments(path, session, threads),
+
+  /** Opens a new session of `agent` in its desktop app on the worktree, given its pending comments (or `threads`). */
+  startSession: (path: string, agent: AgentKind, threads: number[] | null): Promise<number[]> =>
+    isTauri ? invoke("start_session", { path, agent, threads }) : mockStartSession(path, agent, threads),
 
   /** Deletes a message; deleting a thread's first message deletes the thread. */
   deleteComment: (id: number): Promise<void> => (isTauri ? invoke("delete_comment", { id }) : mockDeleteComment(id)),

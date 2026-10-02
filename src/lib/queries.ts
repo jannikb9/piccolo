@@ -3,7 +3,7 @@ import { useEffect, useMemo } from "react";
 import { useStore } from "../store";
 import type { DraftImage } from "./images";
 import { toUpload } from "./images";
-import type { AgentSession, DiffOptions, DiffScope, LineRange, RemoteBranch, Repo, Worktree } from "../types";
+import type { AgentKind, AgentSession, DiffOptions, DiffScope, LineRange, RemoteBranch, Repo, Worktree } from "../types";
 import {
   api,
   confirmAction,
@@ -132,12 +132,17 @@ export function useSessions(worktree: Worktree): AgentSession[] {
   return useAllSessions().data?.[worktree.path] ?? NO_SESSIONS;
 }
 
-/** Sends the worktree's pending comments, or `threads` of them, to a session. */
+/** Where comments go: a running session, or a new one of an agent. */
+export type SendTarget = { session: string } | { newAgent: AgentKind };
+
+/** Sends the worktree's pending comments, or `threads` of them, to a session or a new one. */
 export function useSendComments(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ session, threads }: { session: string; threads: number[] | null }) =>
-      api.sendComments(worktree.path, session, threads),
+    mutationFn: ({ to, threads }: { to: SendTarget; threads: number[] | null }) =>
+      "session" in to
+        ? api.sendComments(worktree.path, to.session, threads)
+        : api.startSession(worktree.path, to.newAgent, threads),
     onError: (error) => showError("Couldn't send the comments", String(error)),
     onSettled: () => {
       client.invalidateQueries({ queryKey: ["threads"] });

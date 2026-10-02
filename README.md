@@ -70,6 +70,12 @@ session then addresses the comments with the `local-review` skill. Nothing to in
 runs while you aren't sending. The socket format is Claude Code's own and undocumented, and a send
 isn't confirmed.
 
+The send menu also opens a **new Claude or Codex session** on the worktree, in the Claude or
+ChatGPT desktop app, with the comments as its first prompt: through the apps' own links,
+`claude://code/new?folder=…&q=…` and `codex://threads/new?path=…&prompt=…` (both undocumented).
+Codex gets the `review` steps spelled out and signs its replies `--as codex`; it needs `review` on
+its PATH and may ask before writing to the comments database, which is outside the worktree.
+
 ## Status
 
 - [x] M1 — App shell: window chrome, design tokens (dark/light), resizable three-column layout

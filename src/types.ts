@@ -140,6 +140,9 @@ export type Thread = {
   updatedAt: number;
 };
 
+/** An agent comments can be sent to in a new session. */
+export type AgentKind = "claude" | "codex";
+
 /** A running Claude Code session that works on a worktree, from Claude Code's session registry. */
 export type AgentSession = {
   id: string;

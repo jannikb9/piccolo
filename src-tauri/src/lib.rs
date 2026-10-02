@@ -55,6 +55,7 @@ pub fn run() {
             comments::attachment_data,
             sessions::list_sessions,
             sessions::send_comments,
+            sessions::start_session,
             navigate::find_symbol,
             navigate::file_text,
         ])

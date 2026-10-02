@@ -159,8 +159,17 @@ fn match_sessions(live: &[Live], worktrees: &[String], traces: &HashMap<String, 
     matched
 }
 
-/// The message a session gets for `threads` on the worktree at `worktree`.
-fn message(worktree: &str, threads: &[i64]) -> String {
+/// An agent that can be given comments: one with a session in the registry, or a new session.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Agent {
+    Claude,
+    Codex,
+}
+
+/// The message an agent gets for `threads` on the worktree at `worktree`. Claude has the
+/// local-review skill; Codex gets its steps spelled out.
+fn message(agent: Agent, worktree: &str, threads: &[i64]) -> String {
     let ids: Vec<String> = threads.iter().map(i64::to_string).collect();
     let hashes: Vec<String> = threads.iter().map(|id| format!("#{id}")).collect();
     let what = if threads.len() == 1 { "a review comment" } else { "review comments" };
@@ -169,13 +178,57 @@ fn message(worktree: &str, threads: &[i64]) -> String {
     } else {
         format!("'{}'", worktree.replace('\'', "'\\''"))
     };
-    format!(
-        "The reviewer sent you {what} from the Review app: {}, on the worktree {worktree}. Address them with the \
-         local-review skill: `review -C {quoted} comments {}` lists them, and `review -C {quoted} reply <id> \"...\"` \
-         answers one.",
-        hashes.join(", "),
-        ids.join(" "),
-    )
+    let (hashes, ids) = (hashes.join(", "), ids.join(" "));
+    match agent {
+        Agent::Claude => format!(
+            "The reviewer sent you {what} from the Review app: {hashes}, on the worktree {worktree}. Address them with \
+             the local-review skill: `review -C {quoted} comments {ids}` lists them, and \
+             `review -C {quoted} reply <id> \"...\"` answers one."
+        ),
+        Agent::Codex => format!(
+            "The reviewer sent you {what} from the Review app: {hashes}, on the worktree {worktree}.\n\
+             1. `review -C {quoted} comments {ids}` lists them, with the code each is about (and the paths of any \
+             attached screenshots: open them).\n\
+             2. Apply what each asks for in that worktree. If you disagree or it's unclear, leave the code alone \
+             and ask in your reply.\n\
+             3. Answer each: `review -C {quoted} reply --as codex <id> \"<what you changed, or your question>\"`. \
+             Don't resolve them; the reviewer does after checking.\n\
+             Finish with one line saying what you did."
+        ),
+    }
+}
+
+/// Opens a new session of `agent` in its desktop app, in `worktree`, with `text` as its prompt,
+/// through the apps' own links (undocumented): Claude's `claude://code/new?folder=&q=`, Codex's
+/// `codex://threads/new?path=&prompt=` (in the ChatGPT app).
+fn open_new_session(agent: Agent, worktree: &str, text: &str) -> Result<()> {
+    let url = match agent {
+        Agent::Claude => format!("claude://code/new?folder={}&q={}", percent_encode(worktree), percent_encode(text)),
+        Agent::Codex => format!("codex://threads/new?path={}&prompt={}", percent_encode(worktree), percent_encode(text)),
+    };
+    let app = match agent {
+        Agent::Claude => "Claude",
+        Agent::Codex => "ChatGPT (for Codex)",
+    };
+    let status = std::process::Command::new("open")
+        .arg(&url)
+        .status()
+        .map_err(|e| format!("Couldn't open {app}: {e}"))?;
+    if !status.success() {
+        return Err(format!("Couldn't open a new session: is the {app} app installed?"));
+    }
+    Ok(())
+}
+
+/// `value` with everything but unreserved URL characters percent-encoded.
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// Hands `text` to the session listening on `socket`, as one stream-json `user` frame.
@@ -218,6 +271,12 @@ impl Store {
     /// one of `sessions`, and marks them sent. Returns the threads sent.
     fn send(&mut self, sessions: &[Session], session: &str, target: &Target, only: Option<&[i64]>) -> Result<Vec<i64>> {
         let session = sessions.iter().find(|s| s.id == session).ok_or("That session isn't running any more")?;
+        self.hand_over(target, only, |ids| deliver(&session.socket, &message(Agent::Claude, &target.worktree, ids)))
+    }
+
+    /// Hands `target`'s pending threads (or those of `only` that are pending) to `deliver`, and
+    /// marks them sent once it succeeds. Returns the threads handed over.
+    fn hand_over(&mut self, target: &Target, only: Option<&[i64]>, deliver: impl FnOnce(&[i64]) -> Result<()>) -> Result<Vec<i64>> {
         let threads: Vec<_> = self
             .threads(target, false)?
             .into_iter()
@@ -227,7 +286,7 @@ impl Store {
             return Err("There are no comments to send".into());
         }
         let ids: Vec<i64> = threads.iter().map(|t| t.id).collect();
-        deliver(&session.socket, &message(&target.worktree, &ids))?;
+        deliver(&ids)?;
         let now = now_ms();
         let tx = sql(self.conn.transaction())?;
         for thread in &threads {
@@ -270,6 +329,19 @@ pub async fn send_comments(path: String, session: String, threads: Option<Vec<i6
             .unwrap_or_default();
         let target = Target::of(Path::new(&path))?;
         store.send(&sessions, &session, &target, threads.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Opens a new `agent` session on the worktree at `path` with its pending comments, or `threads` of them.
+#[tauri::command]
+pub async fn start_session(path: String, agent: Agent, threads: Option<Vec<i64>>) -> Result<Vec<i64>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target = Target::of(Path::new(&path))?;
+        Store::open()?.hand_over(&target, threads.as_deref(), |ids| {
+            open_new_session(agent, &target.worktree, &message(agent, &target.worktree, ids))
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -378,6 +450,12 @@ mod tests {
         assert!(!store.thread(second).unwrap().pending);
         store.edit_message(sent, "y", &[]).unwrap();
         assert!(store.thread(second).unwrap().pending);
+
+        // Codex gets the steps instead of the skill, signing its replies.
+        let codex = message(Agent::Codex, &target.worktree, &[first, second]);
+        assert!(codex.contains(&format!("review -C {} comments {first} {second}", target.worktree)), "{codex}");
+        assert!(codex.contains("reply --as codex <id>") && !codex.contains("local-review"), "{codex}");
+        assert_eq!(percent_encode("a b/é&q=1"), "a%20b%2F%C3%A9%26q%3D1");
 
         // Nothing is marked sent when the session can't be reached.
         drop(listener);
