@@ -1,6 +1,7 @@
 import { CheckCircle2, ChevronRight, MessageSquare, MessageSquarePlus, Pencil, RotateCcw, ThumbsUp, Trash2, User } from "lucide-react";
-import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { showError } from "../lib/api";
+import { markdownPreview } from "../lib/markdown";
 import { clipboardImages, prepareImage, type DraftImage } from "../lib/images";
 import { useAddGeneralThread, useDeleteComment, useEditComment, useReplyThread, useSetThreadResolved, useSetThumbsUp } from "../lib/queries";
 import { agentLabel, cn, timeAgo } from "../lib/utils";
@@ -8,6 +9,8 @@ import { conversationKey, editKey, replyKey, useStore } from "../store";
 import type { CommentMessage, ExcerptRow, GeneralThread, LineRange, Thread, Worktree } from "../types";
 import { DraftImages, MessageImages, useDraftImages } from "./Images";
 import { AgentIcon } from "./AgentIcon";
+import { Markdown } from "./Markdown";
+import { MarkdownEditor } from "./MarkdownEditor";
 import { SendThreadButton } from "./SendToAgent";
 import { Button, Tooltip } from "./ui";
 
@@ -35,7 +38,7 @@ function Card({ children, className }: { children: ReactNode; className?: string
   );
 }
 
-/** A textarea that grows with its content; ⌘↩ submits and Esc cancels. Pasted screenshots attach to `imageKey`. */
+/** A Markdown field that renders as you type; ⌘↩ submits and Esc cancels. Pasted screenshots attach to `imageKey`. */
 function CommentField({
   imageKey,
   value,
@@ -56,61 +59,31 @@ function CommentField({
   /** ⌘↩ submits with nothing written too (the text is optional). */
   submitEmpty?: boolean;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
   const addImages = useStore((s) => s.addDraftImages);
   const hasImages = useDraftImages(imageKey).length > 0;
-  useEffect(() => {
-    const field = ref.current;
-    if (!autoFocus || !field) return;
-    field.focus({ preventScroll: true });
-    // After any text it starts with (an edit).
-    field.setSelectionRange(field.value.length, field.value.length);
-  }, [autoFocus]);
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      if (submitEmpty || value.trim() || hasImages) onSubmit();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      onCancel();
-    }
-  };
-
-  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = clipboardImages(e.clipboardData);
-    if (files.length === 0) return;
-    e.preventDefault();
+  const onPasteFiles = (data: DataTransfer) => {
+    const files = clipboardImages(data);
+    if (files.length === 0) return false;
     Promise.all(files.map(prepareImage)).then(
       (images: DraftImage[]) => addImages(imageKey, images),
       (error) => showError("Couldn't paste the image", String(error)),
     );
+    return true;
   };
 
-  // The textarea grows with a hidden copy of its text in the same grid cell, so the height follows
-  // in the normal layout pass; measuring it from script forces a layout of the whole diff per key.
-  // WebKit draws the caret as tall as the line, so lines are kept fairly tight.
-  const shared = "col-start-1 row-start-1 max-h-80 px-3 py-2.5 leading-[18px] break-words whitespace-pre-wrap";
   return (
     <>
-      <div className="grid">
-        <div aria-hidden className={cn(shared, "invisible overflow-hidden")}>
-          {value}{" "}
-        </div>
-        <textarea
-          ref={ref}
-          value={value}
-          rows={3}
-          placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          className={cn(
-            shared,
-            "selectable block min-h-[74px] w-full resize-none bg-transparent text-fg caret-accent outline-none placeholder:text-fg-faint",
-          )}
-        />
-      </div>
+      <MarkdownEditor
+        value={value}
+        onChange={onChange}
+        onSubmit={() => (submitEmpty || value.trim() || hasImages) && onSubmit()}
+        onCancel={onCancel}
+        onPasteFiles={onPasteFiles}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        className="max-h-80 min-h-[74px] overflow-y-auto px-3 py-2.5 text-fg caret-accent"
+      />
       <DraftImages imageKey={imageKey} />
     </>
   );
@@ -238,7 +211,7 @@ export function ThreadCard({ thread, note }: { thread: Thread | GeneralThread; n
         >
           <CheckCircle2 className="size-3.5 shrink-0 text-add" />
           <span className="shrink-0 font-medium">Resolved</span>
-          <span className="min-w-0 flex-1 truncate">{first?.body.split("\n")[0] || (first?.attachments.length ? "Image" : "")}</span>
+          <span className="min-w-0 flex-1 truncate">{markdownPreview(first?.body ?? "") || (first?.attachments.length ? "Image" : "")}</span>
           <span className="tabular shrink-0 text-fg-faint">
             {thread.messages.length > 1 && `${thread.messages.length} comments`}
           </span>
@@ -344,7 +317,7 @@ function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: bo
         <MessageEditor message={message} />
       ) : (
         message.body && (
-          <p className="selectable mt-1 pl-7 leading-5 break-words whitespace-pre-wrap text-fg-muted">{message.body}</p>
+          <Markdown text={message.body} className="mt-1 pl-7 text-fg-muted" />
         )
       )}
       <MessageImages attachments={message.attachments} />

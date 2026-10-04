@@ -1,5 +1,6 @@
 import { ChevronRight, MessageSquare } from "lucide-react";
 import { useMemo, useState } from "react";
+import { markdownPreview } from "../lib/markdown";
 import { cn, splitPath } from "../lib/utils";
 import { panelCommentKey, useStore } from "../store";
 import type { ChangedFile, GeneralThread, LineRange, Thread, Worktree } from "../types";
@@ -148,7 +149,7 @@ function ThreadRow({ thread, inDiff, onSelect }: { thread: AnyThread; inDiff: bo
   const first = thread.messages[0];
   const last = thread.messages[thread.messages.length - 1];
   const replies = thread.messages.length - 1;
-  const preview = first?.body.trim() || (first?.attachments.length ? "Image" : "");
+  const preview = markdownPreview(first?.body ?? "") || (first?.attachments.length ? "Image" : "");
   const range = thread.path === null ? null : (thread.position ?? thread.range);
   const status = thread.resolved
     ? { label: "Resolved", className: "text-add" }

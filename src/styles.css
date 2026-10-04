@@ -208,3 +208,144 @@
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * Comment text, posted or being written (the editor renders as you type, so both share this):
+ * GitHub's comment Markdown, tightened for threads in a diff.
+ */
+@layer components {
+  .markdown {
+    line-height: 20px;
+    overflow-wrap: break-word;
+  }
+  .markdown > :first-child {
+    margin-top: 0;
+  }
+  .markdown > :last-child {
+    margin-bottom: 0;
+  }
+  .markdown :where(p, ul, ol, blockquote, pre, table, hr) {
+    margin: 0 0 8px;
+  }
+  .markdown :where(ul, ol) {
+    padding-left: 22px;
+  }
+  .markdown ul {
+    list-style: disc;
+  }
+  .markdown ol {
+    list-style: decimal;
+  }
+  .markdown :where(ul ul) {
+    list-style: circle;
+  }
+  .markdown :where(li > ul, li > ol, li > p) {
+    margin: 0;
+  }
+  .markdown li + li {
+    margin-top: 2px;
+  }
+  .markdown li::marker {
+    color: var(--fg-subtle);
+  }
+  .markdown :where(h1, h2, h3, h4, h5, h6) {
+    margin: 0 0 8px;
+    font-size: inherit;
+    font-weight: 600;
+  }
+  .markdown :where(strong, b) {
+    font-weight: 600;
+    color: var(--fg);
+  }
+  .markdown a {
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .markdown a:hover {
+    text-decoration: underline;
+  }
+  .markdown code {
+    padding: 1px 5px;
+    border-radius: 6px;
+    background: var(--bg-active);
+    font-family: var(--font-mono);
+    font-size: 85%;
+  }
+  .markdown pre {
+    padding: 8px 12px;
+    overflow-x: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    background: var(--bg-inset);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 18px;
+    white-space: pre;
+  }
+  .markdown pre code {
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    font-size: inherit;
+  }
+  .markdown blockquote {
+    padding: 0 10px;
+    border-left: 3px solid var(--border);
+    color: var(--fg-subtle);
+  }
+  .markdown hr {
+    height: 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+  .markdown table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+  }
+  .markdown :where(th, td) {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .markdown th {
+    font-weight: 600;
+    text-align: left;
+    color: var(--fg);
+  }
+  .markdown :where(th, td) > p {
+    margin: 0;
+  }
+  .markdown tr:nth-child(2n) {
+    background: var(--bg-raised);
+  }
+  .markdown input[type="checkbox"] {
+    margin: 0 4px 0 -18px;
+    vertical-align: -1px;
+  }
+  .markdown li:has(> input[type="checkbox"]) {
+    list-style: none;
+  }
+
+  /* The editor's empty state and table selection. */
+  .markdown.ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    color: var(--fg-faint);
+    pointer-events: none;
+  }
+  .markdown.ProseMirror .selectedCell {
+    background: var(--accent-soft);
+  }
+  .markdown.ProseMirror .tableWrapper {
+    margin: 0 0 8px;
+    overflow-x: auto;
+  }
+  .markdown.ProseMirror .tableWrapper table {
+    margin: 0;
+  }
+}

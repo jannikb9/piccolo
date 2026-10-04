@@ -385,7 +385,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
         {
           id: 6,
           author: "agent",
-          body: "Moving the refresh into the middleware is the right call. Two things across files: nothing tests an expired token end to end (only isExpiringSoon is unit-tested), and the API client still retries on 401 by refreshing itself, so a request can now refresh twice.",
+          body: "Moving the refresh into the middleware is the right call. Two things across files:\n\n1. Nothing tests an expired token end to end (only `isExpiringSoon` is unit-tested).\n2. The API client still retries on **401** by refreshing itself, so a request can now refresh twice:\n\n```ts\nif (res.status === 401) await refresh();\n```\n\n| Path | Refreshes |\n| --- | --- |\n| `authMiddleware` | once |\n| `apiClient` on 401 | again |",
           attachments: [],
           createdAt: minutesAgo(4),
           editedAt: null,
