@@ -174,7 +174,7 @@ export type AgentSession = {
   startedAt: number | null;
   /** When it last ran a `piccolo` command on the worktree. */
   lastSeen: number | null;
-  /** Piccolo can send it messages (a running Claude Code session). */
+  /** Piccolo can send it messages: a running Claude Code session, or a Codex thread (queued with the Codex CLI). */
   reachable: boolean;
 };
 

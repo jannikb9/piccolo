@@ -8,7 +8,9 @@
 //! sessions). The format is Claude Code's own and undocumented, and the sender gets no confirmation.
 //! And any agent that runs a `piccolo` command from a session the command can name (see
 //! [`Caller`]) leaves a trace, so Codex sessions, and sessions in a folder above several
-//! repositories, show up too; Piccolo can't message those yet.
+//! repositories, show up too. Codex has no inbox socket: `codex queue --thread <id>` queues a
+//! message for a thread, which a session that has it open takes as its next turn (as Spock sends
+//! to Codex). That needs the Codex CLI, which the ChatGPT app ships even when it isn't installed.
 //!
 //! Comments aren't sent as a batch: they're posted for every agent to read. What's new for a
 //! session is what changed in open threads since it last saw them: by listing them with `piccolo
@@ -20,10 +22,11 @@ use crate::requests::{self, Request};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 /// An agent session that works in, or on, a worktree.
@@ -46,10 +49,20 @@ pub struct Session {
     pub started_at: Option<i64>,
     /// When it last ran a `piccolo` command on the worktree.
     pub last_seen: Option<i64>,
-    /// Whether Piccolo can send it messages: a running Claude Code session has an inbox.
+    /// Whether Piccolo can send it messages: a running Claude Code session has an inbox, and a
+    /// Codex thread a queue when the Codex CLI is found.
     pub reachable: bool,
     #[serde(skip)]
-    socket: Option<PathBuf>,
+    inbox: Option<Inbox>,
+}
+
+/// How a message reaches a session.
+#[derive(Debug, Clone)]
+enum Inbox {
+    /// A Claude Code session's inbox socket.
+    Socket(PathBuf),
+    /// A Codex thread, queued with this Codex CLI.
+    CodexQueue(PathBuf),
 }
 
 /// A session's file in the registry, as far as it's used here.
@@ -138,6 +151,24 @@ fn codex_titles(index: &Path) -> HashMap<String, String> {
         .collect()
 }
 
+/// The Codex CLI: on the PATH, else the copy the ChatGPT app ships and runs for its own chats.
+fn codex_binary() -> Option<PathBuf> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let path = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
+    // An app opened from the Finder gets a minimal PATH, so the usual install folders are looked at too.
+    let usual = [home.join(".local/bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
+    path.into_iter()
+        .chain(usual)
+        .map(|dir| dir.join("codex"))
+        .chain([PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex")])
+        .find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.mode() & 0o111 != 0))
+}
+
+/// Whether `id` looks like a Codex thread id (a UUID), so it can't pass for an option.
+fn is_thread_id(id: &str) -> bool {
+    id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
 /// Whether the process `pid` still runs: a session that crashed leaves its file behind.
 fn is_alive(pid: i64) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
@@ -194,12 +225,14 @@ struct Trace {
 /// For each of `worktrees`, the sessions working on it: the running Claude Code sessions in it
 /// (not in a worktree nested inside it), then those that ran `piccolo` on it (`traces`: session id
 /// → canonical worktree → trace), running or not. Running ones come first, the most recently
-/// started first; then the others, most recently seen first.
+/// started first; then the others, most recently seen first. Codex threads can be sent messages
+/// with the Codex CLI at `codex`.
 fn match_sessions(
     live: &[Live],
     worktrees: &[String],
     traces: &HashMap<String, HashMap<PathBuf, Trace>>,
     titles: &HashMap<String, String>,
+    codex: Option<&Path>,
 ) -> HashMap<String, Vec<Session>> {
     let canonical_worktrees: Vec<(String, PathBuf)> =
         worktrees.iter().filter_map(|w| canonical(w).map(|c| (w.clone(), c))).collect();
@@ -225,7 +258,7 @@ fn match_sessions(
                     started_at: l.entry.started_at,
                     last_seen: trace.map(|t| t.seen_at),
                     reachable: true,
-                    socket: Some(l.socket.clone()),
+                    inbox: Some(Inbox::Socket(l.socket.clone())),
                 })
             })
             .collect();
@@ -236,6 +269,7 @@ fn match_sessions(
             .filter_map(|(id, worktrees)| {
                 let trace = worktrees.get(worktree)?;
                 let agent = trace.agent.clone().unwrap_or_else(|| "claude".into());
+                let inbox = codex.filter(|_| agent == "codex" && is_thread_id(id)).map(|c| Inbox::CodexQueue(c.to_path_buf()));
                 Some(Session {
                     id: id.clone(),
                     title: titles.get(id).cloned(),
@@ -247,8 +281,8 @@ fn match_sessions(
                     in_worktree: false,
                     started_at: None,
                     last_seen: Some(trace.seen_at),
-                    reachable: false,
-                    socket: None,
+                    reachable: inbox.is_some(),
+                    inbox,
                 })
             })
             .collect();
@@ -340,15 +374,55 @@ fn percent_encode(value: &str) -> String {
         .collect()
 }
 
-/// Hands `text` to `session`, as one stream-json `user` frame to its inbox.
+/// Hands `text` to `session`: as one stream-json `user` frame to a Claude Code session's inbox, or
+/// queued for a Codex thread.
 pub(crate) fn deliver(session: &Session, text: &str) -> Result<()> {
-    let socket = session.socket.as_ref().ok_or("Piccolo can't send messages to that session")?;
+    match session.inbox.as_ref().ok_or("Piccolo can't send messages to that session")? {
+        Inbox::Socket(socket) => write_to_socket(socket, text),
+        Inbox::CodexQueue(codex) => queue_for_codex(codex, &session.id, text),
+    }
+}
+
+fn write_to_socket(socket: &Path, text: &str) -> Result<()> {
     let frame = serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } });
     let mut stream = UnixStream::connect(socket).map_err(|e| format!("The session isn't reachable any more ({e})"))?;
     stream.set_write_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
     stream
         .write_all(format!("{frame}\n").as_bytes())
         .map_err(|e| format!("Couldn't send to the session ({e})"))
+}
+
+/// How long `codex queue` gets to confirm; past that, whether the message was queued is unknown.
+const QUEUE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Queues `text` for Codex thread `thread` with the Codex CLI at `codex`.
+fn queue_for_codex(codex: &Path, thread: &str, text: &str) -> Result<()> {
+    let mut child = Command::new(codex)
+        .args(["queue", "--thread", thread, "--message", text])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Couldn't run Codex ({}): {e}", codex.display()))?;
+    let mut stderr = child.stderr.take();
+    let (done, finished) = std::sync::mpsc::channel();
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let mut errors = String::new();
+        if let Some(stderr) = stderr.as_mut() {
+            let _ = stderr.read_to_string(&mut errors);
+        }
+        let _ = done.send((child.wait(), errors));
+    });
+    match finished.recv_timeout(QUEUE_TIMEOUT) {
+        Ok((Ok(status), _)) if status.success() => Ok(()),
+        Ok((Ok(_), errors)) => Err(format!("Codex couldn't queue the message: {}", errors.trim())),
+        Ok((Err(e), _)) => Err(format!("Codex couldn't queue the message: {e}")),
+        Err(_) => {
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            Err("Codex didn't confirm within a minute, so the message may or may not be queued".into())
+        }
+    }
 }
 
 /// Records that `session` has seen `threads` as they are at `now`.
@@ -424,7 +498,8 @@ impl Store {
         if ids.is_empty() {
             return Err("There are no comments to send".into());
         }
-        deliver(session, &message(None, &target.worktree, &ids))?;
+        let agent = (session.agent == "codex").then_some(Agent::Codex);
+        deliver(session, &message(agent, &target.worktree, &ids))?;
         self.mark_seen(&session.id, &ids)?;
         Ok(ids)
     }
@@ -437,7 +512,8 @@ impl Store {
 
 /// The sessions working on each of `worktrees`, from the registry and the traces in `store`.
 fn sessions_by_worktree(store: &Store, worktrees: &[String]) -> Result<HashMap<String, Vec<Session>>> {
-    Ok(match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?, &codex_titles(&codex_index())))
+    let codex = codex_binary();
+    Ok(match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?, &codex_titles(&codex_index()), codex.as_deref()))
 }
 
 /// The sessions working on the worktree at `path`.
@@ -563,7 +639,7 @@ mod tests {
         std::fs::write(registry.join("gone.json"), gone.to_string()).unwrap();
         let titles = HashMap::from([("codex-1".to_string(), "Review the parser".to_string())]);
 
-        let found = |store: &Store| match_sessions(&live_sessions(&registry), &worktrees, &store.traces().unwrap(), &titles);
+        let found = |store: &Store| match_sessions(&live_sessions(&registry), &worktrees, &store.traces().unwrap(), &titles, None);
         let ids = |store: &Store, worktree: &str| -> Vec<String> {
             found(store).get(worktree).map(|s| s.iter().map(|s| s.id.clone()).collect()).unwrap_or_default()
         };
@@ -591,6 +667,58 @@ mod tests {
         for id in ["here", "above", "main"] {
             let _ = std::fs::remove_file(format!("/tmp/review-test-{}-{id}.sock", std::process::id()));
         }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn queues_messages_for_codex_threads() {
+        let (root, wt, mut store) = fixture("sessions-codex");
+        let target = Target::of(&wt).unwrap();
+        // A stand-in for the Codex CLI that records what it was asked, and fails for one thread.
+        let codex = root.join("codex");
+        let log = root.join("queued.txt");
+        std::fs::write(
+            &codex,
+            format!(
+                "#!/bin/sh\ncase \"$3\" in 00000000-*) echo 'no such thread' >&2; exit 1;; esac\nprintf '%s\\n' \"$@\" >> '{}'\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&codex, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let thread = "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b";
+        let worktree = target.worktree.clone();
+        store.note_session(&caller(thread, "codex"), &worktree).unwrap();
+        store.note_session(&caller("not-a-thread", "codex"), &worktree).unwrap();
+        store.note_session(&caller("00000000-0000-0000-0000-000000000000", "codex"), &worktree).unwrap();
+        let sessions = |codex: Option<&Path>| {
+            match_sessions(&[], std::slice::from_ref(&worktree), &store.traces().unwrap(), &HashMap::new(), codex).remove(&worktree).unwrap()
+        };
+
+        // Without the Codex CLI, or with an id that isn't a thread's, there's no way to send.
+        assert!(sessions(None).iter().all(|s| !s.reachable));
+        let found = sessions(Some(&codex));
+        let reachable: Vec<&str> = found.iter().filter(|s| s.reachable).map(|s| s.id.as_str()).collect();
+        assert_eq!(reachable.len(), 2);
+        assert!(reachable.contains(&thread));
+
+        let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
+        let new = NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: additions(3, 3), body: "x", images: &[] };
+        let id = store.add_thread(&target, &wt, &range, new).unwrap();
+        let session = found.iter().find(|s| s.id == thread).unwrap();
+        assert_eq!(store.send(session, &target, None).unwrap(), [id]);
+        let queued = std::fs::read_to_string(&log).unwrap();
+        assert!(queued.starts_with(&format!("queue\n--thread\n{thread}\n--message\n")), "{queued}");
+        // Codex gets the steps spelled out, signing as itself.
+        assert!(queued.contains("reply --as codex <id>"), "{queued}");
+        assert!(store.unseen(&target, Some(thread)).unwrap().is_empty());
+
+        // A failure says why, and leaves the comment unseen.
+        let failing = found.iter().find(|s| s.id.starts_with("00000000")).unwrap();
+        let error = store.send(failing, &target, None).unwrap_err();
+        assert!(error.contains("no such thread"), "{error}");
+        assert_eq!(store.unseen(&target, Some(&failing.id)).unwrap(), [id]);
+
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -654,7 +782,7 @@ mod tests {
         std::fs::create_dir_all(&registry).unwrap();
         let listener = register(&registry, "s1", &wt, 1);
         let target = Target::of(&wt).unwrap();
-        let sessions = match_sessions(&live_sessions(&registry), std::slice::from_ref(&target.worktree), &HashMap::new(), &HashMap::new())
+        let sessions = match_sessions(&live_sessions(&registry), std::slice::from_ref(&target.worktree), &HashMap::new(), &HashMap::new(), None)
             .remove(&target.worktree)
             .unwrap();
         let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();

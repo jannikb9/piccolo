@@ -23,11 +23,12 @@ export const sessionName = (session: AgentSession) => session.title ?? `${agentL
 /** A folder with the home folder shortened to `~`. */
 const homeShort = (path: string) => path.replace(/^\/Users\/[^/]+/, "~");
 
-/** Where a session runs, when that's not the worktree itself, and whether it's mid-turn. */
+/** Where a session runs, when that's not the worktree itself, and when it gets what's sent. */
 function sessionDetail(session: AgentSession): string | null {
   const parts = [
     !session.inWorktree && session.cwd && `in ${homeShort(session.cwd)}`,
     session.status === "busy" && "busy: gets them when its turn ends",
+    session.agent === "codex" && "queued: the chat takes them as its next message",
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
 }

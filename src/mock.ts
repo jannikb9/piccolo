@@ -516,7 +516,7 @@ const mockSessionList: AgentSession[] = [
     inWorktree: false,
     startedAt: null,
     lastSeen: minutesAgo(3),
-    reachable: false,
+    reachable: true,
   },
   {
     id: "mock-old",

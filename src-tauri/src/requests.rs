@@ -324,6 +324,7 @@ mod tests {
         // A review nobody asked for is recorded when it's done, from its first comment.
         wait();
         comment(&mut store, By::agent(Some("gemini")), 5);
+        wait();
         let unasked = store.finish_review(&target, "gemini", None, None).unwrap();
         assert_eq!(unasked.comments, 1);
         assert!(unasked.started_at < unasked.finished_at);
