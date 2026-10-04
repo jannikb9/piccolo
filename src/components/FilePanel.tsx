@@ -3,12 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { COLLAPSED_BY_DEFAULT, type FileSection } from "../lib/sections";
 import { cn, totals, type TreeNode } from "../lib/utils";
 import { useStore, type FileTab } from "../store";
-import type { ChangedFile, GeneralThread, Thread } from "../types";
+import type { ChangedFile, GeneralThread, Thread, Worktree } from "../types";
 import { CommentList } from "./CommentList";
 import { SidebarToggle } from "./Sidebar";
 import { DiffCount, Skeleton, StatusLetter } from "./ui";
 
 export function FilePanel({
+  worktree,
   worktreeId,
   sections,
   fileCount,
@@ -21,6 +22,8 @@ export function FilePanel({
   sidebarCollapsed,
   onToggleSidebar,
 }: {
+  /** For comments on the branch as a whole. */
+  worktree: Worktree | undefined;
   worktreeId: string;
   /** Non-empty sections (Implementation, Tests, Changesets) in review order. */
   sections: FileSection[];
@@ -69,7 +72,7 @@ export function FilePanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {tab === "comments" ? (
-          worktreeId && <CommentList generalThreads={generalThreads} threads={threads} files={files} onSelectFile={onSelect} />
+          worktree && <CommentList worktree={worktree} generalThreads={generalThreads} threads={threads} files={files} onSelectFile={onSelect} />
         ) : loading ? (
           <div className="space-y-3 px-2 pt-2">
             {[28, 20, 32, 24, 18].map((w, i) => (

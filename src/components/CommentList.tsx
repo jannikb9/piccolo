@@ -1,9 +1,9 @@
 import { ChevronRight, MessageSquare } from "lucide-react";
 import { useMemo, useState } from "react";
 import { cn, splitPath } from "../lib/utils";
-import { useStore } from "../store";
-import type { ChangedFile, GeneralThread, LineRange, Thread } from "../types";
-import { authorLabel, AuthorAvatar } from "./Comments";
+import { panelCommentKey, useStore } from "../store";
+import type { ChangedFile, GeneralThread, LineRange, Thread, Worktree } from "../types";
+import { authorLabel, AuthorAvatar, GeneralComposer } from "./Comments";
 
 type AnyThread = Thread | GeneralThread;
 
@@ -23,11 +23,13 @@ function lineLabel(range: LineRange): string {
  * it, where it's read and answered.
  */
 export function CommentList({
+  worktree,
   generalThreads,
   threads,
   files,
   onSelectFile,
 }: {
+  worktree: Worktree;
   generalThreads: GeneralThread[];
   threads: Thread[];
   /** Changed files in display order. */
@@ -58,11 +60,12 @@ export function CommentList({
 
   return (
     <div className="flex flex-col gap-2">
+      <GeneralComposer worktree={worktree} draftKey={panelCommentKey(worktree.id)} panel />
       {groups.length === 0 ? (
         <p className="px-2 py-6 text-center text-[12px] leading-5 text-fg-subtle">
           {resolvedCount > 0 ? "No open comments." : "No comments yet."}
           <br />
-          Click + beside a line in the diff, or comment on the whole branch above it.
+          Click + beside a line in the diff, or add a comment on the whole branch.
         </p>
       ) : (
         groups.map((group) => <GroupSection key={group.key} group={group} onSelectFile={onSelectFile} onSelect={revealThread} />)

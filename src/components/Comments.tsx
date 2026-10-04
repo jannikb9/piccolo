@@ -551,50 +551,56 @@ export function Conversation({ worktree, threads }: { worktree: Worktree; thread
           {threads.map((thread) => (
             <ThreadCard key={thread.id} thread={thread} />
           ))}
-          <GeneralComposer worktree={worktree} />
+          <GeneralComposer worktree={worktree} draftKey={conversationKey(worktree.id)} />
         </>
       )}
     </section>
   );
 }
 
-/** A new general comment: a prompt to start one, then the form. */
-function GeneralComposer({ worktree }: { worktree: Worktree }) {
-  const key = conversationKey(worktree.id);
-  const draft = useStore((s) => s.generalDrafts[key]);
+/**
+ * A new general comment: a prompt to start one, then the form. In the Comments panel (`panel`)
+ * it is a plain box that fits the narrow column instead of a card in the diff.
+ */
+export function GeneralComposer({ worktree, draftKey, panel }: { worktree: Worktree; draftKey: string; panel?: boolean }) {
+  const draft = useStore((s) => s.generalDrafts[draftKey]);
   const setGeneralDraft = useStore((s) => s.setGeneralDraft);
-  const images = useDraftImages(key);
+  const images = useDraftImages(draftKey);
   const add = useAddGeneralThread(worktree);
 
   if (draft === undefined) {
-    return (
-      <div className="px-3 py-1.5 [contain:inline-size]">
-        <button
-          type="button"
-          onClick={() => setGeneralDraft(key, "")}
-          className="flex h-8 w-full max-w-[760px] items-center gap-2 rounded-lg border border-border-subtle bg-bg px-3 text-left text-[12px] text-fg-faint hover:border-border hover:text-fg-subtle"
-        >
-          <MessageSquarePlus className="size-3.5 shrink-0" />
-          Comment on the whole branch…
-        </button>
-      </div>
+    const button = (
+      <button
+        type="button"
+        onClick={() => setGeneralDraft(draftKey, "")}
+        className={cn(
+          "flex h-8 w-full items-center gap-2 rounded-lg border border-border-subtle bg-bg px-3 text-left text-[12px] text-fg-faint hover:border-border hover:text-fg-subtle",
+          !panel && "max-w-[760px]",
+        )}
+      >
+        <MessageSquarePlus className="size-3.5 shrink-0" />
+        {panel ? "Add comment" : "Comment on the whole branch…"}
+      </button>
     );
+    return panel ? button : <div className="px-3 py-1.5 [contain:inline-size]">{button}</div>;
   }
 
   const canSubmit = !!draft.trim() || images.length > 0;
-  const discard = () => setGeneralDraft(key, null);
+  const discard = () => setGeneralDraft(draftKey, null);
   const submit = () => canSubmit && add.mutate({ body: draft, images }, { onSuccess: discard });
-  return (
-    <Card className="focus-within:border-border-strong">
-      <div className="border-b border-border-subtle px-3 py-1.5 text-[12px] text-fg-subtle">Comment on the whole branch</div>
+  const form = (
+    <>
+      {!panel && (
+        <div className="border-b border-border-subtle px-3 py-1.5 text-[12px] text-fg-subtle">Comment on the whole branch</div>
+      )}
       <GeneralCommentField
-        draftKey={key}
-        placeholder="Leave a comment about the change as a whole, or paste a screenshot"
+        draftKey={draftKey}
+        placeholder={panel ? "Comment on the whole branch, or paste a screenshot" : "Leave a comment about the change as a whole, or paste a screenshot"}
         onSubmit={submit}
         onCancel={() => !canSubmit && discard()}
       />
       <FieldActions
-        hint="⌘↩ to comment"
+        hint={panel ? "⌘↩" : "⌘↩ to comment"}
         submitLabel="Comment"
         canSubmit={canSubmit}
         pending={add.isPending}
@@ -602,7 +608,12 @@ function GeneralComposer({ worktree }: { worktree: Worktree }) {
         onSubmit={submit}
         onCancel={discard}
       />
-    </Card>
+    </>
+  );
+  return panel ? (
+    <div className="rounded-lg border border-border bg-bg font-sans focus-within:border-border-strong">{form}</div>
+  ) : (
+    <Card className="focus-within:border-border-strong">{form}</Card>
   );
 }
 

@@ -22,6 +22,8 @@ export const draftKey = (worktreeId: string, path: string, range: LineRange) =>
 export const replyKey = (threadId: number) => `reply:${threadId}`;
 /** The general comment being written in a worktree's conversation, above the diff. */
 export const conversationKey = (worktreeId: string) => `conversation:${worktreeId}`;
+/** The general comment being written in the Comments panel. */
+export const panelCommentKey = (worktreeId: string) => `panel:${worktreeId}`;
 /** The summary being written in a worktree's send box. */
 export const summaryKey = (worktreeId: string) => `summary:${worktreeId}`;
 /** Where an edit of a message keeps its newly pasted images. */
@@ -55,7 +57,7 @@ type State = {
   replyDrafts: Record<number, string>;
   /** Text of messages being edited, by message id. */
   editDrafts: Record<number, string>;
-  /** General comments being written, by `conversationKey` or `summaryKey`; images by the same key. */
+  /** General comments being written, by `conversationKey`, `panelCommentKey` or `summaryKey`; images by the same key. */
   generalDrafts: Record<string, string>;
   /** Worktrees whose conversation above the diff is folded away. */
   conversationCollapsed: PathSet;

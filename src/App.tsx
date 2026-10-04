@@ -95,6 +95,7 @@ export default function App() {
         <ResizeHandle />
         <Panel id="files" defaultSize={272} minSize={220} maxSize={520} groupResizeBehavior="preserve-pixel-size">
           <FilePanel
+            worktree={worktree}
             worktreeId={worktree?.id ?? ""}
             sections={sections}
             fileCount={files.length}
