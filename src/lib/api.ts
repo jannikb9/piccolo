@@ -175,7 +175,7 @@ export function onRepoChanged(callback: (repoId: string) => void): () => void {
   return () => void unlisten.then((fn) => fn());
 }
 
-/** Fires when comments change, including replies an agent writes with the `review` command. */
+/** Fires when comments change, including replies an agent writes with the `piccolo` command. */
 export function onCommentsChanged(callback: () => void): () => void {
   if (!isTauri) return () => {};
   const unlisten = listen("comments-changed", () => callback());

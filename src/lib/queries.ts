@@ -127,7 +127,7 @@ function useAllSessions() {
   });
 }
 
-/** Claude Code sessions working on the worktree: in it, or having run `review` on it. */
+/** Claude Code sessions working on the worktree: in it, or having run `piccolo` on it. */
 export function useSessions(worktree: Worktree): AgentSession[] {
   return useAllSessions().data?.[worktree.path] ?? NO_SESSIONS;
 }
@@ -338,7 +338,7 @@ export function useLiveGitData() {
       client.invalidateQueries({ queryKey: ["patch"] });
       client.invalidateQueries({ queryKey: ["threads"] });
     });
-    // A `review` command run by a session also records that it works on the worktree.
+    // A `piccolo` command run by a session also records that it works on the worktree.
     const offComments = onCommentsChanged(() => {
       client.invalidateQueries({ queryKey: ["threads"] });
       client.invalidateQueries({ queryKey: ["sessions"] });

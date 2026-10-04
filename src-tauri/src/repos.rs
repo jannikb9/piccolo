@@ -12,7 +12,7 @@ use tauri_plugin_store::StoreExt;
 const STORE_FILE: &str = "settings.json";
 const STORE_KEY: &str = "repos";
 
-/// The repositories added to the app, read from its settings file, for the `review` command
+/// The repositories added to the app, read from its settings file, for the `piccolo` command
 /// (which runs without the app).
 pub fn saved_paths() -> Vec<String> {
     let file = crate::comments::app_data_dir().join(STORE_FILE);

@@ -1,4 +1,4 @@
-//! Review comments. They live in a SQLite database shared by the app and the `review` command, so
+//! Review comments. They live in a SQLite database shared by the app and the `piccolo` command, so
 //! an agent working in a worktree can read and answer the comments on its branch.
 //!
 //! A thread is anchored to lines on one side of a diff. It keeps the text of those lines, so it can
@@ -14,7 +14,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Must match `identifier` in tauri.conf.json: the database sits in the app's data folder.
+/// Must match `identifier` in tauri.conf.json: the database sits in the app's data folder. It
+/// predates the name Piccolo and stays, so existing comments and settings keep their place.
 const APP_IDENTIFIER: &str = "dev.jb.review";
 const DB_FILE: &str = "comments.db";
 /// Pasted images are saved as `<id>.png` in this folder next to the database.
@@ -223,16 +224,16 @@ pub(crate) fn sql<T>(result: rusqlite::Result<T>) -> Result<T> {
 }
 
 pub fn db_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("REVIEW_DB") {
+    if let Some(path) = std::env::var_os("PICCOLO_DB") {
         return PathBuf::from(path);
     }
     app_data_dir().join(DB_FILE)
 }
 
-/// Where the app keeps its data: the comments and its settings. `REVIEW_DATA_DIR` moves it, to
-/// try the `review` command without touching the real data.
+/// Where the app keeps its data: the comments and its settings. `PICCOLO_DATA_DIR` moves it, to
+/// try the `piccolo` command without touching the real data.
 pub fn app_data_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("REVIEW_DATA_DIR") {
+    if let Some(dir) = std::env::var_os("PICCOLO_DATA_DIR") {
         return PathBuf::from(dir);
     }
     dirs::data_dir().unwrap_or_else(std::env::temp_dir).join(APP_IDENTIFIER)
@@ -254,7 +255,7 @@ impl Store {
             std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         }
         let conn = sql(Connection::open(path))?;
-        // The app and `review` processes can write at the same time. The default rollback journal
+        // The app and `piccolo` processes can write at the same time. The default rollback journal
         // (not WAL) keeps reads from touching the disk, so the app's file watcher only sees writes.
         sql(conn.busy_timeout(std::time::Duration::from_secs(5)))?;
         sql(conn.pragma_update(None, "foreign_keys", true))?;

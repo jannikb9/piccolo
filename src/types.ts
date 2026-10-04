@@ -110,7 +110,7 @@ export type Attachment = {
 export type CommentMessage = {
   id: number;
   author: "reviewer" | "agent";
-  /** The agent's name when it gave one (`review … --as codex`); Claude Code signs as `claude`. */
+  /** The agent's name when it gave one (`piccolo … --as codex`); Claude Code signs as `claude`. */
   authorName: string | null;
   body: string;
   attachments: Attachment[];
@@ -121,7 +121,7 @@ export type CommentMessage = {
   sentAt: number | null;
 };
 
-/** A comment on some lines and its replies. Stored per branch; agents answer via the `review` CLI. */
+/** A comment on some lines and its replies. Stored per branch; agents answer via the `piccolo` CLI. */
 export type Thread = {
   id: number;
   path: string;

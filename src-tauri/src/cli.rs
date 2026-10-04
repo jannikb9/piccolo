@@ -1,4 +1,4 @@
-//! The `review` command: lets an agent read, answer and write review comments from its worktree.
+//! The `piccolo` command: lets an agent read, answer and write review comments from its worktree.
 //! It's the app binary itself, run with a subcommand (the app links it onto the PATH).
 
 use crate::comments::{self, Author, By, ExcerptRow, LineRange, NewThread, Side, Store, Target, Thread};
@@ -8,28 +8,28 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 const HELP: &str = "\
-review — read, answer and write review comments on the current branch
+piccolo — read, answer and write review comments on the current branch
 
 Usage:
-  review comments [<id>...] [--all] [--json]
+  piccolo comments [<id>...] [--all] [--json]
                                      Open comments on this branch (--all includes resolved ones),
                                      or only the ones whose ids are given
-  review reply <id> <message>        Reply to a comment
-  review comment <file>:<line>[-<end>] [--removed] <message>
+  piccolo reply <id> <message>       Reply to a comment
+  piccolo comment <file>:<line>[-<end>] [--removed] <message>
                                      Comment on lines of a file as it is now (--removed: lines the
                                      branch removed, numbered as in the base version)
-  review resolve <id>                Mark a comment resolved
-  review reopen <id>                 Reopen a resolved comment
-  review guide                       How to review this branch as an agent
+  piccolo resolve <id>               Mark a comment resolved
+  piccolo reopen <id>                Reopen a resolved comment
+  piccolo guide                      How to review this branch as an agent
 
 Every command works on the worktree in the current folder, or the one `-C <worktree>` names: a
 path, or a branch or worktree folder name in a repository added to the app. File paths are then
 relative to that worktree.
 
 A message of `-` (or none) is read from stdin. `--as <name>` signs a reply or comment with the
-agent's name (e.g. codex); without it, REVIEW_AUTHOR is used, or `claude` inside Claude Code.
+agent's name (e.g. codex); without it, PICCOLO_AUTHOR is used, or `claude` inside Claude Code.
 
-Comments are shown in the Review app and belong to the branch checked out in the current folder.";
+Comments are shown in Piccolo and belong to the branch checked out in the current folder.";
 
 /// Runs the command line if the process was started with a subcommand; returns its exit code.
 pub fn run_if_command() -> Option<i32> {
@@ -38,7 +38,7 @@ pub fn run_if_command() -> Option<i32> {
     if !matches!(command, "comments" | "reply" | "comment" | "resolve" | "reopen" | "guide" | "help" | "--help" | "-h") {
         // `-C` only belongs to the command line; without a command it's the app being launched.
         worktree.as_ref()?;
-        eprintln!("review: missing command\n\n{HELP}");
+        eprintln!("piccolo: missing command\n\n{HELP}");
         return Some(1);
     }
     let result = Folder::resolve(worktree.as_deref()).and_then(|folder| {
@@ -48,7 +48,7 @@ pub fn run_if_command() -> Option<i32> {
     Some(match result {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("review: {e}");
+            eprintln!("piccolo: {e}");
             1
         }
     })
@@ -99,7 +99,7 @@ impl Folder {
         Target::of(&self.path).map_err(|_| format!("{} isn't inside a git repository", self.path.display()))
     }
 
-    /// How a suggested `review` command names this folder: ` -C <worktree>`, or nothing.
+    /// How a suggested `piccolo` command names this folder: ` -C <worktree>`, or nothing.
     fn option(&self, target: &Target) -> String {
         if self.explicit { format!(" -C {}", shell_quote(&target.worktree)) } else { String::new() }
     }
@@ -125,7 +125,7 @@ fn find_worktree(cwd: &Path, name: &str, repos: &[String]) -> Result<PathBuf> {
     match found.len() {
         1 => Ok(PathBuf::from(found.remove(0))),
         0 => Err(format!(
-            "no folder or worktree called {name}: it isn't a path, nor a branch in a repository added to the Review app"
+            "no folder or worktree called {name}: it isn't a path, nor a branch in a repository added to Piccolo"
         )),
         _ => Err(format!("{name} is in several repositories; pass one of these paths with -C:\n  {}", found.join("\n  "))),
     }
@@ -233,10 +233,10 @@ fn message(words: &[String]) -> Result<String> {
     Ok(body)
 }
 
-/// The agent's name: `--as`, else `REVIEW_AUTHOR`, else `claude` when run by Claude Code.
+/// The agent's name: `--as`, else `PICCOLO_AUTHOR`, else `claude` when run by Claude Code.
 fn agent_name(given: Option<String>) -> Result<Option<String>> {
     let name = given
-        .or_else(|| std::env::var("REVIEW_AUTHOR").ok().filter(|n| !n.trim().is_empty()))
+        .or_else(|| std::env::var("PICCOLO_AUTHOR").ok().filter(|n| !n.trim().is_empty()))
         .or_else(|| std::env::var_os("CLAUDECODE").map(|_| "claude".to_string()));
     let Some(name) = name else { return Ok(None) };
     let name = name.trim().to_lowercase();
@@ -365,14 +365,14 @@ fn guide(target: &Target, via: &str) -> Result<String> {
         "\
 # Reviewing {branch}
 
-You're reviewing the changes on {branch} in {worktree}, {compared}. Your comments appear in the Review app next to the diff, where the developer reads them and other agents pick them up. Don't change any files: review only.
+You're reviewing the changes on {branch} in {worktree}, {compared}. Your comments appear in Piccolo next to the diff, where the developer reads them and other agents pick them up. Don't change any files: review only.
 
 1. See what changed: `{diff}` shows everything, uncommitted work included, and `{git} status --short` lists new files as untracked (??); read those whole. Read the surrounding code where the diff alone doesn't tell you enough.
-2. Read what's been said already: `review{via} comments --all`. Don't raise a point again; to add to a thread, `review{via} reply --as <your name> <id> \"...\"`.
+2. Read what's been said already: `piccolo{via} comments --all`. Don't raise a point again; to add to a thread, `piccolo{via} reply --as <your name> <id> \"...\"`.
 3. Comment on the lines each issue is about. Paths are relative to {relative_to}, and line numbers are those of the file as it is now:
-   - `review{via} comment --as <your name> <file>:<line> \"...\"`
-   - `review{via} comment --as <your name> <file>:<start>-<end> \"...\"`
-   - `review{via} comment --as <your name> --removed <file>:<line> \"...\"` for lines the branch removed, numbered as in the old version
+   - `piccolo{via} comment --as <your name> <file>:<line> \"...\"`
+   - `piccolo{via} comment --as <your name> <file>:<start>-<end> \"...\"`
+   - `piccolo{via} comment --as <your name> --removed <file>:<line> \"...\"` for lines the branch removed, numbered as in the old version
    For a long message, pass `-` instead and write it to stdin.
 4. What's worth a comment: bugs, missed cases, risky or surprising behaviour, unclear names or structure, tests that don't check what they claim. One issue per comment: say what's wrong and why, and suggest a fix. No praise, and no nits a formatter or linter would catch.
 5. Finish with one line in the chat: how many comments you left, and the most important one.
@@ -417,7 +417,7 @@ fn format_threads(target: &Target, threads: &[Thread], include_resolved: bool, v
         }
     }
     out.push_str(&format!(
-        "\n---\nAfter addressing a comment, reply with what you changed: `review{via} reply <id> \"<message>\"`\n"
+        "\n---\nAfter addressing a comment, reply with what you changed: `piccolo{via} reply <id> \"<message>\"`\n"
     ));
     out
 }
@@ -571,13 +571,13 @@ mod tests {
         let in_worktree = guide(&target, "").unwrap();
         assert!(in_worktree.starts_with("# Reviewing feat/x\n"), "{in_worktree}");
         assert!(in_worktree.contains("compared with main, from where it branched off"), "{in_worktree}");
-        assert!(in_worktree.contains("`review comment --as <your name> <file>:<line>"), "{in_worktree}");
+        assert!(in_worktree.contains("`piccolo comment --as <your name> <file>:<line>"), "{in_worktree}");
         assert!(in_worktree.contains("`git status --short`"), "{in_worktree}");
 
         // Named from elsewhere, every suggested command names the worktree.
         let via = format!(" -C {}", shell_quote(&target.worktree));
         let from_elsewhere = guide(&target, &via).unwrap();
-        assert!(from_elsewhere.contains(&format!("`review{via} comment --as <your name> <file>:<line>")), "{from_elsewhere}");
+        assert!(from_elsewhere.contains(&format!("`piccolo{via} comment --as <your name> <file>:<line>")), "{from_elsewhere}");
         assert!(from_elsewhere.contains(&format!("`git{via} status --short`")), "{from_elsewhere}");
         assert!(from_elsewhere.contains("relative to the worktree"), "{from_elsewhere}");
 

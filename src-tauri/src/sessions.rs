@@ -6,7 +6,7 @@
 //! message, which it takes as its next turn (the same mechanism Spock uses to pair sessions).
 //! The format is Claude Code's own and undocumented, and the sender gets no confirmation.
 //!
-//! A session belongs to a worktree when it runs in it, or when it has run a `review` command on
+//! A session belongs to a worktree when it runs in it, or when it has run a `piccolo` command on
 //! it (which records a trace, see `note_session`): sessions often run in a folder above several
 //! repositories and work on whichever one a task needs.
 
@@ -55,7 +55,7 @@ struct Entry {
     messaging_socket_path: Option<String>,
 }
 
-/// Worktrees sessions ran `review` commands on, by Claude Code session id.
+/// Worktrees sessions ran `piccolo` commands on, by Claude Code session id.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS session_worktrees (
         session_id TEXT NOT NULL,
@@ -123,7 +123,7 @@ fn live_sessions(registry: &Path) -> Vec<Live> {
 }
 
 /// For each of `worktrees`, the sessions of `live` working on it: those running in it (not in a
-/// worktree nested inside it), then those that ran `review` on it (`traces`: session id →
+/// worktree nested inside it), then those that ran `piccolo` on it (`traces`: session id →
 /// worktrees) from elsewhere; each group most recently started first.
 fn match_sessions(live: &[Live], worktrees: &[String], traces: &HashMap<String, HashSet<PathBuf>>) -> HashMap<String, Vec<Session>> {
     let canonical_worktrees: Vec<(String, PathBuf)> =
@@ -181,17 +181,17 @@ fn message(agent: Agent, worktree: &str, threads: &[i64]) -> String {
     let (hashes, ids) = (hashes.join(", "), ids.join(" "));
     match agent {
         Agent::Claude => format!(
-            "The reviewer sent you {what} from the Review app: {hashes}, on the worktree {worktree}. Address them with \
-             the local-review skill: `review -C {quoted} comments {ids}` lists them, and \
-             `review -C {quoted} reply <id> \"...\"` answers one."
+            "The reviewer sent you {what} from Piccolo: {hashes}, on the worktree {worktree}. Address them with \
+             the local-review skill: `piccolo -C {quoted} comments {ids}` lists them, and \
+             `piccolo -C {quoted} reply <id> \"...\"` answers one."
         ),
         Agent::Codex => format!(
-            "The reviewer sent you {what} from the Review app: {hashes}, on the worktree {worktree}.\n\
-             1. `review -C {quoted} comments {ids}` lists them, with the code each is about (and the paths of any \
+            "The reviewer sent you {what} from Piccolo: {hashes}, on the worktree {worktree}.\n\
+             1. `piccolo -C {quoted} comments {ids}` lists them, with the code each is about (and the paths of any \
              attached screenshots: open them).\n\
              2. Apply what each asks for in that worktree. If you disagree or it's unclear, leave the code alone \
              and ask in your reply.\n\
-             3. Answer each: `review -C {quoted} reply --as codex <id> \"<what you changed, or your question>\"`. \
+             3. Answer each: `piccolo -C {quoted} reply --as codex <id> \"<what you changed, or your question>\"`. \
              Don't resolve them; the reviewer does after checking.\n\
              Finish with one line saying what you did."
         ),
@@ -242,7 +242,7 @@ fn deliver(socket: &Path, text: &str) -> Result<()> {
 }
 
 impl Store {
-    /// Records that Claude Code session `session` worked on `worktree` (it ran `review` there).
+    /// Records that Claude Code session `session` worked on `worktree` (it ran `piccolo` there).
     pub fn note_session(&self, session: &str, worktree: &str) -> Result<()> {
         let now = now_ms();
         sql(self.conn.execute(
@@ -253,7 +253,7 @@ impl Store {
         Ok(())
     }
 
-    /// The worktrees each session ran `review` on, as canonical paths.
+    /// The worktrees each session ran `piccolo` on, as canonical paths.
     fn traces(&self) -> Result<HashMap<String, HashSet<PathBuf>>> {
         let mut stmt = sql(self.conn.prepare("SELECT session_id, worktree FROM session_worktrees"))?;
         let rows = sql(stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))))?;
@@ -390,7 +390,7 @@ mod tests {
         let ids = |store: &Store, worktree: &str| -> Vec<String> {
             found(store).get(worktree).map(|s| s.iter().map(|s| s.id.clone()).collect()).unwrap_or_default()
         };
-        // A session in a folder above only counts once it ran `review` on the worktree.
+        // A session in a folder above only counts once it ran `piccolo` on the worktree.
         assert_eq!(ids(&store, &worktrees[1]), ["here"]);
         assert_eq!(ids(&store, &worktrees[0]), ["main"]);
         store.note_session("above", &Target::of(&wt).unwrap().worktree).unwrap();
@@ -434,8 +434,8 @@ mod tests {
         // One comment, then the rest.
         assert_eq!(store.send(&sessions, "s1", &target, Some(&[second])).unwrap(), [second]);
         let text = received();
-        assert!(text.contains(&format!("a review comment from the Review app: #{second}")), "{text}");
-        assert!(text.contains(&format!("review -C {} comments {second}", target.worktree)), "{text}");
+        assert!(text.contains(&format!("a review comment from Piccolo: #{second}")), "{text}");
+        assert!(text.contains(&format!("piccolo -C {} comments {second}", target.worktree)), "{text}");
         assert_eq!(store.send(&sessions, "s1", &target, None).unwrap(), [first]);
         assert!(received().contains(&format!("#{first}")));
         assert!(store.send(&sessions, "s1", &target, None).is_err());
@@ -453,7 +453,7 @@ mod tests {
 
         // Codex gets the steps instead of the skill, signing its replies.
         let codex = message(Agent::Codex, &target.worktree, &[first, second]);
-        assert!(codex.contains(&format!("review -C {} comments {first} {second}", target.worktree)), "{codex}");
+        assert!(codex.contains(&format!("piccolo -C {} comments {first} {second}", target.worktree)), "{codex}");
         assert!(codex.contains("reply --as codex <id>") && !codex.contains("local-review"), "{codex}");
         assert_eq!(percent_encode("a b/é&q=1"), "a%20b%2F%C3%A9%26q%3D1");
 

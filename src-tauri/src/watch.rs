@@ -1,6 +1,6 @@
 //! Watches each repository's git directory so the sidebar updates when worktrees are added or
 //! removed, or a worktree switches branch — typically done by an agent in a terminal. Also watches
-//! the comments database, so replies written with the `review` command show up right away, and
+//! the comments database, so replies written with the `piccolo` command show up right away, and
 //! Claude Code's session registry, so sessions appear and go as they start and end.
 
 use crate::{comments, git, sessions};

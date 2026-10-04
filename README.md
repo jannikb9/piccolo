@@ -1,4 +1,4 @@
-# Review
+# Piccolo
 
 A local desktop app for reviewing changes in git worktrees and branches, PR-style.
 
@@ -17,50 +17,50 @@ Install a local build (unsigned, for this machine):
 
 ```bash
 pnpm tauri build --bundles app
-# Quit Review first; replace the bundle rather than copying over it (macOS kills a binary
+# Quit Piccolo first; replace the bundle rather than copying over it (macOS kills a binary
 # that was overwritten in place).
-rm -rf /Applications/Review.app && cp -R src-tauri/target/release/bundle/macos/Review.app /Applications/
+rm -rf /Applications/Piccolo.app && cp -R src-tauri/target/release/bundle/macos/Piccolo.app /Applications/
 ```
 
 ## Comments for agents
 
 Hover a line in the diff and click the **+** (or drag it over several lines) to comment, like on
 GitHub. Comments belong to the branch and are stored in
-`~/Library/Application Support/dev.jb.review/comments.db`, which the `review` command reads too.
+`~/Library/Application Support/dev.jb.review/comments.db`, which the `piccolo` command reads too.
 Paste a screenshot (⌘V) into a comment or reply to attach it; images are scaled to at most 2000px,
-saved as PNGs in `attachments/` next to the database, and `review comments` lists their paths so an
+saved as PNGs in `attachments/` next to the database, and `piccolo comments` lists their paths so an
 agent can open them.
 
-`review` is the app binary run with a subcommand. Link it onto your PATH once (bundling an installer
+`piccolo` is the app binary run with a subcommand. Link it onto your PATH once (bundling an installer
 is still open):
 
 ```bash
-ln -sf /Applications/Review.app/Contents/MacOS/review ~/.local/bin/review
+ln -sf /Applications/Piccolo.app/Contents/MacOS/piccolo ~/.local/bin/piccolo
 ```
 
 Then in any worktree:
 
 ```bash
-review comments            # open comments on this branch, with the code they're about (--all, --json, or ids)
-review reply 12 "Fixed"    # answer as the agent; shows up in the app right away
-review resolve 12          # or: review reopen 12
-review comment src/a.ts:40-42 "Why?"   # an agent reviewing starts a thread (--removed for removed lines)
-review guide               # instructions for an agent reviewing the branch, e.g. Codex
+piccolo comments            # open comments on this branch, with the code they're about (--all, --json, or ids)
+piccolo reply 12 "Fixed"    # answer as the agent; shows up in the app right away
+piccolo resolve 12          # or: piccolo reopen 12
+piccolo comment src/a.ts:40-42 "Why?"   # an agent reviewing starts a thread (--removed for removed lines)
+piccolo guide               # instructions for an agent reviewing the branch, e.g. Codex
 ```
 
-Agents sign with `--as <name>` (or `REVIEW_AUTHOR`; Claude Code signs as `claude` by itself), and
+Agents sign with `--as <name>` (or `PICCOLO_AUTHOR`; Claude Code signs as `claude` by itself), and
 the app shows the name. Every command takes `-C <worktree>`: a path, or a branch or worktree folder
 name from the repositories added to the app, for agents working from a parent folder.
 
-Tell your agent about it, e.g. in `CLAUDE.md` / `AGENTS.md`: *Run `review comments` to see review
-feedback on this branch; after addressing a comment, reply with `review reply <id> "<what changed>"`.*
+Tell your agent about it, e.g. in `CLAUDE.md` / `AGENTS.md`: *Run `piccolo comments` to see review
+feedback on this branch; after addressing a comment, reply with `piccolo reply <id> "<what changed>"`.*
 
 ### Sending comments to a Claude session
 
 Comments you write stay unsent until you send them, like a GitHub review. **Send to Claude** in the
 toolbar (or **Send** on one comment) hands them to a running Claude Code session working on the
 worktree (with several, pick one by its title). A session works on a worktree when it runs in it,
-or when it ran a `review` command on it: run inside Claude Code, `review` records the session
+or when it ran a `piccolo` command on it: run inside Claude Code, `piccolo` records the session
 (`CLAUDE_CODE_SESSION_ID`) against the worktree, so a session in a folder above several
 repositories counts too once it has used `/local-review` there. The sidebar and toolbar show the
 sessions' icons, live: the app watches Claude Code's registry, `~/.claude/sessions/*.json`.
@@ -73,7 +73,7 @@ isn't confirmed.
 The send menu also opens a **new Claude or Codex session** on the worktree, in the Claude or
 ChatGPT desktop app, with the comments as its first prompt: through the apps' own links,
 `claude://code/new?folder=…&q=…` and `codex://threads/new?path=…&prompt=…` (both undocumented).
-Codex gets the `review` steps spelled out and signs its replies `--as codex`; it needs `review` on
+Codex gets the `piccolo` steps spelled out and signs its replies `--as codex`; it needs `piccolo` on
 its PATH and may ask before writing to the comments database, which is outside the worktree.
 
 ## Status
@@ -82,7 +82,7 @@ its PATH and may ask before writing to the comments database, which is outside t
 - [x] M2 — Repos & worktrees from git, changed-file lists, switching (⌘1–9, ⌥↑/↓), auto-discovery, drag to reorder repos
 - [x] M3 — Real diffs: `@pierre/diffs` CodeView (virtualized, worker-highlighted), split/unified, expandable context, hide whitespace
 - [x] Syntax themes: GitHub by default, others selectable in Settings (⌘,)
-- [x] Line comments (single and multi-line), replies, resolve, pasted screenshots; `review` CLI for agents
+- [x] Line comments (single and multi-line), replies, resolve, pasted screenshots; `piccolo` CLI for agents
 - [x] ⌘F find in changes: highlights without scrolling; ⌘G / ⇧⌘G, Enter / ⇧Enter step from the current view
 - [x] Selecting text highlights its other occurrences
 - [x] File list in sections (Implementation, Tests, Changesets); the diff follows that order
@@ -107,7 +107,7 @@ its PATH and may ask before writing to the comments database, which is outside t
 - Choose the base branch per worktree (currently the repo default: origin/HEAD → main → master).
 - Image previews for binary files; a proper app icon.
 - Comments: edit a comment, "Start a review" drafts that agents only see once submitted,
-  per-worktree comment counts in the sidebar, installing `review` from the app, an MCP server on
+  per-worktree comment counts in the sidebar, installing `piccolo` from the app, an MCP server on
   top of the same store.
 - Later: ⌘K palette.
 
@@ -145,7 +145,7 @@ src/
 src-tauri/src/
   git.rs                git CLI wrapper: worktrees, status, changed files, patches, file contents (+ tests)
   comments.rs           comment store (SQLite), anchoring to lines as files change, Tauri commands (+ tests)
-  cli.rs                the `review` command (the app binary run with a subcommand)
+  cli.rs                the `piccolo` command (the app binary run with a subcommand)
   sessions.rs           Claude Code sessions from its registry; sending comments to their inbox socket (+ tests)
   navigate.rs           definitions and references via `git grep` (+ tests)
   repos.rs              saved repo list and the Tauri commands

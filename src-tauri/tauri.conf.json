@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Review",
+  "productName": "Piccolo",
   "version": "0.1.0",
   "identifier": "dev.jb.review",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Review",
+        "title": "Piccolo",
         "width": 1440,
         "height": 900,
         "minWidth": 960,
