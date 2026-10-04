@@ -9,3 +9,10 @@ curl -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.
 ```
 
 Run it again to update.
+
+Recommended, but optional: install [worktrunk](https://worktrunk.dev) and Piccolo creates worktrees
+with it.
+
+```bash
+brew install worktrunk
+```
