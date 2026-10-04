@@ -41,8 +41,12 @@ export const unsafeCSS = /* css */ `
   [data-separator] {
     color: var(--hunk-fg);
   }
+  /* Fast scrolling in WebKit let the lines (and their gutters, annotations) flicker through the
+     sticky header: keep it above them, on a compositing layer of its own. */
   [data-diffs-header] {
     background: var(--bg);
+    z-index: 4;
+    transform: translateZ(0);
   }
   [data-diff] {
     border: 1px solid var(--border);

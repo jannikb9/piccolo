@@ -61,7 +61,7 @@ export function CommentList({
 
   return (
     <div className="flex flex-col gap-2">
-      <GeneralComposer worktree={worktree} draftKey={panelCommentKey(worktree.id)} panel />
+      <GeneralComposer worktree={worktree} draftKey={panelCommentKey(worktree.id)} />
       {groups.length === 0 ? (
         <p className="px-2 py-6 text-center text-[12px] leading-5 text-fg-subtle">
           {resolvedCount > 0 ? "No open comments." : "No comments yet."}

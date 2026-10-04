@@ -5,7 +5,7 @@ import { markdownPreview } from "../lib/markdown";
 import { clipboardImages, prepareImage, type DraftImage } from "../lib/images";
 import { useAddGeneralThread, useDeleteComment, useEditComment, useReplyThread, useSetThreadDismissed, useSetThreadResolved, useSetThumbsUp } from "../lib/queries";
 import { agentLabel, cn, timeAgo } from "../lib/utils";
-import { conversationKey, editKey, replyKey, useStore } from "../store";
+import { editKey, replyKey, useStore } from "../store";
 import type { CommentMessage, ExcerptRow, GeneralThread, LineRange, Thread, Worktree } from "../types";
 import { DraftImages, MessageImages, useDraftImages } from "./Images";
 import { AgentIcon } from "./AgentIcon";
@@ -509,84 +509,66 @@ export function GeneralCommentField({
 
 /**
  * Comments on the branch as a whole, above the diff, like the conversation of a GitHub pull
- * request: agents' summaries and points that aren't about particular lines, and a box to add one.
+ * request: agents' summaries and points that aren't about particular lines.
  */
 export function Conversation({ worktree, threads }: { worktree: Worktree; threads: GeneralThread[] }) {
   const collapsed = useStore((s) => !!s.conversationCollapsed[worktree.id]);
   const toggle = useStore((s) => s.toggleConversation);
   const open = threads.filter((t) => !t.resolved).length;
+  if (threads.length === 0) return null;
   return (
     <section className="pt-3 font-sans">
-      {threads.length > 0 && (
-        <button
-          type="button"
-          onClick={() => toggle(worktree.id)}
-          aria-expanded={!collapsed}
-          className="flex items-center gap-1.5 rounded px-1 text-[12px] font-medium text-fg-subtle hover:text-fg-muted"
-        >
-          <ChevronRight className={cn("size-3.5 transition-transform duration-150", !collapsed && "rotate-90")} />
-          <MessageSquare className="size-3.5" />
-          Conversation
-          <span className="tabular font-normal text-fg-faint">
-            {open > 0 ? `${open} open` : `${threads.length} closed`}
-          </span>
-        </button>
-      )}
-      {!collapsed && (
-        <>
-          {threads.map((thread) => (
-            <ThreadCard key={thread.id} thread={thread} />
-          ))}
-          <GeneralComposer worktree={worktree} draftKey={conversationKey(worktree.id)} />
-        </>
-      )}
+      <button
+        type="button"
+        onClick={() => toggle(worktree.id)}
+        aria-expanded={!collapsed}
+        className="flex items-center gap-1.5 rounded px-1 text-[12px] font-medium text-fg-subtle hover:text-fg-muted"
+      >
+        <ChevronRight className={cn("size-3.5 transition-transform duration-150", !collapsed && "rotate-90")} />
+        <MessageSquare className="size-3.5" />
+        Conversation
+        <span className="tabular font-normal text-fg-faint">
+          {open > 0 ? `${open} open` : `${threads.length} closed`}
+        </span>
+      </button>
+      {!collapsed && threads.map((thread) => <ThreadCard key={thread.id} thread={thread} />)}
     </section>
   );
 }
 
-/**
- * A new general comment: a prompt to start one, then the form. In the Comments panel (`panel`)
- * it is a plain box that fits the narrow column instead of a card in the diff.
- */
-export function GeneralComposer({ worktree, draftKey, panel }: { worktree: Worktree; draftKey: string; panel?: boolean }) {
+/** A new general comment, in the Comments panel: a prompt to start one, then the form. */
+export function GeneralComposer({ worktree, draftKey }: { worktree: Worktree; draftKey: string }) {
   const draft = useStore((s) => s.generalDrafts[draftKey]);
   const setGeneralDraft = useStore((s) => s.setGeneralDraft);
   const images = useDraftImages(draftKey);
   const add = useAddGeneralThread(worktree);
 
   if (draft === undefined) {
-    const button = (
+    return (
       <button
         type="button"
         onClick={() => setGeneralDraft(draftKey, "")}
-        className={cn(
-          "flex h-8 w-full items-center gap-2 rounded-lg border border-border-subtle bg-bg px-3 text-left text-[12px] text-fg-faint hover:border-border hover:text-fg-subtle",
-          !panel && "max-w-[760px]",
-        )}
+        className="flex h-8 w-full items-center gap-2 rounded-lg border border-border-subtle bg-bg px-3 text-left text-[12px] text-fg-faint hover:border-border hover:text-fg-subtle"
       >
         <MessageSquarePlus className="size-3.5 shrink-0" />
-        {panel ? "Add comment" : "Comment on the whole branch…"}
+        Add comment
       </button>
     );
-    return panel ? button : <div className="px-3 py-1.5 [contain:inline-size]">{button}</div>;
   }
 
   const canSubmit = !!draft.trim() || images.length > 0;
   const discard = () => setGeneralDraft(draftKey, null);
   const submit = () => canSubmit && add.mutate({ body: draft, images }, { onSuccess: discard });
-  const form = (
-    <>
-      {!panel && (
-        <div className="border-b border-border-subtle px-3 py-1.5 text-[12px] text-fg-subtle">Comment on the whole branch</div>
-      )}
+  return (
+    <div className="rounded-lg border border-border bg-bg font-sans focus-within:border-border-strong">
       <GeneralCommentField
         draftKey={draftKey}
-        placeholder={panel ? "Comment on the whole branch, or paste a screenshot" : "Leave a comment about the change as a whole, or paste a screenshot"}
+        placeholder="Comment on the whole branch, or paste a screenshot"
         onSubmit={submit}
         onCancel={() => !canSubmit && discard()}
       />
       <FieldActions
-        hint={panel ? "⌘↩" : "⌘↩ to comment"}
+        hint="⌘↩"
         submitLabel="Comment"
         canSubmit={canSubmit}
         pending={add.isPending}
@@ -594,12 +576,7 @@ export function GeneralComposer({ worktree, draftKey, panel }: { worktree: Workt
         onSubmit={submit}
         onCancel={discard}
       />
-    </>
-  );
-  return panel ? (
-    <div className="rounded-lg border border-border bg-bg font-sans focus-within:border-border-strong">{form}</div>
-  ) : (
-    <Card className="focus-within:border-border-strong">{form}</Card>
+    </div>
   );
 }
 
