@@ -192,8 +192,9 @@ export function MarkdownEditor({
       },
     },
     onUpdate: ({ editor }) => {
-      // Without the blank lines of empty paragraphs at either end (the one kept after a table or code block).
-      const markdown = editor.isEmpty ? "" : editor.getMarkdown().replace(/^\n+|\s+$/g, "");
+      // Without the blank lines of empty paragraphs at either end (the one kept after a table or code
+      // block). Not `editor.isEmpty`: that holds for an empty list too, but "1." is something written.
+      const markdown = editor.getMarkdown().replace(/^\n+|\s+$/g, "");
       emitted.current = markdown;
       props.current.onChange(markdown);
     },
