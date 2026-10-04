@@ -5,6 +5,7 @@ mod imports;
 mod menu;
 mod navigate;
 mod repos;
+mod reviews;
 mod sessions;
 mod watch;
 

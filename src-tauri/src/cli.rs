@@ -20,6 +20,8 @@ Usage:
                                      branch removed, numbered as in the base version)
   piccolo comment --general <message>
                                      Comment on the branch as a whole, not on particular lines
+  piccolo submit <summary>           Finish reviewing the branch: posts the summary as a general
+                                     comment and tells the developer the review is done
   piccolo resolve <id>               Mark a comment resolved
   piccolo reopen <id>                Reopen a resolved comment
   piccolo guide                      How to review this branch as an agent
@@ -28,8 +30,8 @@ Every command works on the worktree in the current folder, or the one `-C <workt
 path, or a branch or worktree folder name in a repository added to the app. File paths are then
 relative to that worktree.
 
-A message of `-` (or none) is read from stdin. `--as <name>` signs a reply or comment with the
-agent's name (e.g. codex); without it, PICCOLO_AUTHOR is used, or `claude` inside Claude Code.
+A message of `-` (or none) is read from stdin. `--as <name>` signs a reply, comment or review with
+the agent's name (e.g. codex); without it, PICCOLO_AUTHOR is used, or `claude` inside Claude Code.
 
 Comments are shown in Piccolo and belong to the branch checked out in the current folder.";
 
@@ -37,7 +39,7 @@ Comments are shown in Piccolo and belong to the branch checked out in the curren
 pub fn run_if_command() -> Option<i32> {
     let (worktree, args) = take_worktree_option(std::env::args().skip(1).collect());
     let command = args.first().map(String::as_str).unwrap_or_default();
-    if !matches!(command, "comments" | "reply" | "comment" | "resolve" | "reopen" | "guide" | "help" | "--help" | "-h") {
+    if !matches!(command, "comments" | "reply" | "comment" | "submit" | "resolve" | "reopen" | "guide" | "help" | "--help" | "-h") {
         // `-C` only belongs to the command line; without a command it's the app being launched.
         worktree.as_ref()?;
         eprintln!("piccolo: missing command\n\n{HELP}");
@@ -176,6 +178,20 @@ fn run(command: &str, args: &[String], folder: &Folder) -> Result<()> {
             let body = message(&args.positional[1..])?;
             let side = if args.has("--removed") { Side::Deletions } else { Side::Additions };
             println!("{}", add_comment(&mut Store::open()?, &folder.path, location, side, &body, by)?);
+            Ok(())
+        }
+        "submit" => {
+            let args = Args::parse(args, &["--as"])?;
+            let name = agent_name(args.name)?.ok_or("say who reviewed: --as <your name>")?;
+            let summary = message(&args.positional)?;
+            let target = folder.target()?;
+            let review = Store::open()?.submit_review(&target, &name, &summary)?;
+            let comments = match review.comments {
+                0 => "no comments".to_string(),
+                1 => "1 comment".to_string(),
+                n => format!("{n} comments"),
+            };
+            println!("Submitted your review of {} with {comments}; the summary is #{}.", target.label(), review.thread);
             Ok(())
         }
         "resolve" | "reopen" => {
@@ -389,7 +405,8 @@ You're reviewing the changes on {branch} in {worktree}, {compared}. Your comment
    - `piccolo{via} comment --as <your name> --general \"...\"` for a point about the change as a whole rather than particular lines: the approach, something missing, how the parts fit together
    For a long message, pass `-` instead and write it to stdin.
 4. What's worth a comment: bugs, missed cases, risky or surprising behaviour, unclear names or structure, tests that don't check what they claim. One issue per comment: say what's wrong and why, and suggest a fix. No praise, and no nits a formatter or linter would catch.
-5. Finish with one line in the chat: how many comments you left, and the most important one.
+5. Submit your review: `piccolo{via} submit --as <your name> \"...\"` with a short summary: your verdict and the most important points, without repeating every comment. It's posted as a general comment and tells the developer you're done, so submit once, at the end, even when you found nothing to comment on.
+6. Finish with one line in the chat: how many comments you left, and the most important one.
 
 Sign everything with `--as` and your name (e.g. `--as codex`), so the developer sees who wrote what.
 ",
@@ -624,6 +641,7 @@ mod tests {
         assert!(in_worktree.contains("`piccolo comment --as <your name> <file>:<line>"), "{in_worktree}");
         assert!(in_worktree.contains("`git status --short`"), "{in_worktree}");
         assert!(in_worktree.contains("`piccolo comment --as <your name> --general"), "{in_worktree}");
+        assert!(in_worktree.contains("`piccolo submit --as <your name> \"...\"`"), "{in_worktree}");
 
         // Named from elsewhere, every suggested command names the worktree.
         let via = format!(" -C {}", shell_quote(&target.worktree));
@@ -631,6 +649,7 @@ mod tests {
         assert!(from_elsewhere.contains(&format!("`piccolo{via} comment --as <your name> <file>:<line>")), "{from_elsewhere}");
         assert!(from_elsewhere.contains(&format!("`git{via} status --short`")), "{from_elsewhere}");
         assert!(from_elsewhere.contains("relative to the worktree"), "{from_elsewhere}");
+        assert!(from_elsewhere.contains(&format!("`piccolo{via} submit --as <your name>")), "{from_elsewhere}");
 
         fs::remove_dir_all(&root).unwrap();
     }

@@ -7,7 +7,7 @@
 //! branch as a whole, like the text of a review on GitHub.
 
 use crate::git::{self, DiffLine, DiffRange, LineKind, Result, Scope};
-use crate::sessions;
+use crate::{reviews, sessions};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -244,7 +244,8 @@ pub fn app_data_dir() -> PathBuf {
 }
 
 pub struct Store {
-    /// Shared with sessions.rs: sending comments marks them sent, and sessions leave traces.
+    /// Shared with sessions.rs and reviews.rs: sending comments marks them sent, sessions leave
+    /// traces, and agents submit reviews.
     pub(crate) conn: Connection,
     images_dir: PathBuf,
 }
@@ -301,6 +302,7 @@ impl Store {
             CREATE INDEX IF NOT EXISTS attachments_by_message ON attachments (message_id);",
         ))?;
         sql(conn.execute_batch(sessions::SCHEMA))?;
+        sql(conn.execute_batch(reviews::SCHEMA))?;
         // Columns added after the first release.
         for (column, definition) in [
             ("edited_at", "INTEGER"),
@@ -475,16 +477,8 @@ impl Store {
         if body.is_empty() && images.is_empty() {
             return Err("A comment can't be empty".into());
         }
-        let now = now_ms();
         let tx = sql(self.conn.transaction())?;
-        sql(tx.execute(
-            "INSERT INTO threads (repo, branch, worktree, path, start_side, start_line, end_side, end_line,
-                                  anchor_start, anchor_lines, excerpt, created_at, updated_at)
-             VALUES (?1, ?2, ?3, '', 'additions', 0, 'additions', 0, 0, '[]', '[]', ?4, ?4)",
-            params![target.repo, target.branch, target.worktree, now],
-        ))?;
-        let id = tx.last_insert_rowid();
-        let message = insert_message(&tx, id, by, body, now)?;
+        let (id, message) = insert_general_thread(&tx, target, by, body, now_ms())?;
         save_images(&tx, &self.images_dir, message, images)?;
         sql(tx.commit())?;
         Ok(id)
@@ -621,6 +615,18 @@ fn save_images(conn: &Connection, dir: &Path, message_id: i64, images: &[NewImag
         }
     }
     result
+}
+
+/// Inserts a general thread with its first message; returns the ids of both.
+pub(crate) fn insert_general_thread(conn: &Connection, target: &Target, by: By, body: &str, now: i64) -> Result<(i64, i64)> {
+    sql(conn.execute(
+        "INSERT INTO threads (repo, branch, worktree, path, start_side, start_line, end_side, end_line,
+                              anchor_start, anchor_lines, excerpt, created_at, updated_at)
+         VALUES (?1, ?2, ?3, '', 'additions', 0, 'additions', 0, 0, '[]', '[]', ?4, ?4)",
+        params![target.repo, target.branch, target.worktree, now],
+    ))?;
+    let id = conn.last_insert_rowid();
+    Ok((id, insert_message(conn, id, by, body, now)?))
 }
 
 /// Inserts a message and returns its id.
