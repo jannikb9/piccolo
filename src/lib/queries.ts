@@ -3,7 +3,7 @@ import { useEffect, useMemo } from "react";
 import { summaryKey, useStore } from "../store";
 import type { DraftImage } from "./images";
 import { toUpload } from "./images";
-import type { AgentKind, AgentSession, DiffOptions, DiffScope, LineRange, RemoteBranch, Repo, Worktree } from "../types";
+import type { AgentKind, AgentSession, DiffOptions, DiffScope, GeneralThread, LineRange, RemoteBranch, Repo, Thread, Worktree } from "../types";
 import {
   api,
   confirmAction,
@@ -233,6 +233,21 @@ export const useEditComment = () =>
   useCommentMutation((args: { id: number; body: string; images: DraftImage[] }) =>
     api.editComment(args.id, args.body, args.images.map(toUpload)),
   );
+
+/** Applied to the cached threads at once, so the thumb doesn't wait for the database. */
+export function useSetThumbsUp() {
+  const client = useQueryClient();
+  const patch = (id: number, thumbsUp: boolean) =>
+    client.setQueriesData<(Thread | GeneralThread)[]>({ queryKey: ["threads"] }, (threads) =>
+      threads?.map((t) => ({ ...t, messages: t.messages.map((m) => (m.id === id ? { ...m, thumbsUp } : m)) })),
+    );
+  return useMutation({
+    mutationFn: (args: { id: number; thumbsUp: boolean }) => api.setThumbsUp(args.id, args.thumbsUp),
+    onMutate: (args) => patch(args.id, args.thumbsUp),
+    onError: (_error, args) => patch(args.id, !args.thumbsUp),
+    onSettled: () => client.invalidateQueries({ queryKey: ["threads"] }),
+  });
+}
 
 export const useSetThreadResolved = () =>
   useCommentMutation((args: { id: number; resolved: boolean }) => api.setThreadResolved(args.id, args.resolved));

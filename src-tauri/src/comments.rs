@@ -133,6 +133,8 @@ pub struct Message {
     pub edited_at: Option<i64>,
     /// When the reviewer sent it to an agent's session; `None` until then (and for agents').
     pub sent_at: Option<i64>,
+    /// The reviewer gave an agent's message a thumbs up.
+    pub thumbs_up: bool,
 }
 
 /// A PNG to attach to a new message.
@@ -300,7 +302,12 @@ impl Store {
         ))?;
         sql(conn.execute_batch(sessions::SCHEMA))?;
         // Columns added after the first release.
-        for (column, definition) in [("edited_at", "INTEGER"), ("author_name", "TEXT"), ("sent_at", "INTEGER")] {
+        for (column, definition) in [
+            ("edited_at", "INTEGER"),
+            ("author_name", "TEXT"),
+            ("sent_at", "INTEGER"),
+            ("thumbs_up", "INTEGER NOT NULL DEFAULT 0"),
+        ] {
             let exists: bool = sql(conn.query_row(
                 "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = ?1",
                 [column],
@@ -354,7 +361,7 @@ impl Store {
         }
         // Ids are integers, so inlining them is safe.
         let mut stmt = sql(self.conn.prepare(&format!(
-            "SELECT id, thread_id, author, body, created_at, edited_at, author_name, sent_at FROM messages WHERE thread_id IN ({}) ORDER BY id",
+            "SELECT id, thread_id, author, body, created_at, edited_at, author_name, sent_at, thumbs_up FROM messages WHERE thread_id IN ({}) ORDER BY id",
             ids.join(",")
         )))?;
         let rows = sql(stmt.query_map([], |row| {
@@ -370,6 +377,7 @@ impl Store {
                     created_at: row.get(4)?,
                     edited_at: row.get(5)?,
                     sent_at: row.get(7)?,
+                    thumbs_up: row.get(8)?,
                 },
             ))
         }))?;
@@ -519,6 +527,19 @@ impl Store {
         save_images(&tx, &self.images_dir, message_id, images)?;
         sql(tx.execute("UPDATE threads SET updated_at = ?2 WHERE id = ?1", params![thread_id, now]))?;
         sql(tx.commit())
+    }
+
+    /// Gives an agent's message a thumbs up, or takes it back. It doesn't touch `updated_at`:
+    /// a reaction isn't a change to the conversation.
+    pub fn set_thumbs_up(&self, message_id: i64, thumbs_up: bool) -> Result<()> {
+        let changed = sql(self.conn.execute(
+            "UPDATE messages SET thumbs_up = ?2 WHERE id = ?1 AND author = 'agent'",
+            params![message_id, thumbs_up],
+        ))?;
+        if changed == 0 {
+            return Err(format!("No agent message #{message_id}"));
+        }
+        Ok(())
     }
 
     pub fn set_resolved(&self, thread_id: i64, resolved: bool) -> Result<()> {
@@ -841,6 +862,11 @@ pub async fn edit_comment(id: i64, body: String, images: Vec<ImageUpload>) -> Re
 }
 
 #[tauri::command]
+pub async fn set_thumbs_up(id: i64, thumbs_up: bool) -> Result<()> {
+    blocking(move || Store::open()?.set_thumbs_up(id, thumbs_up)).await
+}
+
+#[tauri::command]
 pub async fn set_thread_resolved(id: i64, resolved: bool) -> Result<()> {
     blocking(move || Store::open()?.set_resolved(id, resolved)).await
 }
@@ -1038,6 +1064,16 @@ pub(crate) mod tests {
         assert_eq!((edited.body.as_str(), edited.attachments.len()), ("", 3));
         assert!(edited.edited_at.is_some() && thread.messages[1].edited_at.is_none());
         assert_eq!(on_disk(), 4);
+
+        // Only an agent's message can be given a thumbs up.
+        store.reply(id, By { author: Author::Agent, name: Some("codex") }, "done", &[]).unwrap();
+        let agent = store.thread(id).unwrap().messages.last().unwrap().id;
+        store.set_thumbs_up(agent, true).unwrap();
+        assert!(store.thread(id).unwrap().messages.last().unwrap().thumbs_up);
+        store.set_thumbs_up(agent, false).unwrap();
+        assert!(!store.thread(id).unwrap().messages.last().unwrap().thumbs_up);
+        assert!(store.set_thumbs_up(thread.messages[0].id, true).is_err());
+        store.delete_message(agent).unwrap();
 
         // Deleting a reply removes its files; deleting the thread removes the rest.
         store.delete_message(thread.messages[1].id).unwrap();

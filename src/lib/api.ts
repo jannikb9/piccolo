@@ -12,6 +12,7 @@ import {
   mockDeleteComment,
   mockDiffPatch,
   mockEditComment,
+  mockSetThumbsUp,
   mockFileText,
   mockFileVersions,
   mockFindSymbol,
@@ -125,6 +126,10 @@ export const api = {
   /** Replaces a message's text and attaches more images. */
   editComment: (id: number, body: string, images: ImageUpload[]): Promise<void> =>
     isTauri ? invoke("edit_comment", { id, body, images }) : mockEditComment(id, body, images),
+
+  /** Gives an agent's message a thumbs up, or takes it back. */
+  setThumbsUp: (id: number, thumbsUp: boolean): Promise<void> =>
+    isTauri ? invoke("set_thumbs_up", { id, thumbsUp }) : mockSetThumbsUp(id, thumbsUp),
 
   /** An attached image as base64. */
   attachmentData: (id: number): Promise<string> =>

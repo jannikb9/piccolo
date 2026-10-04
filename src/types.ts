@@ -119,6 +119,8 @@ export type CommentMessage = {
   editedAt: number | null;
   /** When the reviewer sent it to an agent's session; `null` until then (and for agents'). */
   sentAt: number | null;
+  /** The reviewer gave an agent's message a thumbs up. */
+  thumbsUp: boolean;
 };
 
 /** A comment on some lines and its replies. Stored per branch; agents answer via the `piccolo` CLI. */

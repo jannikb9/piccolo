@@ -1,8 +1,8 @@
-import { CheckCircle2, ChevronRight, MessageSquare, MessageSquarePlus, Pencil, RotateCcw, Trash2, User } from "lucide-react";
+import { CheckCircle2, ChevronRight, MessageSquare, MessageSquarePlus, Pencil, RotateCcw, ThumbsUp, Trash2, User } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { showError } from "../lib/api";
 import { clipboardImages, prepareImage, type DraftImage } from "../lib/images";
-import { useAddGeneralThread, useDeleteComment, useEditComment, useReplyThread, useSetThreadResolved } from "../lib/queries";
+import { useAddGeneralThread, useDeleteComment, useEditComment, useReplyThread, useSetThreadResolved, useSetThumbsUp } from "../lib/queries";
 import { agentLabel, cn, timeAgo } from "../lib/utils";
 import { conversationKey, editKey, replyKey, useStore } from "../store";
 import type { CommentMessage, ExcerptRow, GeneralThread, LineRange, Thread, Worktree } from "../types";
@@ -348,6 +348,32 @@ function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: bo
         )
       )}
       <MessageImages attachments={message.attachments} />
+      {isAgent && !editing && <ThumbsUpButton message={message} />}
+    </div>
+  );
+}
+
+/** Marks an agent's message as good; it sits under the message and fills once given. */
+function ThumbsUpButton({ message }: { message: CommentMessage }) {
+  const setThumbsUp = useSetThumbsUp();
+  const given = message.thumbsUp;
+  const label = given ? "Remove thumbs up" : "Thumbs up";
+  return (
+    <div className="mt-1.5 pl-7">
+      <Tooltip label={label}>
+        <button
+          type="button"
+          aria-label={label}
+          aria-pressed={given}
+          onClick={() => setThumbsUp.mutate({ id: message.id, thumbsUp: !given })}
+          className={cn(
+            "flex h-6 items-center rounded-md px-1.5 transition-colors hover:bg-bg-hover",
+            given ? "text-accent" : "text-fg-faint hover:text-fg-muted",
+          )}
+        >
+          <ThumbsUp className={cn("size-3.5", given && "fill-current")} />
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -369,7 +395,9 @@ function DeleteButton({ messageId, label }: { messageId: number; label: string }
       onClick={() => (armed ? remove.mutate(messageId) : setArmed(true))}
       className={cn(
         "flex h-5 items-center gap-1 rounded px-1 text-[11px] transition-[opacity,colors]",
-        armed ? "bg-del-bg text-del opacity-100" : "text-fg-faint opacity-0 group-hover:opacity-100 hover:text-fg-muted",
+        armed
+          ? "bg-del-bg text-del opacity-100 hover:bg-del-gutter"
+          : "text-fg-faint opacity-0 group-hover:opacity-100 hover:text-fg-muted",
       )}
     >
       <Trash2 className="size-3" />

@@ -51,6 +51,7 @@ pub fn run() {
             comments::add_general_thread,
             comments::reply_thread,
             comments::edit_comment,
+            comments::set_thumbs_up,
             comments::set_thread_resolved,
             comments::delete_comment,
             comments::attachment_data,

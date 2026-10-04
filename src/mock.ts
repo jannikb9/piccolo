@@ -391,6 +391,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           editedAt: null,
           authorName: "codex",
           sentAt: null,
+          thumbsUp: false,
         },
       ],
       createdAt: minutesAgo(4),
@@ -414,6 +415,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           editedAt: null,
           authorName: null,
           sentAt: minutesAgo(41),
+          thumbsUp: false,
         },
         {
           id: 2,
@@ -424,6 +426,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           editedAt: null,
           authorName: "claude",
           sentAt: null,
+          thumbsUp: false,
         },
       ],
       createdAt: minutesAgo(42),
@@ -437,7 +440,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: false,
       excerpt: excerpt(lines(29, 29)),
       pending: false,
-      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null, sentAt: null }],
+      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null, sentAt: null, thumbsUp: false }],
       createdAt: minutesAgo(40),
       updatedAt: minutesAgo(40),
     },
@@ -459,6 +462,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           editedAt: null,
           authorName: "codex",
           sentAt: null,
+          thumbsUp: false,
         },
       ],
       createdAt: minutesAgo(3),
@@ -472,7 +476,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: true,
       excerpt: excerpt(lines(21, 21)),
       pending: false,
-      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null, sentAt: minutesAgo(90) }],
+      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null, sentAt: minutesAgo(90), thumbsUp: false }],
       createdAt: minutesAgo(90),
       updatedAt: minutesAgo(30),
     },
@@ -563,7 +567,7 @@ export function mockAddThread(
     resolved: false,
     excerpt: excerpt(range),
     pending: false,
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null }],
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null, thumbsUp: false }],
     createdAt: now,
     updatedAt: now,
   });
@@ -583,7 +587,7 @@ export function mockAddGeneralThread(worktreePath: string, body: string, images:
     resolved: false,
     excerpt: [],
     pending: false,
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null }],
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null, thumbsUp: false }],
     createdAt: now,
     updatedAt: now,
   });
@@ -601,6 +605,7 @@ export function mockReply(id: number, body: string, images: ImageUpload[]): Prom
     editedAt: null,
     authorName: null,
     sentAt: null,
+    thumbsUp: false,
   });
   return delay(undefined);
 }
@@ -616,6 +621,15 @@ export function mockEditComment(messageId: number, body: string, images: ImageUp
     message.editedAt = thread.updatedAt = Date.now();
     if (message.author === "reviewer") message.sentAt = null;
   }
+  return delay(undefined);
+}
+
+export function mockSetThumbsUp(messageId: number, thumbsUp: boolean): Promise<void> {
+  const message = Object.values(threads)
+    .flat()
+    .flatMap((t) => t.messages)
+    .find((m) => m.id === messageId);
+  if (message) message.thumbsUp = thumbsUp;
   return delay(undefined);
 }
 
