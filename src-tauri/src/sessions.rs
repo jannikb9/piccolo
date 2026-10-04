@@ -18,6 +18,7 @@
 
 use crate::comments::{blocking, now_ms, sql, Store, Target};
 use crate::git::{self, Result};
+use crate::{acp, programs};
 use crate::requests::{self, Request};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -151,17 +152,12 @@ fn codex_titles(index: &Path) -> HashMap<String, String> {
         .collect()
 }
 
-/// The Codex CLI: on the PATH, else the copy the ChatGPT app ships and runs for its own chats.
+/// The Codex CLI: on the user's PATH, else the copy the ChatGPT app ships and runs for its own chats.
 fn codex_binary() -> Option<PathBuf> {
-    let home = dirs::home_dir().unwrap_or_default();
-    let path = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
-    // An app opened from the Finder gets a minimal PATH, so the usual install folders are looked at too.
-    let usual = [home.join(".local/bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
-    path.into_iter()
-        .chain(usual)
-        .map(|dir| dir.join("codex"))
-        .chain([PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex")])
-        .find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.mode() & 0o111 != 0))
+    programs::find("codex").or_else(|| {
+        let bundled = PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex");
+        programs::is_executable(&bundled).then_some(bundled)
+    })
 }
 
 /// Whether `id` looks like a Codex thread id (a UUID), so it can't pass for an option.
@@ -513,7 +509,15 @@ impl Store {
 /// The sessions working on each of `worktrees`, from the registry and the traces in `store`.
 fn sessions_by_worktree(store: &Store, worktrees: &[String]) -> Result<HashMap<String, Vec<Session>>> {
     let codex = codex_binary();
-    Ok(match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?, &codex_titles(&codex_index()), codex.as_deref()))
+    let mut matched = match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?, &codex_titles(&codex_index()), codex.as_deref());
+    // Reviews Piccolo runs itself: it knows whether they still run.
+    let running = acp::running_sessions();
+    for session in matched.values_mut().flatten().filter(|s| acp::is_run(&s.id)) {
+        let busy = running.contains(&session.id);
+        session.running = Some(busy);
+        session.status = busy.then(|| "busy".into());
+    }
+    Ok(matched)
 }
 
 /// The sessions working on the worktree at `path`.

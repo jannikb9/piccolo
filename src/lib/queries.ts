@@ -165,11 +165,19 @@ export function useSendComments(worktree: Worktree) {
   });
 }
 
-/** Asks a running session, or a new session of an agent, to review the worktree. */
+/** Installed agents that speak ACP. Checked again now and then, for agents installed meanwhile. */
+export function useInstalledAgents() {
+  return useQuery({ queryKey: ["agents"], queryFn: api.listAgents, staleTime: 60_000 }).data ?? [];
+}
+
+/**
+ * Asks a running session, or a new session of an agent, to review the worktree: Claude or Codex in
+ * its app, or an ACP agent in the background.
+ */
 export function useRequestReview(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (to: { session: string } | { agent: AgentKind }) => api.requestReview(worktree.path, to),
+    mutationFn: (to: { session: string } | { agent: string }) => api.requestReview(worktree.path, to),
     onError: (error) => showError("Couldn't request a review", String(error)),
     onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
   });

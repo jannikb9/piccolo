@@ -1,9 +1,10 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { Check, ChevronDown, LoaderCircle, RotateCcw, Send, X } from "lucide-react";
+import { Check, ChevronDown, FileText, LoaderCircle, RotateCcw, Send, X } from "lucide-react";
 import { useState } from "react";
-import { useCancelReviewRequest, useRequestReview, useSendComments } from "../lib/queries";
+import { api, showError } from "../lib/api";
+import { useCancelReviewRequest, useInstalledAgents, useRequestReview, useSendComments } from "../lib/queries";
 import { agentLabel, ago, cn, timeAgo } from "../lib/utils";
-import type { AgentKind, AgentSession, ReviewRequest, Worktree } from "../types";
+import type { AgentSession, ReviewRequest, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
 import { isUnderway, MenuRow, NEW_SESSIONS, sessionName, unseenBy, useJustDone, useSessionRoles } from "./SendToAgent";
 import { Button, IconButton, Tooltip } from "./ui";
@@ -13,6 +14,9 @@ export function useActiveSessionCount(worktree: Worktree): number {
   const { sessions, activity } = useSessionRoles(worktree);
   return sessions.filter((s) => s.running !== false).length + activity.requests.filter((r) => isUnderway(r) && !r.sessionId).length;
 }
+
+/** A review that finished in the last hour stays in view, even when its session ended. */
+const RECENT_MS = 60 * 60 * 1000;
 
 /**
  * The agents on a worktree, like the reviewers of a pull request: the session building the branch,
@@ -25,8 +29,12 @@ export function SessionList({ worktree }: { worktree: Worktree }) {
   // A session's latest request; requests come newest first.
   const requestOf = (session: AgentSession) => activity.requests.find((r) => r.sessionId === session.id);
   const waiting = activity.requests.filter((r) => isUnderway(r) && !r.sessionId);
-  const ended = sessions.filter((s) => s.running === false);
-  const current = sessions.filter((s) => s.running !== false);
+  const isCurrent = (session: AgentSession) => {
+    const request = requestOf(session);
+    return session.running !== false || (!!request && (isUnderway(request) || request.finishedAt! > Date.now() - RECENT_MS));
+  };
+  const ended = sessions.filter((s) => !isCurrent(s));
+  const current = sessions.filter(isCurrent);
   const row = (session: AgentSession) => (
     <SessionRow
       key={session.id}
@@ -71,12 +79,19 @@ export function SessionList({ worktree }: { worktree: Worktree }) {
   );
 }
 
-/** "Request review": a new Claude or Codex session, or a running session asked by name. */
+/**
+ * "Request review": a new Claude or Codex session in its app, an installed ACP agent in the
+ * background, or a running session asked by name.
+ */
 function RequestReview({ worktree, sessions }: { worktree: Worktree; sessions: AgentSession[] }) {
   const request = useRequestReview(worktree);
+  const agents = useInstalledAgents();
   const [justAsked, markAsked] = useJustDone();
-  const ask = (to: { session: string } | { agent: AgentKind }) => request.mutate(to, { onSuccess: markAsked });
+  const ask = (to: { session: string } | { agent: string }) => request.mutate(to, { onSuccess: markAsked });
   const reachable = sessions.filter((s) => s.reachable);
+  const label = (text: string) => (
+    <DropdownMenuPrimitive.Label className="px-2 pt-1 pb-0.5 text-[11px] text-fg-faint">{text}</DropdownMenuPrimitive.Label>
+  );
   return (
     <DropdownMenuPrimitive.Root>
       <DropdownMenuPrimitive.Trigger asChild>
@@ -101,10 +116,27 @@ function RequestReview({ worktree, sessions }: { worktree: Worktree; sessions: A
               onSelect={() => ask({ agent })}
             />
           ))}
+          <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />
+          {label("In the background")}
+          {agents.length === 0 ? (
+            <p className="px-2 pb-1.5 text-[11.5px] leading-4 text-fg-subtle">
+              Install Gemini CLI, Qwen Code, OpenCode or another agent that speaks ACP to have it review here, in the background.
+            </p>
+          ) : (
+            agents.map((agent) => (
+              <MenuRow
+                key={agent.id}
+                icon={agent.author}
+                title={agent.name}
+                detail="With your own sign-in · can't change files"
+                onSelect={() => ask({ agent: agent.id })}
+              />
+            ))
+          )}
           {reachable.length > 0 && (
             <>
               <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />
-              <DropdownMenuPrimitive.Label className="px-2 pt-1 pb-0.5 text-[11px] text-fg-faint">Ask a running session</DropdownMenuPrimitive.Label>
+              {label("Ask a running session")}
               {reachable.map((session) => (
                 <MenuRow
                   key={session.id}
@@ -123,8 +155,15 @@ function RequestReview({ worktree, sessions }: { worktree: Worktree; sessions: A
 }
 
 /** What a session is doing, as its row's second line says it. */
-function describe(session: AgentSession, request: ReviewRequest | undefined, isAuthor: boolean): { text: string; busy: boolean } {
+function describe(
+  session: AgentSession,
+  request: ReviewRequest | undefined,
+  isAuthor: boolean,
+): { text: string; busy: boolean; failed?: boolean } {
   const comments = (n: number) => (n === 1 ? "1 comment" : `${n} comments`);
+  if (request?.error) {
+    return { text: request.error === "Stopped" ? `Stopped ${ago(request.finishedAt ?? request.requestedAt)}` : request.error, busy: false, failed: request.error !== "Stopped" };
+  }
   if (request && request.startedAt === null && isUnderway(request)) {
     return { text: `Review requested ${ago(request.requestedAt)}`, busy: true };
   }
@@ -161,8 +200,10 @@ function SessionRow({
   const ask = useRequestReview(worktree);
   const cancel = useCancelReviewRequest();
   const [justSent, markSent] = useJustDone();
-  const { text, busy } = describe(session, request, isAuthor);
+  const { text, busy, failed } = describe(session, request, isAuthor);
   const underway = !!request && isUnderway(request);
+  // A review Piccolo ran is asked again with a new run of the same agent.
+  const rerun = useInstalledAgents().find((a) => session.id.startsWith("acp-") && a.author === session.agent);
 
   return (
     <li className={cn("group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-bg-hover", session.running === false && "opacity-60 hover:opacity-100")}>
@@ -171,8 +212,19 @@ function SessionRow({
         <span title={sessionName(session)} className="truncate text-[12.5px] font-medium text-fg">
           {sessionName(session)}
         </span>
-        <span className="truncate text-[11.5px] text-fg-subtle">{text}</span>
+        <span title={text} className={cn("text-[11.5px]", failed ? "line-clamp-3 text-del" : "truncate text-fg-subtle")}>
+          {text}
+        </span>
       </span>
+      {request?.log && (
+        <IconButton
+          label="Show what the agent did"
+          onClick={() => api.openReviewLog(request.id).catch((e) => showError("Couldn't open the log", String(e)))}
+          className="size-7 opacity-0 group-hover:opacity-100"
+        >
+          <FileText className="size-3.5" />
+        </IconButton>
+      )}
       {session.reachable && (unseen > 0 || justSent) && (
         <Tooltip label={`Send it the ${unseen === 1 ? "comment" : `${unseen} comments`} it hasn't seen`}>
           <span>
@@ -188,13 +240,22 @@ function SessionRow({
           </span>
         </Tooltip>
       )}
-      {request && !underway && session.reachable && (
-        <IconButton label="Ask for another review" disabled={ask.isPending} onClick={() => ask.mutate({ session: session.id })} className="size-7">
+      {request && !underway && (session.reachable || rerun) && (
+        <IconButton
+          label="Ask for another review"
+          disabled={ask.isPending}
+          onClick={() => ask.mutate(rerun ? { agent: rerun.id } : { session: session.id })}
+          className="size-7"
+        >
           <RotateCcw className="size-3.5" />
         </IconButton>
       )}
       {underway && (
-        <IconButton label="Stop waiting for this review" onClick={() => cancel.mutate(request.id)} className="size-7 opacity-0 group-hover:opacity-100">
+        <IconButton
+          label={request.log ? "Stop the review" : "Stop waiting for this review"}
+          onClick={() => cancel.mutate(request.id)}
+          className="size-7 opacity-0 group-hover:opacity-100"
+        >
           <X className="size-3.5" />
         </IconButton>
       )}

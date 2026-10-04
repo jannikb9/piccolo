@@ -194,6 +194,19 @@ export type ReviewRequest = {
   finishedAt: number | null;
   /** Comments and replies the agent wrote while reviewing. */
   comments: number;
+  /** Why it ended without finishing, for reviews Piccolo ran. */
+  error: string | null;
+  /** Piccolo ran it in the background and kept a log of what the agent did. */
+  log: boolean;
+};
+
+/** An agent that speaks ACP and is installed, which Piccolo can run reviews with (src-tauri/src/acp.rs). */
+export type InstalledAgent = {
+  /** Its id in the ACP registry, e.g. `gemini`. */
+  id: string;
+  name: string;
+  /** The name its comments are signed with. */
+  author: string;
 };
 
 /** What's going on in a worktree's sessions. */

@@ -17,8 +17,9 @@ export const NEW_SESSIONS: { agent: AgentKind; app: string }[] = [
   { agent: "codex", app: "Opens in the ChatGPT app" },
 ];
 
-/** A session as the app names it: its title, else its agent. */
-export const sessionName = (session: AgentSession) => session.title ?? `${agentLabel(session.agent)} session`;
+/** A session as the app names it: its title, else its agent. Piccolo's own runs are `acp-<request>`. */
+export const sessionName = (session: AgentSession) =>
+  session.title ?? (session.id.startsWith("acp-") ? `${agentLabel(session.agent)}, in the background` : `${agentLabel(session.agent)} session`);
 
 /** A folder with the home folder shortened to `~`. */
 const homeShort = (path: string) => path.replace(/^\/Users\/[^/]+/, "~");

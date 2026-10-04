@@ -317,6 +317,7 @@ impl Store {
             ("messages", "session_id", "TEXT"),
             ("threads", "dismissed", "INTEGER NOT NULL DEFAULT 0"),
             ("session_worktrees", "agent", "TEXT"),
+            ("review_requests", "error", "TEXT"),
         ] {
             if !has_column(table, column)? {
                 sql(conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"), []))?;

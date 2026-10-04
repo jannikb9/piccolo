@@ -20,6 +20,7 @@ import {
   mockReorderRepos,
   mockReply,
   mockCancelRequest,
+  mockInstalledAgents,
   mockRequestReview,
   mockSendComments,
   mockSessionActivity,
@@ -42,6 +43,7 @@ import type {
   DiffScope,
   FileVersions,
   GeneralThread,
+  InstalledAgent,
   LineRange,
   RemoteBranch,
   Repo,
@@ -164,15 +166,24 @@ export const api = {
   startSession: (path: string, agent: AgentKind, threads: number[] | null): Promise<number[]> =>
     isTauri ? invoke("start_session", { path, agent, threads }) : mockStartSession(path, agent, threads),
 
-  /** Asks the running `session`, or a new session of `agent`, to review the worktree. */
-  requestReview: (path: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> =>
+  /**
+   * Asks the running `session` to review the worktree, or a new session of `agent`: Claude or Codex
+   * in its app, or an installed ACP agent (by id) that Piccolo runs in the background.
+   */
+  requestReview: (path: string, to: { session: string } | { agent: string }): Promise<ReviewRequest> =>
     isTauri
       ? invoke("request_review", { path, session: "session" in to ? to.session : null, agent: "agent" in to ? to.agent : null })
       : mockRequestReview(path, to),
 
-  /** Withdraws a review request, or removes a finished review from the list. */
+  /** Stops a review Piccolo runs; otherwise withdraws the request, or removes a finished review from the list. */
   cancelReviewRequest: (id: number): Promise<void> =>
     isTauri ? invoke("cancel_review_request", { id }) : mockCancelRequest(id),
+
+  /** Installed agents that speak ACP, which can review in the background. */
+  listAgents: (): Promise<InstalledAgent[]> => (isTauri ? invoke("list_agents") : mockInstalledAgents()),
+
+  /** Opens the log of a review Piccolo ran in the default text editor. */
+  openReviewLog: (id: number): Promise<void> => (isTauri ? invoke("open_review_log", { id }) : Promise.resolve()),
 
   /** Deletes a message; deleting a thread's first message deletes the thread. */
   deleteComment: (id: number): Promise<void> => (isTauri ? invoke("delete_comment", { id }) : mockDeleteComment(id)),
