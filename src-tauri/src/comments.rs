@@ -7,7 +7,7 @@
 //! branch as a whole, like the text of a review on GitHub.
 
 use crate::git::{self, DiffLine, DiffRange, LineKind, Result, Scope};
-use crate::{reviews, sessions};
+use crate::{requests, sessions};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -98,15 +98,22 @@ pub enum Author {
     Agent,
 }
 
-/// Who writes a message: the reviewer, or an agent, under the name it gives (`codex`, `claude`).
+/// Who writes a message: the reviewer, or an agent, under the name it gives (`codex`, `claude`),
+/// from its session when the `piccolo` command could tell which one.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct By<'a> {
     pub author: Author,
     pub name: Option<&'a str>,
+    pub session: Option<&'a str>,
 }
 
-impl By<'_> {
-    pub const REVIEWER: By<'static> = By { author: Author::Reviewer, name: None };
+impl<'a> By<'a> {
+    pub const REVIEWER: By<'static> = By { author: Author::Reviewer, name: None, session: None };
+
+    #[cfg(test)]
+    pub fn agent(name: Option<&'a str>) -> Self {
+        By { author: Author::Agent, name, session: None }
+    }
 }
 
 /// An image pasted into a message, saved as a file the agent can open.
@@ -131,8 +138,6 @@ pub struct Message {
     pub created_at: i64,
     /// When the text was last changed, if it was.
     pub edited_at: Option<i64>,
-    /// When the reviewer sent it to an agent's session; `None` until then (and for agents').
-    pub sent_at: Option<i64>,
     /// The reviewer gave an agent's message a thumbs up.
     pub thumbs_up: bool,
 }
@@ -165,8 +170,6 @@ pub struct Thread {
     /// The diff around the commented lines when the comment was made.
     pub excerpt: Vec<ExcerptRow>,
     pub messages: Vec<Message>,
-    /// Open, and the reviewer has the last word but hasn't sent it to an agent yet.
-    pub pending: bool,
     pub created_at: i64,
     pub updated_at: i64,
     /// First line number and text of the commented lines on the end side, for relocating them.
@@ -184,14 +187,6 @@ pub struct Target {
     pub repo: String,
     pub branch: Option<String>,
     pub worktree: String,
-}
-
-impl Thread {
-    fn set_messages(&mut self, messages: Vec<Message>) {
-        self.pending = !self.resolved
-            && messages.last().is_some_and(|m| m.author == Author::Reviewer && m.sent_at.is_none());
-        self.messages = messages;
-    }
 }
 
 impl Target {
@@ -248,8 +243,8 @@ pub fn app_data_dir() -> PathBuf {
 }
 
 pub struct Store {
-    /// Shared with sessions.rs and reviews.rs: sending comments marks them sent, sessions leave
-    /// traces, and agents submit reviews.
+    /// Shared with sessions.rs and requests.rs: sessions leave traces and see comments, and
+    /// reviews are requested and finished.
     pub(crate) conn: Connection,
     images_dir: PathBuf,
 }
@@ -306,28 +301,33 @@ impl Store {
             CREATE INDEX IF NOT EXISTS attachments_by_message ON attachments (message_id);",
         ))?;
         sql(conn.execute_batch(sessions::SCHEMA))?;
-        sql(conn.execute_batch(reviews::SCHEMA))?;
+        sql(conn.execute_batch(requests::SCHEMA))?;
+        let has_column = |table: &str, column: &str| -> Result<bool> {
+            sql(conn.query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",
+                [table, column],
+                |r| r.get(0),
+            ))
+        };
         // Columns added after the first release.
         for (table, column, definition) in [
             ("messages", "edited_at", "INTEGER"),
             ("messages", "author_name", "TEXT"),
-            ("messages", "sent_at", "INTEGER"),
             ("messages", "thumbs_up", "INTEGER NOT NULL DEFAULT 0"),
+            ("messages", "session_id", "TEXT"),
             ("threads", "dismissed", "INTEGER NOT NULL DEFAULT 0"),
+            ("session_worktrees", "agent", "TEXT"),
         ] {
-            let exists: bool = sql(conn.query_row(
-                "SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",
-                [table, column],
-                |r| r.get(0),
-            ))?;
-            if !exists {
+            if !has_column(table, column)? {
                 sql(conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"), []))?;
-                // Comments from before sending existed were read with /local-review: count them as sent.
-                if column == "sent_at" {
-                    sql(conn.execute("UPDATE messages SET sent_at = created_at WHERE author = 'reviewer'", []))?;
-                }
             }
         }
+        // Gone with sending comments as a batch, and submitting reviews: what each session has
+        // seen (sessions.rs) and review requests (requests.rs) took their place.
+        if has_column("messages", "sent_at")? {
+            sql(conn.execute("ALTER TABLE messages DROP COLUMN sent_at", []))?;
+        }
+        sql(conn.execute_batch("DROP TABLE IF EXISTS reviews"))?;
         let images_dir = path.parent().unwrap_or(Path::new(".")).join(IMAGES_DIR);
         Ok(Self { conn, images_dir })
     }
@@ -348,7 +348,7 @@ impl Store {
         let mut threads = sql(rows.collect::<rusqlite::Result<Vec<_>>>())?;
         let mut messages = self.messages(threads.iter().map(|t| t.id))?;
         for thread in &mut threads {
-            thread.set_messages(messages.remove(&thread.id).unwrap_or_default());
+            thread.messages = messages.remove(&thread.id).unwrap_or_default();
         }
         Ok(threads)
     }
@@ -356,7 +356,7 @@ impl Store {
     pub fn thread(&self, id: i64) -> Result<Thread> {
         let thread = sql(self.conn.query_row("SELECT * FROM threads WHERE id = ?1", [id], thread_from_row).optional())?;
         let mut thread = thread.ok_or_else(|| format!("No comment #{id}"))?;
-        thread.set_messages(self.messages([id])?.remove(&id).unwrap_or_default());
+        thread.messages = self.messages([id])?.remove(&id).unwrap_or_default();
         Ok(thread)
     }
 
@@ -368,7 +368,7 @@ impl Store {
         }
         // Ids are integers, so inlining them is safe.
         let mut stmt = sql(self.conn.prepare(&format!(
-            "SELECT id, thread_id, author, body, created_at, edited_at, author_name, sent_at, thumbs_up FROM messages WHERE thread_id IN ({}) ORDER BY id",
+            "SELECT id, thread_id, author, body, created_at, edited_at, author_name, thumbs_up FROM messages WHERE thread_id IN ({}) ORDER BY id",
             ids.join(",")
         )))?;
         let rows = sql(stmt.query_map([], |row| {
@@ -383,8 +383,7 @@ impl Store {
                     attachments: Vec::new(),
                     created_at: row.get(4)?,
                     edited_at: row.get(5)?,
-                    sent_at: row.get(7)?,
-                    thumbs_up: row.get(8)?,
+                    thumbs_up: row.get(7)?,
                 },
             ))
         }))?;
@@ -516,11 +515,9 @@ impl Store {
         }
         let now = now_ms();
         let tx = sql(self.conn.transaction())?;
-        // A changed comment is new to the agent: it goes out again with the next send.
+        // `edited_at` makes a changed comment new again to sessions that saw it (see sessions.rs).
         sql(tx.execute(
-            "UPDATE messages SET body = ?2, edited_at = ?3,
-                sent_at = CASE WHEN author = 'reviewer' THEN NULL ELSE sent_at END
-             WHERE id = ?1",
+            "UPDATE messages SET body = ?2, edited_at = ?3 WHERE id = ?1",
             params![message_id, body, now],
         ))?;
         save_images(&tx, &self.images_dir, message_id, images)?;
@@ -645,17 +642,21 @@ pub(crate) fn insert_general_thread(conn: &Connection, target: &Target, by: By, 
     Ok((id, insert_message(conn, id, by, body, now)?))
 }
 
-/// Inserts a message and returns its id.
+/// Inserts a message and returns its id. A session writing in a thread has read it.
 fn insert_message(conn: &Connection, thread_id: i64, by: By, body: &str, now: i64) -> Result<i64> {
     let author = match by.author {
         Author::Reviewer => "reviewer",
         Author::Agent => "agent",
     };
     sql(conn.execute(
-        "INSERT INTO messages (thread_id, author, author_name, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![thread_id, author, by.name, body, now],
+        "INSERT INTO messages (thread_id, author, author_name, session_id, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![thread_id, author, by.name, by.session, body, now],
     ))?;
-    Ok(conn.last_insert_rowid())
+    let id = conn.last_insert_rowid();
+    if let Some(session) = by.session {
+        sessions::mark_seen(conn, session, &[thread_id], now)?;
+    }
+    Ok(id)
 }
 
 fn thread_from_row(row: &Row) -> rusqlite::Result<Thread> {
@@ -681,7 +682,6 @@ fn thread_from_row(row: &Row) -> rusqlite::Result<Thread> {
         dismissed: row.get("dismissed")?,
         excerpt: serde_json::from_str(&json("excerpt")?).unwrap_or_default(),
         messages: Vec::new(),
-        pending: false,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
         anchor_start: row.get("anchor_start")?,
@@ -803,7 +803,7 @@ pub fn locate_in_worktree(threads: &mut [Thread], wt: &Path) {
 // ---------------------------------------------------------------------------------------------
 // Tauri commands
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
 }
 
@@ -945,7 +945,7 @@ pub(crate) mod tests {
 
         let new = NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: additions(3, 4), body: " Why uppercase? ", images: &[] };
         let id = store.add_thread(&target, &wt, &range, new).unwrap();
-        store.reply(id, By { author: Author::Agent, name: Some("codex") }, "Changed it back", &[]).unwrap();
+        store.reply(id, By::agent(Some("codex")), "Changed it back", &[]).unwrap();
 
         let threads = store.threads(&target, false).unwrap();
         assert_eq!(threads.len(), 1);
@@ -1055,14 +1055,14 @@ pub(crate) mod tests {
         assert_eq!(threads.iter().map(|t| t.id).collect::<Vec<_>>(), [general, line]);
         let thread = &threads[0];
         assert_eq!((thread.path.as_deref(), thread.range, thread.position), (None, None, None));
-        assert!(thread.excerpt.is_empty() && thread.pending);
+        assert!(thread.excerpt.is_empty());
         assert_eq!(thread.messages[0].body, "Split this into two PRs.");
         let json = serde_json::to_value(thread).unwrap();
         assert!(json["path"].is_null() && json["range"].is_null(), "{json}");
 
         // Answered and resolved like any thread; other branches don't see it.
-        store.reply(general, By { author: Author::Agent, name: Some("claude") }, "Done", &[]).unwrap();
-        assert!(!store.thread(general).unwrap().pending);
+        store.reply(general, By::agent(Some("claude")), "Done", &[]).unwrap();
+        assert_eq!(store.thread(general).unwrap().messages.len(), 2);
         store.set_resolved(general, true).unwrap();
         assert_eq!(store.threads(&target, false).unwrap().len(), 1);
         assert!(store.threads(&Target::of(&root.join("repo")).unwrap(), true).unwrap().is_empty());
@@ -1107,7 +1107,7 @@ pub(crate) mod tests {
         assert_eq!(on_disk(), 4);
 
         // Only an agent's message can be given a thumbs up.
-        store.reply(id, By { author: Author::Agent, name: Some("codex") }, "done", &[]).unwrap();
+        store.reply(id, By::agent(Some("codex")), "done", &[]).unwrap();
         let agent = store.thread(id).unwrap().messages.last().unwrap().id;
         store.set_thumbs_up(agent, true).unwrap();
         assert!(store.thread(id).unwrap().messages.last().unwrap().thumbs_up);

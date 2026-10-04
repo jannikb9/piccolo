@@ -4,6 +4,8 @@
 use crate::comments::{self, Author, By, ExcerptRow, LineRange, NewThread, Side, Store, Target, Thread};
 use crate::git::{self, DiffOptions, DiffRange, LineKind, Result, Scope};
 use crate::repos;
+use crate::sessions::{shell_quote, Caller};
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
@@ -20,18 +22,20 @@ Usage:
                                      branch removed, numbered as in the base version)
   piccolo comment --general <message>
                                      Comment on the branch as a whole, not on particular lines
-  piccolo submit <summary>           Finish reviewing the branch: posts the summary as a general
-                                     comment and tells the developer the review is done
+  piccolo done [--request <id>]      Say you've finished reviewing the branch
   piccolo resolve <id>               Mark a comment resolved
   piccolo reopen <id>                Reopen a resolved comment
-  piccolo guide                      How to review this branch as an agent
+  piccolo guide [--request <id>]     How to review this branch as an agent (--request: the review
+                                     Piccolo asked you for, which you take on)
 
 Every command works on the worktree in the current folder, or the one `-C <worktree>` names: a
 path, or a branch or worktree folder name in a repository added to the app. File paths are then
 relative to that worktree.
 
 A message of `-` (or none) is read from stdin. `--as <name>` signs a reply, comment or review with
-the agent's name (e.g. codex); without it, PICCOLO_AUTHOR is used, or `claude` inside Claude Code.
+the agent's name (e.g. codex); without it, PICCOLO_AUTHOR is used, or `claude` inside Claude Code
+and `codex` inside Codex. Agents other than those set PICCOLO_SESSION to a name for their session,
+so Piccolo can tell what it has seen and send it comments.
 
 Comments are shown in Piccolo and belong to the branch checked out in the current folder.";
 
@@ -39,15 +43,16 @@ Comments are shown in Piccolo and belong to the branch checked out in the curren
 pub fn run_if_command() -> Option<i32> {
     let (worktree, args) = take_worktree_option(std::env::args().skip(1).collect());
     let command = args.first().map(String::as_str).unwrap_or_default();
-    if !matches!(command, "comments" | "reply" | "comment" | "submit" | "resolve" | "reopen" | "guide" | "help" | "--help" | "-h") {
+    if !matches!(command, "comments" | "reply" | "comment" | "done" | "resolve" | "reopen" | "guide" | "help" | "--help" | "-h") {
         // `-C` only belongs to the command line; without a command it's the app being launched.
         worktree.as_ref()?;
         eprintln!("piccolo: missing command\n\n{HELP}");
         return Some(1);
     }
+    let caller = Caller::from_env();
     let result = Folder::resolve(worktree.as_deref()).and_then(|folder| {
-        note_session(&folder);
-        run(command, &args[1..], &folder)
+        note_session(&folder, caller.as_ref());
+        run(command, &args[1..], &folder, caller.as_ref())
     });
     Some(match result {
         Ok(()) => 0,
@@ -58,13 +63,13 @@ pub fn run_if_command() -> Option<i32> {
     })
 }
 
-/// Run inside a Claude Code session, records that the session works on this worktree, so the
-/// app offers it comments for the worktree even when it runs in a folder above it. Best effort:
-/// the command itself doesn't depend on it.
-fn note_session(folder: &Folder) {
-    let Some(session) = std::env::var("CLAUDE_CODE_SESSION_ID").ok().filter(|id| !id.trim().is_empty()) else { return };
+/// Run inside an agent's session, records that the session works on this worktree, so the app
+/// lists it with the worktree's sessions even when it runs in a folder above it. Best effort: the
+/// command itself doesn't depend on it.
+fn note_session(folder: &Folder, caller: Option<&Caller>) {
+    let Some(caller) = caller else { return };
     if let (Ok(target), Ok(store)) = (folder.target(), Store::open()) {
-        let _ = store.note_session(&session, &target.worktree);
+        let _ = store.note_session(caller, &target.worktree);
     }
 }
 
@@ -135,35 +140,27 @@ fn find_worktree(cwd: &Path, name: &str, repos: &[String]) -> Result<PathBuf> {
     }
 }
 
-/// `value` as one shell word.
-fn shell_quote(value: &str) -> String {
-    if !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || "/._-~+=:@".contains(c)) {
-        value.to_string()
-    } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
-    }
-}
-
-fn run(command: &str, args: &[String], folder: &Folder) -> Result<()> {
+fn run(command: &str, args: &[String], folder: &Folder, caller: Option<&Caller>) -> Result<()> {
+    let session = caller.map(|c| c.id.as_str());
     match command {
         "comments" => {
             let args = Args::parse(args, &["--all", "--json"])?;
             let only = args.positional.iter().map(|id| thread_id(std::slice::from_ref(id))).collect::<Result<Vec<_>>>()?;
-            list(folder, &only, args.has("--all"), args.has("--json"))
+            list(folder, &only, args.has("--all"), args.has("--json"), session)
         }
         "reply" => {
             let args = Args::parse(args, &["--as"])?;
             let id = thread_id(&args.positional)?;
             let body = message(&args.positional[1..])?;
-            let name = agent_name(args.name)?;
-            Store::open()?.reply(id, By { author: Author::Agent, name: name.as_deref() }, &body, &[])?;
+            let name = agent_name(args.value("--as"))?;
+            Store::open()?.reply(id, By { author: Author::Agent, name: name.as_deref(), session }, &body, &[])?;
             println!("Replied to #{id}.");
             Ok(())
         }
         "comment" => {
             let args = Args::parse(args, &["--as", "--removed", "--general"])?;
-            let name = agent_name(args.name.clone())?;
-            let by = By { author: Author::Agent, name: name.as_deref() };
+            let name = agent_name(args.value("--as"))?;
+            let by = By { author: Author::Agent, name: name.as_deref(), session };
             if args.has("--general") {
                 if args.has("--removed") {
                     return Err("a general comment isn't on lines, so it can't be on removed ones".into());
@@ -180,18 +177,21 @@ fn run(command: &str, args: &[String], folder: &Folder) -> Result<()> {
             println!("{}", add_comment(&mut Store::open()?, &folder.path, location, side, &body, by)?);
             Ok(())
         }
-        "submit" => {
-            let args = Args::parse(args, &["--as"])?;
-            let name = agent_name(args.name)?.ok_or("say who reviewed: --as <your name>")?;
-            let summary = message(&args.positional)?;
+        "done" => {
+            let args = Args::parse(args, &["--as", "--request"])?;
+            if !args.positional.is_empty() {
+                return Err("`done` takes no message: post anything left to say as a comment first".into());
+            }
+            let name = agent_name(args.value("--as"))?.ok_or("say who reviewed: --as <your name>")?;
+            let request = args.value("--request").map(|id| request_id(&id)).transpose()?;
             let target = folder.target()?;
-            let review = Store::open()?.submit_review(&target, &name, &summary)?;
+            let review = Store::open()?.finish_review(&target, &name, session, request)?;
             let comments = match review.comments {
                 0 => "no comments".to_string(),
                 1 => "1 comment".to_string(),
                 n => format!("{n} comments"),
             };
-            println!("Submitted your review of {} with {comments}; the summary is #{}.", target.label(), review.thread);
+            println!("Finished your review of {} with {comments}.", target.label());
             Ok(())
         }
         "resolve" | "reopen" => {
@@ -201,8 +201,18 @@ fn run(command: &str, args: &[String], folder: &Folder) -> Result<()> {
             Ok(())
         }
         "guide" => {
+            let args = Args::parse(args, &["--request"])?;
             let target = folder.target()?;
-            print!("{}", guide(&target, &folder.option(&target))?);
+            let review = match args.value("--request") {
+                Some(id) => {
+                    let store = Store::open()?;
+                    let request = store.start_review(&target, request_id(&id)?, caller)?;
+                    let previous = store.previous_review(&target, &request.agent, request.session_id.as_deref(), request.id)?;
+                    Some(Review { id: request.id, since: previous.and_then(|p| p.head) })
+                }
+                None => None,
+            };
+            print!("{}", guide(&target, &folder.option(&target), review.as_ref())?);
             Ok(())
         }
         _ => {
@@ -212,25 +222,29 @@ fn run(command: &str, args: &[String], folder: &Folder) -> Result<()> {
     }
 }
 
+/// Options that take a value.
+const VALUED: &[&str] = &["--as", "--request"];
+
 /// A command's arguments: the options it takes, and the rest in order.
 struct Args {
     positional: Vec<String>,
     flags: Vec<String>,
-    /// The value of `--as`.
-    name: Option<String>,
+    /// Values of options in `VALUED`.
+    values: HashMap<String, String>,
 }
 
 impl Args {
     fn parse(args: &[String], allowed: &[&str]) -> Result<Self> {
-        let mut parsed = Self { positional: Vec::new(), flags: Vec::new(), name: None };
+        let mut parsed = Self { positional: Vec::new(), flags: Vec::new(), values: HashMap::new() };
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
             if arg.starts_with("--") && arg.len() > 2 {
                 if !allowed.contains(&arg.as_str()) {
                     return Err(format!("unknown option {arg}\n\n{HELP}"));
                 }
-                if arg == "--as" {
-                    parsed.name = Some(iter.next().ok_or("--as needs a name")?.clone());
+                if VALUED.contains(&arg.as_str()) {
+                    let value = iter.next().ok_or_else(|| format!("{arg} needs a value"))?;
+                    parsed.values.insert(arg.clone(), value.clone());
                 } else {
                     parsed.flags.push(arg.clone());
                 }
@@ -245,6 +259,13 @@ impl Args {
         self.flags.iter().any(|f| f == flag)
     }
 
+    fn value(&self, option: &str) -> Option<String> {
+        self.values.get(option).cloned()
+    }
+}
+
+fn request_id(arg: &str) -> Result<i64> {
+    arg.trim_start_matches('#').parse().map_err(|_| format!("not a review request id: {arg}"))
 }
 
 fn thread_id(args: &[String]) -> Result<i64> {
@@ -262,11 +283,13 @@ fn message(words: &[String]) -> Result<String> {
     Ok(body)
 }
 
-/// The agent's name: `--as`, else `PICCOLO_AUTHOR`, else `claude` when run by Claude Code.
+/// The agent's name: `--as`, else `PICCOLO_AUTHOR`, else `claude` when run by Claude Code and
+/// `codex` by Codex.
 fn agent_name(given: Option<String>) -> Result<Option<String>> {
     let name = given
         .or_else(|| std::env::var("PICCOLO_AUTHOR").ok().filter(|n| !n.trim().is_empty()))
-        .or_else(|| std::env::var_os("CLAUDECODE").map(|_| "claude".to_string()));
+        .or_else(|| std::env::var_os("CLAUDECODE").map(|_| "claude".to_string()))
+        .or_else(|| std::env::var_os("CODEX_THREAD_ID").map(|_| "codex".to_string()));
     let Some(name) = name else { return Ok(None) };
     let name = name.trim().to_lowercase();
     let valid = (1..=32).contains(&name.len())
@@ -289,11 +312,16 @@ fn author_label(author: Author, name: Option<&str>) -> String {
     }
 }
 
-fn list(folder: &Folder, only: &[i64], include_resolved: bool, json: bool) -> Result<()> {
+/// Prints the comments; a session that lists them has seen them.
+fn list(folder: &Folder, only: &[i64], include_resolved: bool, json: bool, session: Option<&str>) -> Result<()> {
     let target = folder.target()?;
-    let mut threads = Store::open()?.threads(&target, include_resolved || !only.is_empty())?;
+    let store = Store::open()?;
+    let mut threads = store.threads(&target, include_resolved || !only.is_empty())?;
     if !only.is_empty() {
         threads.retain(|t| only.contains(&t.id));
+    }
+    if let Some(session) = session {
+        store.mark_seen(session, &threads.iter().map(|t| t.id).collect::<Vec<_>>())?;
     }
     comments::locate_in_worktree(&mut threads, Path::new(&target.worktree));
     if json {
@@ -372,9 +400,16 @@ fn worktree_path(wt: &Path, cwd: &Path, file: &str) -> Result<String> {
     Ok(parts.join("/"))
 }
 
+/// A review Piccolo asked for, as the guide mentions it.
+struct Review {
+    id: i64,
+    /// The commit the agent's previous review of the branch was asked at.
+    since: Option<String>,
+}
+
 /// Instructions for an agent reviewing the branch, with this branch's base and commands filled in.
 /// `via` is how suggested commands name the worktree (` -C <worktree>`), or empty in it.
-fn guide(target: &Target, via: &str) -> Result<String> {
+fn guide(target: &Target, via: &str, review: Option<&Review>) -> Result<String> {
     let wt = Path::new(&target.worktree);
     let git = if via.is_empty() { "git".to_string() } else { format!("git -C {}", shell_quote(&target.worktree)) };
     let relative_to = if via.is_empty() { "the current folder" } else { "the worktree" };
@@ -390,11 +425,19 @@ fn guide(target: &Target, via: &str) -> Result<String> {
         }
         None => ("with no base branch found, so only its uncommitted changes".to_string(), format!("{git} diff HEAD")),
     };
+    let again = match review.and_then(|r| r.since.as_deref()) {
+        Some(since) => format!(
+            "\n\nYou reviewed this branch before, when it was at {}. `{git} diff {since}` shows what changed since then: look there first, and check whether the comments you left were addressed.",
+            &since[..since.len().min(10)]
+        ),
+        None => String::new(),
+    };
+    let request = review.map(|r| format!(" --request {}", r.id)).unwrap_or_default();
     Ok(format!(
         "\
 # Reviewing {branch}
 
-You're reviewing the changes on {branch} in {worktree}, {compared}. Your comments appear in Piccolo next to the diff, where the developer reads them and other agents pick them up. Don't change any files: review only.
+You're reviewing the changes on {branch} in {worktree}, {compared}. Your comments appear in Piccolo next to the diff as you post them, where the developer reads them and other agents pick them up. Don't change any files: review only.{again}
 
 1. See what changed: `{diff}` shows everything, uncommitted work included, and `{git} status --short` lists new files as untracked (??); read those whole. Read the surrounding code where the diff alone doesn't tell you enough.
 2. Read what's been said already: `piccolo{via} comments --all`. Don't raise a point again, whether it's open, resolved or dismissed (the developer decided that one needs no action); to add to a thread, `piccolo{via} reply --as <your name> <id> \"...\"`.
@@ -405,7 +448,7 @@ You're reviewing the changes on {branch} in {worktree}, {compared}. Your comment
    - `piccolo{via} comment --as <your name> --general \"...\"` for a point about the change as a whole rather than particular lines: the approach, something missing, how the parts fit together
    For a long message, pass `-` instead and write it to stdin.
 4. What's worth a comment: bugs, missed cases, risky or surprising behaviour, unclear names or structure, tests that don't check what they claim. One issue per comment: say what's wrong and why, and suggest a fix. No praise, and no nits a formatter or linter would catch.
-5. Submit your review: `piccolo{via} submit --as <your name> \"...\"` with a short summary: your verdict and the most important points, without repeating every comment. It's posted as a general comment and tells the developer you're done, so submit once, at the end, even when you found nothing to comment on.
+5. When you've finished, run `piccolo{via} done --as <your name>{request}`. It tells the developer you're done, so run it once, at the end, even when you found nothing to comment on. Don't post a summary that repeats your comments.
 6. Finish with one line in the chat: how many comments you left, and the most important one.
 
 Sign everything with `--as` and your name (e.g. `--as codex`), so the developer sees who wrote what.
@@ -575,7 +618,7 @@ mod tests {
         fs::create_dir_all(wt.join("src")).unwrap();
         fs::write(wt.join("src/new.rs"), "fn a() {}\nfn b() {}\n").unwrap();
         let comment = |store: &mut Store, cwd: &Path, location: &str, side: Side| {
-            add_comment(store, cwd, location, side, "Why?", By { author: Author::Agent, name: Some("codex") })
+            add_comment(store, cwd, location, side, "Why?", By::agent(Some("codex")))
         };
 
         // Changed, unchanged and untracked lines, with paths relative to the current folder.
@@ -617,7 +660,7 @@ mod tests {
         let (root, wt, mut store) = fixture("cli-general");
         let target = Target::of(&wt).unwrap();
         add_comment(&mut store, &wt, "a.txt:3", Side::Additions, "Why?", By::REVIEWER).unwrap();
-        let codex = By { author: Author::Agent, name: Some("codex") };
+        let codex = By::agent(Some("codex"));
         let id = store.add_general_thread(&target, codex, "The parser and the UI change belong in separate PRs.", &[]).unwrap();
 
         let threads = store.threads(&target, false).unwrap();
@@ -637,21 +680,27 @@ mod tests {
 
         let (root, wt, _) = fixture("cli-guide");
         let target = Target::of(&wt).unwrap();
-        let in_worktree = guide(&target, "").unwrap();
+        let in_worktree = guide(&target, "", None).unwrap();
         assert!(in_worktree.starts_with("# Reviewing feat/x\n"), "{in_worktree}");
         assert!(in_worktree.contains("compared with main, from where it branched off"), "{in_worktree}");
         assert!(in_worktree.contains("`piccolo comment --as <your name> <file>:<line>"), "{in_worktree}");
         assert!(in_worktree.contains("`git status --short`"), "{in_worktree}");
         assert!(in_worktree.contains("`piccolo comment --as <your name> --general"), "{in_worktree}");
-        assert!(in_worktree.contains("`piccolo submit --as <your name> \"...\"`"), "{in_worktree}");
+        assert!(in_worktree.contains("`piccolo done --as <your name>`"), "{in_worktree}");
+        assert!(!in_worktree.contains("reviewed this branch before"), "{in_worktree}");
 
         // Named from elsewhere, every suggested command names the worktree.
         let via = format!(" -C {}", shell_quote(&target.worktree));
-        let from_elsewhere = guide(&target, &via).unwrap();
+        let from_elsewhere = guide(&target, &via, None).unwrap();
         assert!(from_elsewhere.contains(&format!("`piccolo{via} comment --as <your name> <file>:<line>")), "{from_elsewhere}");
         assert!(from_elsewhere.contains(&format!("`git{via} status --short`")), "{from_elsewhere}");
         assert!(from_elsewhere.contains("relative to the worktree"), "{from_elsewhere}");
-        assert!(from_elsewhere.contains(&format!("`piccolo{via} submit --as <your name>")), "{from_elsewhere}");
+        assert!(from_elsewhere.contains(&format!("`piccolo{via} done --as <your name>`")), "{from_elsewhere}");
+
+        // A requested review says how to finish it, and a second one where to look first.
+        let again = guide(&target, "", Some(&Review { id: 7, since: Some("0123456789abcdef".into()) })).unwrap();
+        assert!(again.contains("`piccolo done --as <your name> --request 7`"), "{again}");
+        assert!(again.contains("when it was at 0123456789. `git diff 0123456789abcdef` shows what changed"), "{again}");
 
         fs::remove_dir_all(&root).unwrap();
     }

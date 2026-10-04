@@ -1,9 +1,9 @@
 import { focusManager, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
-import { summaryKey, useStore } from "../store";
+import { useStore } from "../store";
 import type { DraftImage } from "./images";
 import { toUpload } from "./images";
-import type { AgentKind, AgentSession, DiffOptions, DiffScope, GeneralThread, LineRange, RemoteBranch, Repo, Thread, Worktree } from "../types";
+import type { AgentKind, AgentSession, SessionActivity, DiffOptions, DiffScope, GeneralThread, LineRange, RemoteBranch, Repo, Thread, Worktree } from "../types";
 import {
   api,
   confirmAction,
@@ -37,6 +37,7 @@ export const keys = {
   threads: (path: string, base: string | null, scope: DiffScope, revision: number) =>
     ["threads", path, base, scope, revision] as const,
   sessions: (paths: string[]) => ["sessions", paths] as const,
+  activity: (path: string) => ["sessions", "activity", path] as const,
   symbol: (path: string, rev: string | null, name: string, from: string) => ["symbol", path, rev, name, from] as const,
   fileText: (path: string, rev: string | null, file: string) => ["file-text", path, rev, file] as const,
   branches: (repoId: string) => ["branches", repoId] as const,
@@ -111,9 +112,9 @@ export function useThreads(worktree: Worktree | undefined, base: string | null, 
 const NO_SESSIONS: AgentSession[] = [];
 
 /**
- * Claude Code sessions working on each worktree, read from Claude Code's registry whenever it
- * changes (see `useLiveGitData`). The slow poll only catches sessions that crashed, which leave
- * their registry file behind.
+ * Agent sessions working on each worktree, read again whenever Claude Code's registry or the
+ * comments database changes (see `useLiveGitData`). The slow poll only catches sessions that
+ * crashed, which leave their registry file behind.
  */
 function useAllSessions() {
   const repos = useRepos().data;
@@ -127,53 +128,59 @@ function useAllSessions() {
   });
 }
 
-/** Claude Code sessions working on the worktree: in it, or having run `piccolo` on it. */
+/** Agent sessions working on the worktree: running in it, or having run `piccolo` on it. */
 export function useSessions(worktree: Worktree): AgentSession[] {
   return useAllSessions().data?.[worktree.path] ?? NO_SESSIONS;
+}
+
+const NO_ACTIVITY: SessionActivity = { unseen: {}, open: [], requests: [] };
+
+/** What each of the worktree's sessions hasn't seen, and the reviews requested on it. */
+export function useSessionActivity(worktree: Worktree): SessionActivity {
+  return (
+    useQuery({
+      queryKey: keys.activity(worktree.path),
+      queryFn: () => api.sessionActivity(worktree.path),
+      placeholderData: sameWorktree(worktree.path),
+    }).data ?? NO_ACTIVITY
+  );
 }
 
 /** Where comments go: a running session, or a new one of an agent. */
 export type SendTarget = { session: string } | { newAgent: AgentKind };
 
-/** Hands the worktree's pending comments, or `threads` of them, to a session or a new one. */
-const sendComments = (worktree: Worktree, to: SendTarget, threads: number[] | null) =>
-  "session" in to
-    ? api.sendComments(worktree.path, to.session, threads)
-    : api.startSession(worktree.path, to.newAgent, threads);
-
-/** Sends the worktree's pending comments, or `threads` of them, to a session or a new one. */
+/**
+ * Sends `threads`, or else what the session hasn't seen (all open comments for a new one), to a
+ * session or a new one.
+ */
 export function useSendComments(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ to, threads }: { to: SendTarget; threads: number[] | null }) => sendComments(worktree, to, threads),
+    mutationFn: ({ to, threads }: { to: SendTarget; threads: number[] | null }) =>
+      "session" in to
+        ? api.sendComments(worktree.path, to.session, threads)
+        : api.startSession(worktree.path, to.newAgent, threads),
     onError: (error) => showError("Couldn't send the comments", String(error)),
-    onSettled: () => {
-      client.invalidateQueries({ queryKey: ["threads"] });
-      client.invalidateQueries({ queryKey: ["sessions"] });
-    },
+    onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
   });
 }
 
-/**
- * Sends all the worktree's pending comments like submitting a review on GitHub: a summary, when
- * written, is saved as a general comment first and goes out with them.
- */
-export function useSendReview(worktree: Worktree) {
+/** Asks a running session, or a new session of an agent, to review the worktree. */
+export function useRequestReview(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: async ({ to, summary, images }: { to: SendTarget; summary: string; images: DraftImage[] }) => {
-      if (summary.trim() || images.length > 0) {
-        await api.addGeneralThread(worktree.path, summary, images.map(toUpload));
-        // Saved as a pending comment now: should sending fail, it mustn't be saved twice.
-        useStore.getState().setGeneralDraft(summaryKey(worktree.id), null);
-      }
-      return sendComments(worktree, to, null);
-    },
-    onError: (error) => showError("Couldn't send the review", String(error)),
-    onSettled: () => {
-      client.invalidateQueries({ queryKey: ["threads"] });
-      client.invalidateQueries({ queryKey: ["sessions"] });
-    },
+    mutationFn: (to: { session: string } | { agent: AgentKind }) => api.requestReview(worktree.path, to),
+    onError: (error) => showError("Couldn't request a review", String(error)),
+    onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
+  });
+}
+
+/** Withdraws a review request, or removes a finished review from the list. */
+export function useCancelReviewRequest() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.cancelReviewRequest(id),
+    onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
   });
 }
 
@@ -198,7 +205,11 @@ function useCommentMutation<T>(mutationFn: (args: T) => Promise<unknown>) {
   const client = useQueryClient();
   return useMutation({
     mutationFn,
-    onSettled: () => client.invalidateQueries({ queryKey: ["threads"] }),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: ["threads"] });
+      // What sessions haven't seen changes with every comment.
+      client.invalidateQueries({ queryKey: ["sessions", "activity"] });
+    },
   });
 }
 

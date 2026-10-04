@@ -47,7 +47,6 @@ function CommentField({
   onCancel,
   placeholder,
   autoFocus,
-  submitEmpty,
 }: {
   imageKey: string;
   value: string;
@@ -56,8 +55,6 @@ function CommentField({
   onCancel: () => void;
   placeholder: string;
   autoFocus?: boolean;
-  /** ⌘↩ submits with nothing written too (the text is optional). */
-  submitEmpty?: boolean;
 }) {
   const addImages = useStore((s) => s.addDraftImages);
   const hasImages = useDraftImages(imageKey).length > 0;
@@ -77,7 +74,7 @@ function CommentField({
       <MarkdownEditor
         value={value}
         onChange={onChange}
-        onSubmit={() => (submitEmpty || value.trim() || hasImages) && onSubmit()}
+        onSubmit={() => (value.trim() || hasImages) && onSubmit()}
         onCancel={onCancel}
         onPasteFiles={onPasteFiles}
         placeholder={placeholder}
@@ -483,13 +480,11 @@ export function GeneralCommentField({
   placeholder,
   onSubmit,
   onCancel,
-  submitEmpty,
 }: {
   draftKey: string;
   placeholder: string;
   onSubmit: () => void;
   onCancel: () => void;
-  submitEmpty?: boolean;
 }) {
   const body = useStore((s) => s.generalDrafts[draftKey] ?? "");
   const setGeneralDraft = useStore((s) => s.setGeneralDraft);
@@ -502,7 +497,6 @@ export function GeneralCommentField({
       onCancel={onCancel}
       placeholder={placeholder}
       autoFocus
-      submitEmpty={submitEmpty}
     />
   );
 }

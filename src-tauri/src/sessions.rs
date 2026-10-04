@@ -1,18 +1,23 @@
-//! Claude Code sessions the reviewer can send comments to.
+//! Agent sessions working on a worktree: those the reviewer can send comments to, and what each
+//! has seen of them.
 //!
-//! Every running Claude Code session (terminal or desktop app) describes itself in
-//! `~/.claude/sessions/<pid>.json`: its id, folder, title, whether it's busy, and the Unix socket
-//! that is its inbox. Writing one stream-json `user` frame to that socket hands the session a
-//! message, which it takes as its next turn (the same mechanism Spock uses to pair sessions).
-//! The format is Claude Code's own and undocumented, and the sender gets no confirmation.
+//! Sessions are found two ways. Every running Claude Code session (terminal or desktop app)
+//! describes itself in `~/.claude/sessions/<pid>.json`: its id, folder, title, whether it's busy,
+//! and the Unix socket that is its inbox. Writing one stream-json `user` frame to that socket hands
+//! the session a message, which it takes as its next turn (the same mechanism Spock uses to pair
+//! sessions). The format is Claude Code's own and undocumented, and the sender gets no confirmation.
+//! And any agent that runs a `piccolo` command from a session the command can name (see
+//! [`Caller`]) leaves a trace, so Codex sessions, and sessions in a folder above several
+//! repositories, show up too; Piccolo can't message those yet.
 //!
-//! A session belongs to a worktree when it runs in it, or when it has run a `piccolo` command on
-//! it (which records a trace, see `note_session`): sessions often run in a folder above several
-//! repositories and work on whichever one a task needs.
+//! Comments aren't sent as a batch: they're posted for every agent to read. What's new for a
+//! session is what changed in open threads since it last saw them: by listing them with `piccolo
+//! comments`, by writing in them, or by being sent them.
 
-use crate::comments::{now_ms, sql, Store, Target};
+use crate::comments::{blocking, now_ms, sql, Store, Target};
 use crate::git::{self, Result};
-use rusqlite::params;
+use crate::requests::{self, Request};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -21,24 +26,30 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// A Claude Code session that works in, or above, a worktree.
+/// An agent session that works in, or on, a worktree.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub id: String,
-    /// Who runs it; only `claude` so far.
+    /// Who runs it: `claude`, `codex`, or the name another agent gave.
     pub agent: String,
-    /// The session's title, as Claude Code shows it in its sidebar.
+    /// The session's title, as its app shows it.
     pub title: Option<String>,
-    /// `busy` while a turn runs (a message waits until it ends), else `idle`.
+    /// `busy` while a turn runs (a message waits until it ends), else `idle`; running sessions only.
     pub status: Option<String>,
-    /// The folder it runs in: the worktree, or a folder above it holding several repositories.
-    pub cwd: String,
+    /// Whether it runs now: known for Claude Code sessions; `None` for other agents' sessions.
+    pub running: Option<bool>,
+    /// The folder it runs in, when running: the worktree, or a folder above it.
+    pub cwd: Option<String>,
     /// Whether it runs in the worktree itself rather than above it.
     pub in_worktree: bool,
-    pub started_at: i64,
+    pub started_at: Option<i64>,
+    /// When it last ran a `piccolo` command on the worktree.
+    pub last_seen: Option<i64>,
+    /// Whether Piccolo can send it messages: a running Claude Code session has an inbox.
+    pub reachable: bool,
     #[serde(skip)]
-    socket: PathBuf,
+    socket: Option<PathBuf>,
 }
 
 /// A session's file in the registry, as far as it's used here.
@@ -55,17 +66,47 @@ struct Entry {
     messaging_socket_path: Option<String>,
 }
 
-/// Worktrees sessions ran `piccolo` commands on, by Claude Code session id.
+/// Worktrees sessions ran `piccolo` commands on, and what each session has seen of each thread.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS session_worktrees (
         session_id TEXT NOT NULL,
         worktree TEXT NOT NULL,
         seen_at INTEGER NOT NULL,
+        agent TEXT,
         PRIMARY KEY (session_id, worktree)
+    );
+    CREATE TABLE IF NOT EXISTS session_threads (
+        session_id TEXT NOT NULL,
+        thread_id INTEGER NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
+        seen_at INTEGER NOT NULL,
+        PRIMARY KEY (session_id, thread_id)
     );";
 
 /// Traces older than this are forgotten; sessions rarely live that long.
 const TRACE_DAYS: i64 = 30;
+
+/// The agent session a `piccolo` command runs in, as far as its environment tells:
+/// `PICCOLO_SESSION` (any agent, named by `PICCOLO_AUTHOR`), Claude Code's session id, or Codex's
+/// thread id.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Caller {
+    pub id: String,
+    pub agent: String,
+}
+
+impl Caller {
+    pub fn from_env() -> Option<Self> {
+        let var = |name: &str| std::env::var(name).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        if let Some(id) = var("PICCOLO_SESSION") {
+            let agent = var("PICCOLO_AUTHOR").map(|a| a.to_lowercase()).unwrap_or_else(|| "agent".into());
+            return Some(Self { id, agent });
+        }
+        if let Some(id) = var("CLAUDE_CODE_SESSION_ID") {
+            return Some(Self { id, agent: "claude".into() });
+        }
+        var("CODEX_THREAD_ID").map(|id| Self { id, agent: "codex".into() })
+    }
+}
 
 /// Where Claude Code registers its sessions; `CLAUDE_CONFIG_DIR` moves it, as it does for Claude Code.
 pub fn registry_dir() -> PathBuf {
@@ -73,6 +114,28 @@ pub fn registry_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude"));
     config.join("sessions")
+}
+
+/// Codex's list of thread titles; `CODEX_HOME` moves it, as it does for Codex.
+fn codex_index() -> PathBuf {
+    std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".codex"))
+        .join("session_index.jsonl")
+}
+
+/// Titles of Codex threads by id, from `index` (one JSON object per line; a later line renames).
+fn codex_titles(index: &Path) -> HashMap<String, String> {
+    #[derive(Deserialize)]
+    struct Line {
+        id: String,
+        thread_name: Option<String>,
+    }
+    let text = std::fs::read_to_string(index).unwrap_or_default();
+    text.lines()
+        .filter_map(|l| serde_json::from_str::<Line>(l).ok())
+        .filter_map(|l| Some((l.id, l.thread_name.filter(|n| !n.trim().is_empty())?)))
+        .collect()
 }
 
 /// Whether the process `pid` still runs: a session that crashed leaves its file behind.
@@ -122,10 +185,22 @@ fn live_sessions(registry: &Path) -> Vec<Live> {
     live
 }
 
-/// For each of `worktrees`, the sessions of `live` working on it: those running in it (not in a
-/// worktree nested inside it), then those that ran `piccolo` on it (`traces`: session id →
-/// worktrees) from elsewhere; each group most recently started first.
-fn match_sessions(live: &[Live], worktrees: &[String], traces: &HashMap<String, HashSet<PathBuf>>) -> HashMap<String, Vec<Session>> {
+/// A session that ran `piccolo` on a worktree.
+struct Trace {
+    agent: Option<String>,
+    seen_at: i64,
+}
+
+/// For each of `worktrees`, the sessions working on it: the running Claude Code sessions in it
+/// (not in a worktree nested inside it), then those that ran `piccolo` on it (`traces`: session id
+/// → canonical worktree → trace), running or not. Running ones come first, the most recently
+/// started first; then the others, most recently seen first.
+fn match_sessions(
+    live: &[Live],
+    worktrees: &[String],
+    traces: &HashMap<String, HashMap<PathBuf, Trace>>,
+    titles: &HashMap<String, String>,
+) -> HashMap<String, Vec<Session>> {
     let canonical_worktrees: Vec<(String, PathBuf)> =
         worktrees.iter().filter_map(|w| canonical(w).map(|c| (w.clone(), c))).collect();
     let mut matched: HashMap<String, Vec<Session>> = HashMap::new();
@@ -133,33 +208,62 @@ fn match_sessions(live: &[Live], worktrees: &[String], traces: &HashMap<String, 
         let nested = |cwd: &Path| {
             canonical_worktrees.iter().any(|(_, other)| other != worktree && other.starts_with(worktree) && cwd.starts_with(other))
         };
+        let trace = |id: &str| traces.get(id).and_then(|t| t.get(worktree));
         let mut sessions: Vec<Session> = live
             .iter()
             .filter_map(|l| {
                 let in_worktree = l.cwd.starts_with(worktree) && !nested(&l.cwd);
-                let traced = traces.get(&l.entry.session_id).is_some_and(|t| t.contains(worktree));
-                (in_worktree || traced).then(|| Session {
+                let trace = trace(&l.entry.session_id);
+                (in_worktree || trace.is_some()).then(|| Session {
                     id: l.entry.session_id.clone(),
                     agent: "claude".into(),
                     title: l.entry.name.clone().filter(|n| !n.trim().is_empty()),
                     status: l.entry.status.clone(),
-                    cwd: l.cwd.to_string_lossy().into_owned(),
+                    running: Some(true),
+                    cwd: Some(l.cwd.to_string_lossy().into_owned()),
                     in_worktree,
-                    started_at: l.entry.started_at.unwrap_or_default(),
-                    socket: l.socket.clone(),
+                    started_at: l.entry.started_at,
+                    last_seen: trace.map(|t| t.seen_at),
+                    reachable: true,
+                    socket: Some(l.socket.clone()),
                 })
             })
             .collect();
-        if sessions.is_empty() {
+        let running: HashSet<String> = sessions.iter().map(|s| s.id.clone()).collect();
+        let mut others: Vec<Session> = traces
+            .iter()
+            .filter(|(id, _)| !running.contains(*id))
+            .filter_map(|(id, worktrees)| {
+                let trace = worktrees.get(worktree)?;
+                let agent = trace.agent.clone().unwrap_or_else(|| "claude".into());
+                Some(Session {
+                    id: id.clone(),
+                    title: titles.get(id).cloned(),
+                    status: None,
+                    // Claude Code registers every running session, so one missing has ended.
+                    running: (agent == "claude").then_some(false),
+                    agent,
+                    cwd: None,
+                    in_worktree: false,
+                    started_at: None,
+                    last_seen: Some(trace.seen_at),
+                    reachable: false,
+                    socket: None,
+                })
+            })
+            .collect();
+        if sessions.is_empty() && others.is_empty() {
             continue;
         }
         sessions.sort_by_key(|s| std::cmp::Reverse((s.in_worktree, s.started_at)));
+        others.sort_by_key(|s| std::cmp::Reverse(s.last_seen));
+        sessions.extend(others);
         matched.insert(path.clone(), sessions);
     }
     matched
 }
 
-/// An agent that can be given comments: one with a session in the registry, or a new session.
+/// An agent a new session can be opened for, in its desktop app.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Agent {
@@ -167,25 +271,30 @@ pub enum Agent {
     Codex,
 }
 
+/// `value` as one shell word.
+pub(crate) fn shell_quote(value: &str) -> String {
+    if !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || "/._-~+=:@".contains(c)) {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 /// The message an agent gets for `threads` on the worktree at `worktree`. Claude has the
-/// local-review skill; Codex gets its steps spelled out.
-fn message(agent: Agent, worktree: &str, threads: &[i64]) -> String {
+/// local-review skill; other agents get the steps spelled out.
+fn message(agent: Option<Agent>, worktree: &str, threads: &[i64]) -> String {
     let ids: Vec<String> = threads.iter().map(i64::to_string).collect();
     let hashes: Vec<String> = threads.iter().map(|id| format!("#{id}")).collect();
     let what = if threads.len() == 1 { "a review comment" } else { "review comments" };
-    let quoted = if worktree.chars().all(|c| c.is_ascii_alphanumeric() || "/._-~+=:@".contains(c)) {
-        worktree.to_string()
-    } else {
-        format!("'{}'", worktree.replace('\'', "'\\''"))
-    };
+    let quoted = shell_quote(worktree);
     let (hashes, ids) = (hashes.join(", "), ids.join(" "));
     match agent {
-        Agent::Claude => format!(
+        Some(Agent::Claude) | None => format!(
             "The reviewer sent you {what} from Piccolo: {hashes}, on the worktree {worktree}. Address them with \
              the local-review skill: `piccolo -C {quoted} comments {ids}` lists them, and \
              `piccolo -C {quoted} reply <id> \"...\"` answers one."
         ),
-        Agent::Codex => format!(
+        Some(Agent::Codex) => format!(
             "The reviewer sent you {what} from Piccolo: {hashes}, on the worktree {worktree}.\n\
              1. `piccolo -C {quoted} comments {ids}` lists them, with the code each is about (and the paths of any \
              attached screenshots: open them).\n\
@@ -201,7 +310,7 @@ fn message(agent: Agent, worktree: &str, threads: &[i64]) -> String {
 /// Opens a new session of `agent` in its desktop app, in `worktree`, with `text` as its prompt,
 /// through the apps' own links (undocumented): Claude's `claude://code/new?folder=&q=`, Codex's
 /// `codex://threads/new?path=&prompt=` (in the ChatGPT app).
-fn open_new_session(agent: Agent, worktree: &str, text: &str) -> Result<()> {
+pub(crate) fn open_new_session(agent: Agent, worktree: &str, text: &str) -> Result<()> {
     let url = match agent {
         Agent::Claude => format!("claude://code/new?folder={}&q={}", percent_encode(worktree), percent_encode(text)),
         Agent::Codex => format!("codex://threads/new?path={}&prompt={}", percent_encode(worktree), percent_encode(text)),
@@ -231,8 +340,9 @@ fn percent_encode(value: &str) -> String {
         .collect()
 }
 
-/// Hands `text` to the session listening on `socket`, as one stream-json `user` frame.
-fn deliver(socket: &Path, text: &str) -> Result<()> {
+/// Hands `text` to `session`, as one stream-json `user` frame to its inbox.
+pub(crate) fn deliver(session: &Session, text: &str) -> Result<()> {
+    let socket = session.socket.as_ref().ok_or("Piccolo can't send messages to that session")?;
     let frame = serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } });
     let mut stream = UnixStream::connect(socket).map_err(|e| format!("The session isn't reachable any more ({e})"))?;
     stream.set_write_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
@@ -241,117 +351,179 @@ fn deliver(socket: &Path, text: &str) -> Result<()> {
         .map_err(|e| format!("Couldn't send to the session ({e})"))
 }
 
+/// Records that `session` has seen `threads` as they are at `now`.
+pub(crate) fn mark_seen(conn: &Connection, session: &str, threads: &[i64], now: i64) -> Result<()> {
+    for thread in threads {
+        sql(conn.execute(
+            "INSERT INTO session_threads (session_id, thread_id, seen_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (session_id, thread_id) DO UPDATE SET seen_at = MAX(seen_at, ?3)",
+            params![session, thread, now],
+        ))?;
+    }
+    Ok(())
+}
+
 impl Store {
-    /// Records that Claude Code session `session` worked on `worktree` (it ran `piccolo` there).
-    pub fn note_session(&self, session: &str, worktree: &str) -> Result<()> {
+    /// Records that `caller` worked on `worktree` (it ran `piccolo` there).
+    pub fn note_session(&self, caller: &Caller, worktree: &str) -> Result<()> {
         let now = now_ms();
         sql(self.conn.execute(
-            "INSERT OR REPLACE INTO session_worktrees (session_id, worktree, seen_at) VALUES (?1, ?2, ?3)",
-            params![session, worktree, now],
+            "INSERT OR REPLACE INTO session_worktrees (session_id, worktree, seen_at, agent) VALUES (?1, ?2, ?3, ?4)",
+            params![caller.id, worktree, now, caller.agent],
         ))?;
         sql(self.conn.execute("DELETE FROM session_worktrees WHERE seen_at < ?1", [now - TRACE_DAYS * 86_400_000]))?;
         Ok(())
     }
 
-    /// The worktrees each session ran `piccolo` on, as canonical paths.
-    fn traces(&self) -> Result<HashMap<String, HashSet<PathBuf>>> {
-        let mut stmt = sql(self.conn.prepare("SELECT session_id, worktree FROM session_worktrees"))?;
-        let rows = sql(stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))))?;
-        let mut traces: HashMap<String, HashSet<PathBuf>> = HashMap::new();
+    /// The worktrees each session ran `piccolo` on, by canonical path.
+    fn traces(&self) -> Result<HashMap<String, HashMap<PathBuf, Trace>>> {
+        let mut stmt = sql(self.conn.prepare("SELECT session_id, worktree, agent, seen_at FROM session_worktrees"))?;
+        let rows = sql(stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, Trace { agent: r.get(2)?, seen_at: r.get(3)? }))
+        }))?;
+        let mut traces: HashMap<String, HashMap<PathBuf, Trace>> = HashMap::new();
         for row in rows {
-            let (session, worktree) = sql(row)?;
+            let (session, worktree, trace) = sql(row)?;
             if let Some(worktree) = canonical(&worktree) {
-                traces.entry(session).or_default().insert(worktree);
+                traces.entry(session).or_default().insert(worktree, trace);
             }
         }
         Ok(traces)
     }
 
-    /// Sends `target`'s pending threads (or those of `only` that are pending) to session `session`,
-    /// one of `sessions`, and marks them sent. Returns the threads sent.
-    fn send(&mut self, sessions: &[Session], session: &str, target: &Target, only: Option<&[i64]>) -> Result<Vec<i64>> {
-        let session = sessions.iter().find(|s| s.id == session).ok_or("That session isn't running any more")?;
-        self.hand_over(target, only, |ids| deliver(&session.socket, &message(Agent::Claude, &target.worktree, ids)))
+    /// Records that `session` has seen `threads` as they are now.
+    pub fn mark_seen(&self, session: &str, threads: &[i64]) -> Result<()> {
+        mark_seen(&self.conn, session, threads, now_ms())
     }
 
-    /// Hands `target`'s pending threads (or those of `only` that are pending) to `deliver`, and
-    /// marks them sent once it succeeds. Returns the threads handed over.
-    fn hand_over(&mut self, target: &Target, only: Option<&[i64]>, deliver: impl FnOnce(&[i64]) -> Result<()>) -> Result<Vec<i64>> {
-        let threads: Vec<_> = self
-            .threads(target, false)?
-            .into_iter()
-            .filter(|t| t.pending && only.is_none_or(|ids| ids.contains(&t.id)))
-            .collect();
-        if threads.is_empty() {
+    /// Open threads on `target`'s branch with something `session` hasn't seen: a message someone
+    /// else wrote or edited after it last saw the thread. With no session, every open thread.
+    pub fn unseen(&self, target: &Target, session: Option<&str>) -> Result<Vec<i64>> {
+        let mut stmt = sql(self.conn.prepare(
+            "SELECT t.id FROM threads t
+             WHERE t.repo = ?1 AND (t.branch = ?2 OR (?2 IS NULL AND t.branch IS NULL AND t.worktree = ?3))
+               AND t.resolved = 0
+               AND (?4 IS NULL OR EXISTS (
+                 SELECT 1 FROM messages m
+                 WHERE m.thread_id = t.id AND m.session_id IS NOT ?4
+                   AND COALESCE(m.edited_at, m.created_at) > COALESCE(
+                     (SELECT s.seen_at FROM session_threads s WHERE s.session_id = ?4 AND s.thread_id = t.id), 0)))
+             ORDER BY t.id",
+        ))?;
+        let rows = sql(stmt.query_map(params![target.repo, target.branch, target.worktree, session], |r| r.get(0)))?;
+        sql(rows.collect())
+    }
+
+    /// Sends `session` the threads of `only` (or all those it hasn't seen) on `target`'s branch,
+    /// and counts them as seen. Returns the threads sent.
+    fn send(&mut self, session: &Session, target: &Target, only: Option<&[i64]>) -> Result<Vec<i64>> {
+        let ids = match only {
+            Some(ids) => self.open_among(target, ids)?,
+            None => self.unseen(target, Some(&session.id))?,
+        };
+        if ids.is_empty() {
             return Err("There are no comments to send".into());
         }
-        let ids: Vec<i64> = threads.iter().map(|t| t.id).collect();
-        deliver(&ids)?;
-        let now = now_ms();
-        let tx = sql(self.conn.transaction())?;
-        for thread in &threads {
-            if let Some(message) = thread.messages.last() {
-                sql(tx.execute("UPDATE messages SET sent_at = ?2 WHERE id = ?1", params![message.id, now]))?;
-            }
-        }
-        sql(tx.commit())?;
+        deliver(session, &message(None, &target.worktree, &ids))?;
+        self.mark_seen(&session.id, &ids)?;
         Ok(ids)
+    }
+
+    /// Those of `ids` that are open threads on `target`'s branch.
+    fn open_among(&self, target: &Target, ids: &[i64]) -> Result<Vec<i64>> {
+        Ok(self.unseen(target, None)?.into_iter().filter(|id| ids.contains(id)).collect())
     }
 }
 
 /// The sessions working on each of `worktrees`, from the registry and the traces in `store`.
 fn sessions_by_worktree(store: &Store, worktrees: &[String]) -> Result<HashMap<String, Vec<Session>>> {
-    Ok(match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?))
+    Ok(match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?, &codex_titles(&codex_index())))
+}
+
+/// The sessions working on the worktree at `path`.
+pub(crate) fn sessions_of(store: &Store, path: &str) -> Result<Vec<Session>> {
+    // Its siblings too, so a session in a nested worktree isn't taken for this one's.
+    let worktrees: Vec<String> = git::list_worktrees(Path::new(path))?.into_iter().map(|w| w.path).collect();
+    Ok(sessions_by_worktree(store, &worktrees)?
+        .into_iter()
+        .find(|(w, _)| canonical(w) == canonical(path))
+        .map(|(_, sessions)| sessions)
+        .unwrap_or_default())
+}
+
+/// What's going on in a worktree's sessions, beyond the sessions themselves.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Activity {
+    /// Open threads each session hasn't seen, by session id.
+    pub unseen: HashMap<String, Vec<i64>>,
+    /// All open threads, which a new session would be given.
+    pub open: Vec<i64>,
+    /// Reviews requested on the branch, newest first.
+    pub requests: Vec<Request>,
 }
 
 // ---------------------------------------------------------------------------------------------
 // Tauri commands
 
-/// Claude Code sessions working on each of the worktrees at `paths` (worktrees without one are left out).
+/// Sessions working on each of the worktrees at `paths` (worktrees without one are left out).
 #[tauri::command]
 pub async fn list_sessions(paths: Vec<String>) -> Result<HashMap<String, Vec<Session>>> {
-    tauri::async_runtime::spawn_blocking(move || sessions_by_worktree(&Store::open()?, &paths))
-        .await
-        .map_err(|e| e.to_string())?
+    blocking(move || sessions_by_worktree(&Store::open()?, &paths)).await
 }
 
-/// Sends the worktree's pending comments, or `threads` of them, to session `session`.
+/// What each session on the worktree at `path` hasn't seen, and the reviews requested there.
+#[tauri::command]
+pub async fn session_activity(path: String) -> Result<Activity> {
+    blocking(move || {
+        let store = Store::open()?;
+        let target = Target::of(Path::new(&path))?;
+        let mut unseen = HashMap::new();
+        for session in sessions_of(&store, &path)? {
+            unseen.insert(session.id.clone(), store.unseen(&target, Some(&session.id))?);
+        }
+        Ok(Activity { unseen, open: store.unseen(&target, None)?, requests: requests::list(&store, &target)? })
+    })
+    .await
+}
+
+/// Sends session `session` what it hasn't seen on the worktree, or `threads`.
 #[tauri::command]
 pub async fn send_comments(path: String, session: String, threads: Option<Vec<i64>>) -> Result<Vec<i64>> {
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
         let mut store = Store::open()?;
-        // Its siblings too, so a session in a nested worktree isn't taken for this one's.
-        let worktrees: Vec<String> = git::list_worktrees(Path::new(&path))?.into_iter().map(|w| w.path).collect();
-        let sessions = sessions_by_worktree(&store, &worktrees)?
-            .into_iter()
-            .find(|(w, _)| canonical(w) == canonical(&path))
-            .map(|(_, sessions)| sessions)
-            .unwrap_or_default();
+        let sessions = sessions_of(&store, &path)?;
+        let session = sessions.iter().find(|s| s.id == session).ok_or("That session isn't running any more")?;
         let target = Target::of(Path::new(&path))?;
-        store.send(&sessions, &session, &target, threads.as_deref())
+        store.send(session, &target, threads.as_deref())
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
-/// Opens a new `agent` session on the worktree at `path` with its pending comments, or `threads` of them.
+/// Opens a new `agent` session on the worktree at `path` with its open comments, or `threads`.
 #[tauri::command]
 pub async fn start_session(path: String, agent: Agent, threads: Option<Vec<i64>>) -> Result<Vec<i64>> {
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
+        let store = Store::open()?;
         let target = Target::of(Path::new(&path))?;
-        Store::open()?.hand_over(&target, threads.as_deref(), |ids| {
-            open_new_session(agent, &target.worktree, &message(agent, &target.worktree, ids))
-        })
+        let ids = match threads {
+            Some(ids) => store.open_among(&target, &ids)?,
+            None => store.unseen(&target, None)?,
+        };
+        if ids.is_empty() {
+            return Err("There are no open comments to send".into());
+        }
+        open_new_session(agent, &target.worktree, &message(Some(agent), &target.worktree, &ids))?;
+        Ok(ids)
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::comments::tests::{additions, fixture};
-    use crate::comments::{Author, By, NewThread};
+    use crate::comments::{By, NewThread};
     use crate::git::{DiffRange, Scope};
     use std::io::{BufRead, BufReader};
     use std::os::unix::net::UnixListener;
@@ -372,8 +544,12 @@ mod tests {
         listener
     }
 
+    fn caller(id: &str, agent: &str) -> Caller {
+        Caller { id: id.into(), agent: agent.into() }
+    }
+
     #[test]
-    fn finds_sessions_in_a_worktree_or_that_reviewed_it() {
+    fn finds_sessions_in_a_worktree_or_that_worked_on_it() {
         let (root, wt, store) = fixture("sessions-find");
         let registry = root.join("registry");
         std::fs::create_dir_all(&registry).unwrap();
@@ -385,20 +561,32 @@ mod tests {
         // A session whose process ended is left out.
         let gone = serde_json::json!({"pid": 999_999, "sessionId": "gone", "cwd": wt, "messagingSocketPath": "/nope"});
         std::fs::write(registry.join("gone.json"), gone.to_string()).unwrap();
+        let titles = HashMap::from([("codex-1".to_string(), "Review the parser".to_string())]);
 
-        let found = |store: &Store| match_sessions(&live_sessions(&registry), &worktrees, &store.traces().unwrap());
+        let found = |store: &Store| match_sessions(&live_sessions(&registry), &worktrees, &store.traces().unwrap(), &titles);
         let ids = |store: &Store, worktree: &str| -> Vec<String> {
             found(store).get(worktree).map(|s| s.iter().map(|s| s.id.clone()).collect()).unwrap_or_default()
         };
         // A session in a folder above only counts once it ran `piccolo` on the worktree.
         assert_eq!(ids(&store, &worktrees[1]), ["here"]);
         assert_eq!(ids(&store, &worktrees[0]), ["main"]);
-        store.note_session("above", &Target::of(&wt).unwrap().worktree).unwrap();
+        let worktree = Target::of(&wt).unwrap().worktree;
+        store.note_session(&caller("above", "claude"), &worktree).unwrap();
         assert_eq!(ids(&store, &worktrees[1]), ["here", "above"]);
         assert_eq!(ids(&store, &worktrees[0]), ["main"]);
         let sessions = &found(&store)[&worktrees[1]];
         assert_eq!((sessions[0].title.as_deref(), sessions[0].in_worktree), (Some("Session here"), true));
-        assert!(!sessions[1].in_worktree);
+        assert!(!sessions[1].in_worktree && sessions[1].reachable && sessions[1].last_seen.is_some());
+
+        // Sessions that aren't running are listed after those that are: a Claude Code session
+        // that ended, and a Codex one, which may or may not run.
+        store.note_session(&caller("gone", "claude"), &worktree).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        store.note_session(&caller("codex-1", "codex"), &worktree).unwrap();
+        assert_eq!(ids(&store, &worktrees[1]), ["here", "above", "codex-1", "gone"]);
+        let sessions = &found(&store)[&worktrees[1]];
+        assert_eq!((sessions[2].agent.as_str(), sessions[2].running, sessions[2].title.as_deref()), ("codex", None, Some("Review the parser")));
+        assert_eq!((sessions[3].running, sessions[3].reachable), (Some(false), false));
 
         for id in ["here", "above", "main"] {
             let _ = std::fs::remove_file(format!("/tmp/review-test-{}-{id}.sock", std::process::id()));
@@ -407,13 +595,66 @@ mod tests {
     }
 
     #[test]
-    fn sends_pending_comments_to_a_session_inbox() {
+    fn reads_codex_titles() {
+        let dir = std::env::temp_dir().join(format!("piccolo-codex-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let index = dir.join("session_index.jsonl");
+        std::fs::write(&index, "{\"id\":\"a\",\"thread_name\":\"First\"}\nnot json\n{\"id\":\"a\",\"thread_name\":\"Renamed\"}\n{\"id\":\"b\",\"thread_name\":\" \"}\n").unwrap();
+        assert_eq!(codex_titles(&index), HashMap::from([("a".to_string(), "Renamed".to_string())]));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn tracks_what_each_session_has_seen() {
+        let (root, wt, mut store) = fixture("sessions-seen");
+        let target = Target::of(&wt).unwrap();
+        let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
+        let mut comment = |by: By, line| {
+            let new = NewThread { by, path: "a.txt", old_path: None, range: additions(line, line), body: "x", images: &[] };
+            store.add_thread(&target, &wt, &range, new).unwrap()
+        };
+        let codex = By { session: Some("codex-1"), ..By::agent(Some("codex")) };
+        let claude = By { session: Some("claude-1"), ..By::agent(Some("claude")) };
+        let (mine, codexs) = (comment(By::REVIEWER, 3), comment(codex, 4));
+        let unseen = |store: &Store, session| store.unseen(&target, session).unwrap();
+        let wait = || std::thread::sleep(std::time::Duration::from_millis(2));
+
+        // Everything's new to Claude; Codex wrote its own comment.
+        assert_eq!(unseen(&store, Some("claude-1")), [mine, codexs]);
+        assert_eq!(unseen(&store, Some("codex-1")), [mine]);
+        assert_eq!(unseen(&store, None), [mine, codexs]);
+
+        // Seen by listing them, or by answering.
+        store.mark_seen("claude-1", &[mine]).unwrap();
+        wait();
+        store.reply(codexs, claude, "Fixed", &[]).unwrap();
+        assert!(unseen(&store, Some("claude-1")).is_empty());
+        assert_eq!(unseen(&store, Some("codex-1")), [mine, codexs]);
+
+        // New again when someone else writes or edits; closed threads drop out.
+        wait();
+        store.reply(mine, By::REVIEWER, "And the other one", &[]).unwrap();
+        assert_eq!(unseen(&store, Some("claude-1")), [mine]);
+        store.mark_seen("claude-1", &[mine]).unwrap();
+        wait();
+        let first = store.thread(mine).unwrap().messages[0].id;
+        store.edit_message(first, "y", &[]).unwrap();
+        assert_eq!(unseen(&store, Some("claude-1")), [mine]);
+        store.set_dismissed(mine, true).unwrap();
+        assert!(unseen(&store, Some("claude-1")).is_empty());
+        assert_eq!(unseen(&store, None), [codexs]);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn sends_unseen_comments_to_a_session_inbox() {
         let (root, wt, mut store) = fixture("sessions-send");
         let registry = root.join("registry");
         std::fs::create_dir_all(&registry).unwrap();
         let listener = register(&registry, "s1", &wt, 1);
         let target = Target::of(&wt).unwrap();
-        let sessions = match_sessions(&live_sessions(&registry), std::slice::from_ref(&target.worktree), &HashMap::new())
+        let sessions = match_sessions(&live_sessions(&registry), std::slice::from_ref(&target.worktree), &HashMap::new(), &HashMap::new())
             .remove(&target.worktree)
             .unwrap();
         let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
@@ -431,37 +672,32 @@ mod tests {
             frame["message"]["content"].as_str().unwrap().to_string()
         };
 
-        // One comment, then the rest.
-        assert_eq!(store.send(&sessions, "s1", &target, Some(&[second])).unwrap(), [second]);
+        // One comment, then the rest; then nothing's left that it hasn't seen.
+        let session = &sessions[0];
+        assert_eq!(store.send(session, &target, Some(&[second])).unwrap(), [second]);
         let text = received();
         assert!(text.contains(&format!("a review comment from Piccolo: #{second}")), "{text}");
         assert!(text.contains(&format!("piccolo -C {} comments {second}", target.worktree)), "{text}");
-        assert_eq!(store.send(&sessions, "s1", &target, None).unwrap(), [first]);
+        assert_eq!(store.send(session, &target, None).unwrap(), [first]);
         assert!(received().contains(&format!("#{first}")));
-        assert!(store.send(&sessions, "s1", &target, None).is_err());
-        assert!(store.send(&sessions, "other", &target, None).is_err());
-
-        // An agent's reply settles a thread; the reviewer answering, or editing, makes it pending again.
-        store.reply(first, By { author: Author::Agent, name: Some("claude") }, "Done", &[]).unwrap();
-        assert!(!store.thread(first).unwrap().pending);
-        store.reply(first, By::REVIEWER, "Not quite", &[]).unwrap();
-        assert!(store.thread(first).unwrap().pending);
-        let sent = store.thread(second).unwrap().messages[0].id;
-        assert!(!store.thread(second).unwrap().pending);
-        store.edit_message(sent, "y", &[]).unwrap();
-        assert!(store.thread(second).unwrap().pending);
+        assert!(store.send(session, &target, None).is_err());
+        // A comment can always be sent again.
+        assert_eq!(store.send(session, &target, Some(&[first])).unwrap(), [first]);
+        received();
 
         // Codex gets the steps instead of the skill, signing its replies.
-        let codex = message(Agent::Codex, &target.worktree, &[first, second]);
+        let codex = message(Some(Agent::Codex), &target.worktree, &[first, second]);
         assert!(codex.contains(&format!("piccolo -C {} comments {first} {second}", target.worktree)), "{codex}");
         assert!(codex.contains("reply --as codex <id>") && !codex.contains("local-review"), "{codex}");
         assert_eq!(percent_encode("a b/é&q=1"), "a%20b%2F%C3%A9%26q%3D1");
 
-        // Nothing is marked sent when the session can't be reached.
+        // Nothing is counted as seen when the session can't be reached.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        store.reply(first, By::REVIEWER, "Not quite", &[]).unwrap();
         drop(listener);
         std::fs::remove_file(format!("/tmp/review-test-{}-s1.sock", std::process::id())).unwrap();
-        assert!(store.send(&sessions, "s1", &target, None).is_err());
-        assert!(store.thread(first).unwrap().pending);
+        assert!(store.send(session, &target, None).is_err());
+        assert_eq!(store.unseen(&target, Some("s1")).unwrap(), [first]);
 
         std::fs::remove_dir_all(&root).unwrap();
     }

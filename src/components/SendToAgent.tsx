@@ -1,28 +1,24 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import * as Popover from "@radix-ui/react-popover";
-import { Check, ChevronDown, Send } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle, Send } from "lucide-react";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { useSendComments, useSendReview, useSessions, type SendTarget } from "../lib/queries";
-import { agentLabel, cn, timeAgo } from "../lib/utils";
-import { summaryKey, useStore } from "../store";
-import type { AgentKind, AgentSession, GeneralThread, Thread, Worktree } from "../types";
+import { useSendComments, useSessionActivity, useSessions, type SendTarget } from "../lib/queries";
+import { agentLabel, ago, cn, timeAgo } from "../lib/utils";
+import { useStore } from "../store";
+import type { AgentKind, AgentSession, GeneralThread, ReviewRequest, SessionActivity, Thread, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
-import { GeneralCommentField } from "./Comments";
-import { useDraftImages } from "./Images";
 import { Button, Tooltip } from "./ui";
 
 /** The worktree the diff shows, for comment cards the diff library draws. */
 export const WorktreeContext = createContext<Worktree | null>(null);
 
 /** Agents a new session can be opened for, in their desktop apps. */
-const NEW_SESSIONS: { agent: AgentKind; app: string }[] = [
+export const NEW_SESSIONS: { agent: AgentKind; app: string }[] = [
   { agent: "claude", app: "Opens in the Claude app" },
   { agent: "codex", app: "Opens in the ChatGPT app" },
 ];
 
-/** A session as the app names it: its title, else when it started. */
-const sessionName = (session: AgentSession) =>
-  session.title ?? `${agentLabel(session.agent)} session started ${timeAgo(session.startedAt)} ago`;
+/** A session as the app names it: its title, else its agent. */
+export const sessionName = (session: AgentSession) => session.title ?? `${agentLabel(session.agent)} session`;
 
 /** A folder with the home folder shortened to `~`. */
 const homeShort = (path: string) => path.replace(/^\/Users\/[^/]+/, "~");
@@ -30,177 +26,136 @@ const homeShort = (path: string) => path.replace(/^\/Users\/[^/]+/, "~");
 /** Where a session runs, when that's not the worktree itself, and whether it's mid-turn. */
 function sessionDetail(session: AgentSession): string | null {
   const parts = [
-    !session.inWorktree && `in ${homeShort(session.cwd)}`,
+    !session.inWorktree && session.cwd && `in ${homeShort(session.cwd)}`,
     session.status === "busy" && "busy: gets them when its turn ends",
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
 }
 
+/** A review still going: asked for, or taken on but not finished. */
+export const isUnderway = (request: ReviewRequest) => request.finishedAt === null;
+
+/**
+ * The worktree's sessions and what they haven't seen, with the one comments go to by default: the
+ * first running session that isn't one asked to review (the one building the branch).
+ */
+export function useSessionRoles(worktree: Worktree) {
+  const sessions = useSessions(worktree);
+  const activity = useSessionActivity(worktree);
+  const reviewers = new Set(activity.requests.map((r) => r.sessionId).filter(Boolean));
+  const author = sessions.find((s) => s.reachable && !reviewers.has(s.id)) ?? null;
+  return { sessions, activity, author, reviewers };
+}
+
+/** What `session` would be sent: what it hasn't seen, or every open comment for a new session. */
+export const unseenBy = (activity: SessionActivity, session: AgentSession | null) =>
+  session ? (activity.unseen[session.id] ?? []) : activity.open;
+
 /** True for two seconds after the returned function is called, to confirm a send. */
-function useJustSent(): [boolean, () => void] {
-  const [sentAt, setSentAt] = useState(0);
+export function useJustDone(): [boolean, () => void] {
+  const [doneAt, setDoneAt] = useState(0);
   useEffect(() => {
-    if (!sentAt) return;
-    const timer = setTimeout(() => setSentAt(0), 2000);
+    if (!doneAt) return;
+    const timer = setTimeout(() => setDoneAt(0), 2000);
     return () => clearTimeout(timer);
-  }, [sentAt]);
-  return [sentAt > 0, () => setSentAt(Date.now())];
+  }, [doneAt]);
+  return [doneAt > 0, () => setDoneAt(Date.now())];
 }
 
 /**
- * Sends the comments written since the last send to an agent, like submitting a review on GitHub:
- * a box for an optional summary (a general comment), then where to: the Claude Code session
- * working on the worktree ("Send to Claude"), one of several by name, or a new Claude or Codex
- * session.
+ * The toolbar's view of the agents: who's reviewing right now, and a button that sends the session
+ * building the branch what it hasn't seen ("Send to Claude 3"). Comments are posted as they're
+ * written; this only tells an agent there's something to read.
  */
-export function SendToAgent({ worktree, threads }: { worktree: Worktree; threads: (Thread | GeneralThread)[] }) {
-  const sessions = useSessions(worktree);
-  const [open, setOpen] = useState(false);
-  const [justSent, markSent] = useJustSent();
-  const pending = threads.filter((t) => t.pending).length;
-  const summary = useStore((s) => s.generalDrafts[summaryKey(worktree.id)] ?? "");
-  const summaryImages = useDraftImages(summaryKey(worktree.id));
-  const hasSummary = !!summary.trim() || summaryImages.length > 0;
+export function SendToAgent({ worktree }: { worktree: Worktree }) {
+  const { sessions, activity, author } = useSessionRoles(worktree);
+  const send = useSendComments(worktree);
+  const [justSent, markSent] = useJustDone();
+  const count = unseenBy(activity, author).length;
+  const reviewing = activity.requests.filter(isUnderway);
 
-  if (justSent) {
-    return (
-      <Button disabled className="disabled:opacity-100">
-        <Check className="size-3.5 text-add" />
-        Sent
-      </Button>
-    );
-  }
-  // A summary alone can be sent too, as on GitHub.
-  if (pending === 0 && !hasSummary && !open) {
-    if (sessions.length === 0) return null;
-    return (
-      <Tooltip label={<SessionList sessions={sessions} />}>
-        <span className="flex h-7 items-center gap-1.5 px-2 text-[12px] text-fg-subtle">
-          <AgentIcon name={sessions[0].agent} className="size-3.5" />
-          {sessions.length === 1 ? agentLabel(sessions[0].agent) : `${sessions.length} sessions`}
-        </span>
-      </Tooltip>
-    );
-  }
-  return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <Button variant="primary">
-          <Send className="size-3.5" />
-          Send review
-          {pending > 0 && <Count value={pending} inverted />}
-          <ChevronDown className="size-3" />
-        </Button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          align="end"
-          sideOffset={4}
-          // The field takes focus itself, after any text it holds.
-          onOpenAutoFocus={(e) => e.preventDefault()}
-          className="z-40 w-[440px] max-w-[calc(100vw-32px)] rounded-lg border border-border bg-bg-raised text-[13px] shadow-xl shadow-black/30"
-        >
-          <ReviewForm
-            worktree={worktree}
-            sessions={sessions}
-            pending={pending}
-            canSend={pending > 0 || hasSummary}
-            onClose={() => setOpen(false)}
-            onSent={() => {
-              setOpen(false);
-              markSent();
-            }}
-          />
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
-/** The send box: the summary, then where the review goes. */
-function ReviewForm({
-  worktree,
-  sessions,
-  pending,
-  canSend,
-  onClose,
-  onSent,
-}: {
-  worktree: Worktree;
-  sessions: AgentSession[];
-  pending: number;
-  canSend: boolean;
-  onClose: () => void;
-  onSent: () => void;
-}) {
-  const send = useSendReview(worktree);
-  const images = useDraftImages(summaryKey(worktree.id));
-  const submit = (to: SendTarget) => {
-    if (!canSend || send.isPending) return;
-    const summary = useStore.getState().generalDrafts[summaryKey(worktree.id)] ?? "";
-    send.mutate({ to, summary, images }, { onSuccess: onSent });
-  };
-  const only = sessions.length === 1 ? sessions[0] : null;
   return (
     <>
-      <div className="flex items-baseline gap-2 px-3 pt-2.5 pb-2">
-        <span className="font-medium text-fg">Send review</span>
-        <span className="tabular text-[12px] text-fg-subtle">
-          {pending === 0 ? "summary only" : pending === 1 ? "1 comment" : `${pending} comments`}
-        </span>
-      </div>
-      <div className="mx-3 rounded-md border border-border bg-bg focus-within:border-border-strong">
-        <GeneralCommentField
-          draftKey={summaryKey(worktree.id)}
-          placeholder="Summary (optional): the review as a whole, or paste a screenshot"
-          submitEmpty
-          onSubmit={() => only && submit({ session: only.id })}
-          onCancel={onClose}
-        />
-      </div>
-      <div className="flex items-center gap-2 p-3">
-        <span className="min-w-0 flex-1 text-[11px] text-fg-faint">
-          {only ? "⌘↩ to send · " : ""}A summary is saved as a general comment
-        </span>
-        <SendControl sessions={sessions} primary busy={!canSend || send.isPending} onSend={submit} />
-      </div>
+      {reviewing.length > 0 && <ReviewingChip requests={reviewing} sessions={sessions} />}
+      {justSent ? (
+        <Button disabled className="disabled:opacity-100">
+          <Check className="size-3.5 text-add" />
+          Sent
+        </Button>
+      ) : (
+        count > 0 && (
+          <SendControl
+            sessions={sessions}
+            author={author}
+            primary
+            count={count}
+            busy={send.isPending}
+            onSend={(to) => send.mutate({ to, threads: null }, { onSuccess: markSent })}
+          />
+        )
+      )}
     </>
   );
 }
 
-function SessionList({ sessions }: { sessions: AgentSession[] }) {
+/** "Codex is reviewing": opens the Sessions tab, where reviews are followed. */
+function ReviewingChip({ requests, sessions }: { requests: ReviewRequest[]; sessions: AgentSession[] }) {
+  const setFileTab = useStore((s) => s.setFileTab);
+  const agents = [...new Set(requests.map((r) => r.agent))];
+  const waiting = requests.every((r) => r.startedAt === null);
+  const label =
+    requests.length === 1 ? `${agentLabel(agents[0])} ${waiting ? "is starting" : "is reviewing"}` : `${requests.length} reviews`;
   return (
-    <div className="flex max-w-80 flex-col gap-1">
-      <span>Comments you send can go to:</span>
-      {sessions.map((s) => (
-        <span key={s.id} className="flex items-center gap-1.5 text-fg">
-          <AgentIcon name={s.agent} className="size-3.5" />
-          <span className="truncate">{sessionName(s)}</span>
+    <Tooltip
+      label={
+        <span className="flex max-w-80 flex-col gap-0.5">
+          {requests.map((r) => {
+            const session = sessions.find((s) => s.id === r.sessionId);
+            return (
+              <span key={r.id} className="truncate">
+                {session ? sessionName(session) : `${agentLabel(r.agent)}, new session`} ·{" "}
+                {r.startedAt === null ? `asked ${ago(r.requestedAt)}` : `${r.comments} so far`}
+              </span>
+            );
+          })}
+          <span className="text-fg-subtle">Show sessions</span>
         </span>
-      ))}
-    </div>
+      }
+    >
+      <button
+        type="button"
+        onClick={() => setFileTab("sessions")}
+        className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-fg-muted hover:bg-bg-hover hover:text-fg"
+      >
+        <LoaderCircle className="size-3.5 animate-spin text-mod" />
+        {agents.length === 1 && <AgentIcon name={agents[0]} className="size-3.5" />}
+        {label}
+      </button>
+    </Tooltip>
   );
 }
 
 /**
- * The send button. With one session working on the worktree it sends there ("Send to Claude"),
- * and an arrow beside it opens the other choices; otherwise the button itself opens them: the
+ * The send button. With a session building the branch it sends there ("Send to Claude"), and an
+ * arrow beside it opens the other choices; otherwise the button itself opens them: the running
  * sessions by name, then a new Claude or Codex session.
  */
-function SendControl({
+export function SendControl({
   sessions,
+  author,
   primary,
   busy,
   count,
   onSend,
 }: {
   sessions: AgentSession[];
+  author: AgentSession | null;
   primary?: boolean;
   busy: boolean;
   count?: number;
   onSend: (to: SendTarget) => void;
 }) {
-  const only = sessions.length === 1 ? sessions[0] : null;
+  const reachable = sessions.filter((s) => s.reachable);
   const variant = primary ? "primary" : "ghost";
   const countBadge = count !== undefined && <Count value={count} inverted={primary} />;
   const menu = (trigger: ReactNode) => (
@@ -212,17 +167,17 @@ function SendControl({
           sideOffset={4}
           className="z-50 w-80 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
         >
-          {sessions.map((session) => (
+          {reachable.map((session) => (
             <MenuRow
               key={session.id}
               icon={session.agent}
               title={sessionName(session)}
-              time={timeAgo(session.startedAt)}
+              time={session.startedAt ? timeAgo(session.startedAt) : undefined}
               detail={sessionDetail(session)}
               onSelect={() => onSend({ session: session.id })}
             />
           ))}
-          {sessions.length > 0 && <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />}
+          {reachable.length > 0 && <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />}
           {NEW_SESSIONS.map(({ agent, app }) => (
             <MenuRow
               key={agent}
@@ -237,7 +192,7 @@ function SendControl({
     </DropdownMenuPrimitive.Root>
   );
 
-  if (!only) {
+  if (!author) {
     return menu(
       <Button variant={variant} disabled={busy}>
         <Send className="size-3.5" />
@@ -248,19 +203,19 @@ function SendControl({
     );
   }
   return (
-    <span className="flex items-center">
+    <span className="flex shrink-0 items-center">
       <Tooltip
         label={
           <span className="flex max-w-80 flex-col">
-            <span className="truncate">To “{sessionName(only)}”</span>
-            {sessionDetail(only) && <span className="text-fg-subtle">{sessionDetail(only)}</span>}
+            <span className="truncate">To “{sessionName(author)}”</span>
+            {sessionDetail(author) && <span className="text-fg-subtle">{sessionDetail(author)}</span>}
           </span>
         }
       >
         <span>
-          <Button variant={variant} disabled={busy} onClick={() => onSend({ session: only.id })} className="rounded-r-none">
+          <Button variant={variant} disabled={busy} onClick={() => onSend({ session: author.id })} className="rounded-r-none">
             <Send className="size-3.5" />
-            {primary ? `Send to ${agentLabel(only.agent)}` : "Send"}
+            {primary ? `Send to ${agentLabel(author.agent)}` : "Send"}
             {countBadge}
           </Button>
         </span>
@@ -279,7 +234,7 @@ function SendControl({
   );
 }
 
-function MenuRow({
+export function MenuRow({
   icon,
   title,
   time,
@@ -320,17 +275,29 @@ function Count({ value, inverted }: { value: number; inverted?: boolean }) {
   );
 }
 
-/** Sends one comment straight away: to the session, one picked by name, or a new one. */
+/**
+ * Sends one comment straight away: to the session building the branch, one picked by name, or a
+ * new one. Shown while it has something that session hasn't seen; without such a session, while
+ * the reviewer has the last word.
+ */
 export function SendThreadButton({ thread }: { thread: Thread | GeneralThread }) {
   const worktree = useContext(WorktreeContext);
-  if (!worktree || !thread.pending) return null;
+  if (!worktree || thread.resolved) return null;
   return <SendThread worktree={worktree} thread={thread} />;
 }
 
 function SendThread({ worktree, thread }: { worktree: Worktree; thread: Thread | GeneralThread }) {
-  const sessions = useSessions(worktree);
+  const { sessions, activity, author } = useSessionRoles(worktree);
   const send = useSendComments(worktree);
+  const last = thread.messages[thread.messages.length - 1];
+  const due = author ? unseenBy(activity, author).includes(thread.id) : last?.author === "reviewer";
+  if (!due) return null;
   return (
-    <SendControl sessions={sessions} busy={send.isPending} onSend={(to) => send.mutate({ to, threads: [thread.id] })} />
+    <SendControl
+      sessions={sessions}
+      author={author}
+      busy={send.isPending}
+      onSend={(to) => send.mutate({ to, threads: [thread.id] })}
+    />
   );
 }

@@ -154,9 +154,7 @@ function ThreadRow({ thread, inDiff, onSelect }: { thread: AnyThread; inDiff: bo
   const status = thread.dismissed
     ? { label: "Dismissed", className: "text-fg-faint" }
     : thread.resolved
-    ? { label: "Resolved", className: "text-add" }
-    : thread.pending
-      ? { label: "Unsent", className: "text-accent" }
+      ? { label: "Resolved", className: "text-add" }
       : thread.path !== null && !inDiff
         ? { label: "Not in diff", className: "text-mod" }
         : thread.path !== null && !thread.position

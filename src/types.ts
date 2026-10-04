@@ -117,8 +117,6 @@ export type CommentMessage = {
   createdAt: number;
   /** When the text was last changed, if it was. */
   editedAt: number | null;
-  /** When the reviewer sent it to an agent's session; `null` until then (and for agents'). */
-  sentAt: number | null;
   /** The reviewer gave an agent's message a thumbs up. */
   thumbsUp: boolean;
 };
@@ -139,8 +137,6 @@ export type Thread = {
   /** The diff around the commented lines when the comment was made. */
   excerpt: ExcerptRow[];
   messages: CommentMessage[];
-  /** Open, and the reviewer has the last word but hasn't sent it to an agent yet. */
-  pending: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -158,19 +154,56 @@ export type GeneralThread = Omit<Thread, "path" | "oldPath" | "range" | "positio
 /** An agent comments can be sent to in a new session. */
 export type AgentKind = "claude" | "codex";
 
-/** A running Claude Code session that works on a worktree, from Claude Code's session registry. */
+/**
+ * An agent session working on a worktree: a running Claude Code session in it (from Claude Code's
+ * session registry), or any session that ran `piccolo` on it (src-tauri/src/sessions.rs).
+ */
 export type AgentSession = {
   id: string;
-  /** Who runs it; only `claude` so far. */
+  /** Who runs it: `claude`, `codex`, or the name another agent gave. */
   agent: string;
-  /** Its title, as Claude Code shows it in its sidebar. */
+  /** Its title, as its app shows it. */
   title: string | null;
-  /** `busy` while a turn runs (comments sent then wait for it to end), else `idle`. */
+  /** `busy` while a turn runs (comments sent then wait for it to end), else `idle`; running sessions only. */
   status: string | null;
-  /** The folder it runs in: the worktree, or a folder above it holding several repositories. */
-  cwd: string;
+  /** Whether it runs now: known for Claude Code sessions, `null` for other agents'. */
+  running: boolean | null;
+  /** The folder it runs in, when running: the worktree, or a folder above it holding several repositories. */
+  cwd: string | null;
   inWorktree: boolean;
-  startedAt: number;
+  startedAt: number | null;
+  /** When it last ran a `piccolo` command on the worktree. */
+  lastSeen: number | null;
+  /** Piccolo can send it messages (a running Claude Code session). */
+  reachable: boolean;
+};
+
+/** A review asked of an agent (src-tauri/src/requests.rs). */
+export type ReviewRequest = {
+  id: number;
+  /** Who was asked: `claude`, `codex`, or another agent's name. */
+  agent: string;
+  /** The session reviewing, once it took the request on. */
+  sessionId: string | null;
+  /** The commit the branch was at when the review was asked for. */
+  head: string | null;
+  requestedAt: number;
+  /** When the agent took it on; `null` while waiting for it to start. */
+  startedAt: number | null;
+  /** When the agent said it's done. */
+  finishedAt: number | null;
+  /** Comments and replies the agent wrote while reviewing. */
+  comments: number;
+};
+
+/** What's going on in a worktree's sessions. */
+export type SessionActivity = {
+  /** Open threads each session hasn't seen, by session id. */
+  unseen: Record<string, number[]>;
+  /** All open threads, which a new session is given. */
+  open: number[];
+  /** Newest first. */
+  requests: ReviewRequest[];
 };
 
 /** A line mentioning a name, from a whole-word search (src-tauri/src/navigate.rs). */

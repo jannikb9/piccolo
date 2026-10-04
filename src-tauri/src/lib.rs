@@ -5,7 +5,7 @@ mod imports;
 mod menu;
 mod navigate;
 mod repos;
-mod reviews;
+mod requests;
 mod sessions;
 mod watch;
 
@@ -58,8 +58,11 @@ pub fn run() {
             comments::delete_comment,
             comments::attachment_data,
             sessions::list_sessions,
+            sessions::session_activity,
             sessions::send_comments,
             sessions::start_session,
+            requests::request_review,
+            requests::cancel_review_request,
             navigate::find_symbol,
             navigate::file_text,
         ])

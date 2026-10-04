@@ -14,6 +14,8 @@ import type {
   LineRange,
   RemoteBranch,
   Repo,
+  ReviewRequest,
+  SessionActivity,
   SymbolHit,
   SymbolSearch,
   Thread,
@@ -381,7 +383,6 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: false,
       dismissed: false,
       excerpt: [],
-      pending: false,
       messages: [
         {
           id: 6,
@@ -391,7 +392,6 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           createdAt: minutesAgo(4),
           editedAt: null,
           authorName: "codex",
-          sentAt: null,
           thumbsUp: false,
         },
       ],
@@ -406,7 +406,6 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: false,
       dismissed: false,
       excerpt: excerpt(lines(24, 26)),
-      pending: false,
       messages: [
         {
           id: 1,
@@ -416,7 +415,6 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           createdAt: minutesAgo(42),
           editedAt: null,
           authorName: null,
-          sentAt: minutesAgo(41),
           thumbsUp: false,
         },
         {
@@ -427,7 +425,6 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           createdAt: minutesAgo(6),
           editedAt: null,
           authorName: "claude",
-          sentAt: null,
           thumbsUp: false,
         },
       ],
@@ -442,8 +439,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: false,
       dismissed: false,
       excerpt: excerpt(lines(29, 29)),
-      pending: false,
-      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null, sentAt: null, thumbsUp: false }],
+      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null, thumbsUp: false }],
       createdAt: minutesAgo(40),
       updatedAt: minutesAgo(40),
     },
@@ -455,7 +451,6 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: false,
       dismissed: false,
       excerpt: excerpt(lines(21, 22)),
-      pending: false,
       messages: [
         {
           id: 5,
@@ -465,7 +460,6 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           createdAt: minutesAgo(3),
           editedAt: null,
           authorName: "codex",
-          sentAt: null,
           thumbsUp: false,
         },
       ],
@@ -480,8 +474,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: true,
       dismissed: false,
       excerpt: excerpt(lines(21, 21)),
-      pending: false,
-      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null, sentAt: minutesAgo(90), thumbsUp: false }],
+      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null, thumbsUp: false }],
       createdAt: minutesAgo(90),
       updatedAt: minutesAgo(30),
     },
@@ -490,56 +483,126 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
 
 const findThread = (id: number) => Object.values(threads).flat().find((t) => t.id === id);
 
-/** As the backend decides it: open, with an unsent message from the reviewer last. */
-const isPending = (t: Thread | GeneralThread) => {
-  const last = t.messages[t.messages.length - 1];
-  return !t.resolved && last?.author === "reviewer" && last.sentAt === null;
-};
-
 export function mockThreads(worktreePath: string): Promise<(Thread | GeneralThread)[]> {
-  return delay(structuredClone(threads[worktreePath] ?? []).map((t) => ({ ...t, pending: isPending(t) })));
+  return delay(structuredClone(threads[worktreePath] ?? []));
 }
+
+const mockWorktree = "~/projects/spoke-app/auth-session";
 
 /**
- * A Claude session in the first worktree, so sending can be tried in the browser; plus one in the
- * folder above it that reviewed it, after `localStorage["mock-sessions"] = "2"`.
+ * The first worktree's sessions: Claude building it, Codex reviewing it right now, and an earlier
+ * Claude review that ended. `localStorage["mock-sessions"] = "0"` starts without any.
  */
+const mockSessionList: AgentSession[] = [
+  {
+    id: "mock-1",
+    agent: "claude",
+    title: "Refresh sessions in the auth middleware",
+    status: "idle",
+    running: true,
+    cwd: mockWorktree,
+    inWorktree: true,
+    startedAt: minutesAgo(52),
+    lastSeen: minutesAgo(6),
+    reachable: true,
+  },
+  {
+    id: "mock-codex",
+    agent: "codex",
+    title: "Review the auth session refresh",
+    status: null,
+    running: null,
+    cwd: null,
+    inWorktree: false,
+    startedAt: null,
+    lastSeen: minutesAgo(3),
+    reachable: false,
+  },
+  {
+    id: "mock-old",
+    agent: "claude",
+    title: "Second opinion on token storage",
+    status: null,
+    running: false,
+    cwd: null,
+    inWorktree: false,
+    startedAt: null,
+    lastSeen: minutesAgo(130),
+    reachable: false,
+  },
+];
+
+const mockRequests: ReviewRequest[] = [
+  { id: 2, agent: "codex", sessionId: "mock-codex", head: "a1b2c3d", requestedAt: minutesAgo(6), startedAt: minutesAgo(5), finishedAt: null, comments: 2 },
+  { id: 1, agent: "claude", sessionId: "mock-old", head: "9f8e7d6", requestedAt: minutesAgo(150), startedAt: minutesAgo(149), finishedAt: minutesAgo(131), comments: 0 },
+];
+
+/** The session an agent's mock message came from. */
+const sessionOfAgent: Record<string, string> = { claude: "mock-1", codex: "mock-codex" };
+/** session → thread → when it last saw it. */
+const seen: Record<string, Record<number, number>> = { "mock-1": { 1: minutesAgo(6) } };
+
+const unseenBy = (worktreePath: string, session: string | null) =>
+  (threads[worktreePath] ?? [])
+    .filter((t) => !t.resolved)
+    .filter(
+      (t) =>
+        !session ||
+        t.messages.some(
+          (m) =>
+            (m.author !== "agent" || sessionOfAgent[m.authorName ?? ""] !== session) &&
+            (m.editedAt ?? m.createdAt) > (seen[session]?.[t.id] ?? 0),
+        ),
+    )
+    .map((t) => t.id);
+
 export function mockSessions(paths: string[]): Promise<Record<string, AgentSession[]>> {
-  const worktreePath = "~/projects/spoke-app/auth-session";
-  if (!paths.includes(worktreePath)) return delay({});
-  const sessions: AgentSession[] = [
-    {
-      id: "mock-1",
-      agent: "claude",
-      title: "Refresh sessions in the auth middleware",
-      status: "idle",
-      cwd: worktreePath,
-      inWorktree: true,
-      startedAt: minutesAgo(12),
-    },
-  ];
-  if (localStorage.getItem("mock-sessions") === "2") {
-    sessions.push({
-      id: "mock-2",
-      agent: "claude",
-      title: "Write tests for token expiry",
-      status: "busy",
-      cwd: "~/projects",
-      inWorktree: false,
-      startedAt: minutesAgo(48),
-    });
-  }
-  return delay({ [worktreePath]: sessions });
+  if (!paths.includes(mockWorktree) || localStorage.getItem("mock-sessions") === "0") return delay({});
+  return delay({ [mockWorktree]: structuredClone(mockSessionList) });
 }
 
-export const mockStartSession = (worktreePath: string, _agent: string, only: number[] | null) =>
-  mockSendComments(worktreePath, "new", only);
+export function mockSessionActivity(worktreePath: string): Promise<SessionActivity> {
+  const none = worktreePath !== mockWorktree || localStorage.getItem("mock-sessions") === "0";
+  const sessions = none ? [] : mockSessionList;
+  return delay({
+    unseen: Object.fromEntries(sessions.map((s) => [s.id, unseenBy(worktreePath, s.id)])),
+    open: unseenBy(worktreePath, null),
+    requests: none ? [] : structuredClone(mockRequests),
+  });
+}
 
-export function mockSendComments(worktreePath: string, _session: string, only: number[] | null): Promise<number[]> {
-  const sent = (threads[worktreePath] ?? []).filter((t) => isPending(t) && (!only || only.includes(t.id)));
+export const mockStartSession = (worktreePath: string, _agent: string, only: number[] | null): Promise<number[]> => {
+  const open = unseenBy(worktreePath, null).filter((id) => !only || only.includes(id));
+  return open.length ? delay(open) : Promise.reject("There are no open comments to send");
+};
+
+export function mockSendComments(worktreePath: string, session: string, only: number[] | null): Promise<number[]> {
+  const sent = only ? unseenBy(worktreePath, null).filter((id) => only.includes(id)) : unseenBy(worktreePath, session);
   if (sent.length === 0) return Promise.reject("There are no comments to send");
-  for (const t of sent) t.messages[t.messages.length - 1].sentAt = Date.now();
-  return delay(sent.map((t) => t.id));
+  for (const id of sent) (seen[session] ??= {})[id] = Date.now();
+  return delay(sent);
+}
+
+export function mockRequestReview(_worktreePath: string, to: { session: string } | { agent: string }): Promise<ReviewRequest> {
+  const session = "session" in to ? mockSessionList.find((s) => s.id === to.session) : undefined;
+  const request: ReviewRequest = {
+    id: Math.max(0, ...mockRequests.map((r) => r.id)) + 1,
+    agent: session?.agent ?? ("agent" in to ? to.agent : "claude"),
+    sessionId: session?.id ?? null,
+    head: "f00ba12",
+    requestedAt: Date.now(),
+    startedAt: null,
+    finishedAt: null,
+    comments: 0,
+  };
+  mockRequests.unshift(request);
+  return delay(request);
+}
+
+export function mockCancelRequest(id: number): Promise<void> {
+  const index = mockRequests.findIndex((r) => r.id === id);
+  if (index !== -1) mockRequests.splice(index, 1);
+  return delay(undefined);
 }
 
 /** Pasted images by attachment id, as base64. */
@@ -572,8 +635,7 @@ export function mockAddThread(
     resolved: false,
     dismissed: false,
     excerpt: excerpt(range),
-    pending: false,
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null, thumbsUp: false }],
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, thumbsUp: false }],
     createdAt: now,
     updatedAt: now,
   });
@@ -593,8 +655,7 @@ export function mockAddGeneralThread(worktreePath: string, body: string, images:
     resolved: false,
     dismissed: false,
     excerpt: [],
-    pending: false,
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null, thumbsUp: false }],
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, thumbsUp: false }],
     createdAt: now,
     updatedAt: now,
   });
@@ -611,7 +672,6 @@ export function mockReply(id: number, body: string, images: ImageUpload[]): Prom
     createdAt: Date.now(),
     editedAt: null,
     authorName: null,
-    sentAt: null,
     thumbsUp: false,
   });
   return delay(undefined);
@@ -626,7 +686,6 @@ export function mockEditComment(messageId: number, body: string, images: ImageUp
     message.body = body.trim();
     message.attachments.push(...mockAttachments(images));
     message.editedAt = thread.updatedAt = Date.now();
-    if (message.author === "reviewer") message.sentAt = null;
   }
   return delay(undefined);
 }

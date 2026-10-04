@@ -15,6 +15,12 @@ export function timeAgo(ms: number, now = Date.now()): string {
   return `${Math.round(d / 30)}mo`;
 }
 
+/** "5m ago", or "just now". */
+export function ago(ms: number, now = Date.now()): string {
+  const time = timeAgo(ms, now);
+  return time === "now" ? "just now" : `${time} ago`;
+}
+
 /** An agent as it signs (`codex`, `claude`), as shown: "Codex". */
 export const agentLabel = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 

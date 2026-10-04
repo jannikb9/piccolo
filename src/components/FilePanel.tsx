@@ -5,6 +5,7 @@ import { cn, totals, type TreeNode } from "../lib/utils";
 import { useStore, type FileTab } from "../store";
 import type { ChangedFile, GeneralThread, Thread, Worktree } from "../types";
 import { CommentList } from "./CommentList";
+import { SessionList, useActiveSessionCount } from "./SessionList";
 import { SidebarToggle } from "./Sidebar";
 import { DiffCount, Skeleton, StatusLetter } from "./ui";
 
@@ -59,6 +60,7 @@ export function FilePanel({
         <div role="tablist" aria-label="Show" className="flex min-w-0 items-center gap-0.5">
           <TabButton tab="files" current={tab} onSelect={setTab} label="Files" count={fileCount} />
           <TabButton tab="comments" current={tab} onSelect={setTab} label="Comments" count={openComments} />
+          {worktree && <SessionsTab worktree={worktree} current={tab} onSelect={setTab} />}
         </div>
         {sidebarCollapsed && (
           <span className="ml-auto">
@@ -71,7 +73,9 @@ export function FilePanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {tab === "comments" ? (
+        {tab === "sessions" ? (
+          worktree && <SessionList worktree={worktree} />
+        ) : tab === "comments" ? (
           worktree && <CommentList worktree={worktree} generalThreads={generalThreads} threads={threads} files={files} onSelectFile={onSelect} />
         ) : loading ? (
           <div className="space-y-3 px-2 pt-2">
@@ -96,6 +100,10 @@ export function FilePanel({
       </div>
     </div>
   );
+}
+
+function SessionsTab({ worktree, current, onSelect }: { worktree: Worktree; current: FileTab; onSelect: (tab: FileTab) => void }) {
+  return <TabButton tab="sessions" current={current} onSelect={onSelect} label="Sessions" count={useActiveSessionCount(worktree)} />;
 }
 
 function TabButton({

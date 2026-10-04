@@ -19,7 +19,10 @@ import {
   mockRemoteBranches,
   mockReorderRepos,
   mockReply,
+  mockCancelRequest,
+  mockRequestReview,
   mockSendComments,
+  mockSessionActivity,
   mockStartSession,
   mockSessions,
   mockRepos,
@@ -42,6 +45,8 @@ import type {
   LineRange,
   RemoteBranch,
   Repo,
+  ReviewRequest,
+  SessionActivity,
   SymbolSearch,
   Thread,
   WorktreeStats,
@@ -143,17 +148,31 @@ export const api = {
   setThreadDismissed: (id: number, dismissed: boolean): Promise<void> =>
     isTauri ? invoke("set_thread_dismissed", { id, dismissed }) : mockSetDismissed(id, dismissed),
 
-  /** Claude Code sessions working on each worktree (by path); worktrees without one are left out. */
+  /** Agent sessions working on each worktree (by path); worktrees without one are left out. */
   listSessions: (paths: string[]): Promise<Record<string, AgentSession[]>> =>
     isTauri ? invoke("list_sessions", { paths }) : mockSessions(paths),
 
-  /** Sends the worktree's pending comments (or `threads` of them) to `session`; resolves to the threads sent. */
+  /** What each session on the worktree hasn't seen, and the reviews requested there. */
+  sessionActivity: (path: string): Promise<SessionActivity> =>
+    isTauri ? invoke("session_activity", { path }) : mockSessionActivity(path),
+
+  /** Sends `session` the comments it hasn't seen (or `threads`); resolves to the threads sent. */
   sendComments: (path: string, session: string, threads: number[] | null): Promise<number[]> =>
     isTauri ? invoke("send_comments", { path, session, threads }) : mockSendComments(path, session, threads),
 
-  /** Opens a new session of `agent` in its desktop app on the worktree, given its pending comments (or `threads`). */
+  /** Opens a new session of `agent` in its desktop app on the worktree, given its open comments (or `threads`). */
   startSession: (path: string, agent: AgentKind, threads: number[] | null): Promise<number[]> =>
     isTauri ? invoke("start_session", { path, agent, threads }) : mockStartSession(path, agent, threads),
+
+  /** Asks the running `session`, or a new session of `agent`, to review the worktree. */
+  requestReview: (path: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> =>
+    isTauri
+      ? invoke("request_review", { path, session: "session" in to ? to.session : null, agent: "agent" in to ? to.agent : null })
+      : mockRequestReview(path, to),
+
+  /** Withdraws a review request, or removes a finished review from the list. */
+  cancelReviewRequest: (id: number): Promise<void> =>
+    isTauri ? invoke("cancel_review_request", { id }) : mockCancelRequest(id),
 
   /** Deletes a message; deleting a thread's first message deletes the thread. */
   deleteComment: (id: number): Promise<void> => (isTauri ? invoke("delete_comment", { id }) : mockDeleteComment(id)),

@@ -240,7 +240,8 @@ function WorktreeRow({
   const scope = useStore((s) => s.scope);
   const diffOptions = useDiffOptions();
   const stats = useWorktreeStats(wt, base);
-  const sessions = useSessions(wt);
+  // Only running sessions: the Sessions tab lists the rest.
+  const sessions = useSessions(wt).filter((s) => s.running);
   const deleteWorktree = useDeleteWorktree();
   // Shared by right-click and the "⋮" button.
   const menu: MenuItem[] = [

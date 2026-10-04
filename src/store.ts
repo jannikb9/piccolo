@@ -9,7 +9,7 @@ import type { DiffLayout, DiffOptions, LineRange, Repo, ScopeMode, Worktree } fr
 type PathSet = Record<string, true>;
 
 /** What the panel beside the diff lists. */
-export type FileTab = "files" | "comments";
+export type FileTab = "files" | "comments" | "sessions";
 
 /** A comment being written, before it's saved. */
 export type Draft = { worktreeId: string; path: string; oldPath: string | null; range: LineRange; body: string };
@@ -20,11 +20,8 @@ export const draftKey = (worktreeId: string, path: string, range: LineRange) =>
 
 /** Where a thread's reply keeps its pasted images (see `draftImages`). */
 export const replyKey = (threadId: number) => `reply:${threadId}`;
-/** The general comment being written in a worktree's conversation, above the diff. */
 /** The general comment being written in the Comments panel. */
 export const panelCommentKey = (worktreeId: string) => `panel:${worktreeId}`;
-/** The summary being written in a worktree's send box. */
-export const summaryKey = (worktreeId: string) => `summary:${worktreeId}`;
 /** Where an edit of a message keeps its newly pasted images. */
 export const editKey = (messageId: number) => `edit:${messageId}`;
 
@@ -56,7 +53,7 @@ type State = {
   replyDrafts: Record<number, string>;
   /** Text of messages being edited, by message id. */
   editDrafts: Record<number, string>;
-  /** General comments being written, by `panelCommentKey` or `summaryKey`; images by the same key. */
+  /** General comments being written, by `panelCommentKey`; images by the same key. */
   generalDrafts: Record<string, string>;
   /** Worktrees whose conversation above the diff is folded away. */
   conversationCollapsed: PathSet;

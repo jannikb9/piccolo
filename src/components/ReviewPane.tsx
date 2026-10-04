@@ -49,7 +49,7 @@ export function ReviewPane({
 
   return (
     <main className="@container flex h-full min-w-0 flex-col bg-bg">
-      <Toolbar repo={repo} worktree={worktree} scope={scope} files={files} threads={[...generalThreads, ...threads]} />
+      <Toolbar repo={repo} worktree={worktree} scope={scope} files={files} />
       <div className="min-h-0 flex-1">
         {filesQuery.isPending || patchQuery.isPending ? (
           <DiffSkeleton />
@@ -106,13 +106,11 @@ function Toolbar({
   worktree,
   scope,
   files,
-  threads,
 }: {
   repo: Repo;
   worktree: Worktree;
   scope: DiffScope;
   files: ChangedFile[];
-  threads: (Thread | GeneralThread)[];
 }) {
   const layout = useStore((s) => s.layout);
   const setLayout = useStore((s) => s.setLayout);
@@ -217,7 +215,7 @@ function Toolbar({
             { value: "unified", label: <Rows2 className="size-3.5" />, tooltip: "Unified" },
           ]}
         />
-        <SendToAgent worktree={worktree} threads={threads} />
+        <SendToAgent worktree={worktree} />
       </div>
     </header>
   );
