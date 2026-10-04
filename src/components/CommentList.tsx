@@ -77,7 +77,7 @@ export function CommentList({
           onClick={() => setShowResolved(!showResolved)}
           className="mx-auto h-7 rounded-md px-2 text-[12px] text-fg-subtle hover:bg-bg-hover hover:text-fg-muted"
         >
-          {showResolved ? "Hide resolved" : `Show ${resolvedCount} resolved`}
+          {showResolved ? "Hide closed" : `Show ${resolvedCount} closed`}
         </button>
       )}
     </div>
@@ -151,7 +151,9 @@ function ThreadRow({ thread, inDiff, onSelect }: { thread: AnyThread; inDiff: bo
   const replies = thread.messages.length - 1;
   const preview = markdownPreview(first?.body ?? "") || (first?.attachments.length ? "Image" : "");
   const range = thread.path === null ? null : (thread.position ?? thread.range);
-  const status = thread.resolved
+  const status = thread.dismissed
+    ? { label: "Dismissed", className: "text-fg-faint" }
+    : thread.resolved
     ? { label: "Resolved", className: "text-add" }
     : thread.pending
       ? { label: "Unsent", className: "text-accent" }

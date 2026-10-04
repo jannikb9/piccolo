@@ -397,7 +397,7 @@ fn guide(target: &Target, via: &str) -> Result<String> {
 You're reviewing the changes on {branch} in {worktree}, {compared}. Your comments appear in Piccolo next to the diff, where the developer reads them and other agents pick them up. Don't change any files: review only.
 
 1. See what changed: `{diff}` shows everything, uncommitted work included, and `{git} status --short` lists new files as untracked (??); read those whole. Read the surrounding code where the diff alone doesn't tell you enough.
-2. Read what's been said already: `piccolo{via} comments --all`. Don't raise a point again; to add to a thread, `piccolo{via} reply --as <your name> <id> \"...\"`.
+2. Read what's been said already: `piccolo{via} comments --all`. Don't raise a point again, whether it's open, resolved or dismissed (the developer decided that one needs no action); to add to a thread, `piccolo{via} reply --as <your name> <id> \"...\"`.
 3. Comment on the lines each issue is about. Paths are relative to {relative_to}, and line numbers are those of the file as it is now:
    - `piccolo{via} comment --as <your name> <file>:<line> \"...\"`
    - `piccolo{via} comment --as <your name> <file>:<start>-<end> \"...\"`
@@ -431,7 +431,9 @@ fn format_threads(target: &Target, threads: &[Thread], include_resolved: bool, v
     ));
     for thread in threads {
         out.push_str(&format!("\n## #{} · {}", thread.id, location(thread)));
-        if thread.resolved {
+        if thread.dismissed {
+            out.push_str(" (dismissed: the reviewer decided it needs no action; don't raise it again)");
+        } else if thread.resolved {
             out.push_str(" (resolved)");
         }
         out.push('\n');

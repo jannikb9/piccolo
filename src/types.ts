@@ -132,7 +132,10 @@ export type Thread = {
   range: LineRange;
   /** Where those lines are in the current diff; `null` when they changed (outdated). */
   position: LineRange | null;
+  /** Closed: resolved, or dismissed. */
   resolved: boolean;
+  /** Closed as not worth acting on; kept so an agent reviewing again doesn't raise it twice. Implies `resolved`. */
+  dismissed: boolean;
   /** The diff around the commented lines when the comment was made. */
   excerpt: ExcerptRow[];
   messages: CommentMessage[];

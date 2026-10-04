@@ -252,6 +252,9 @@ export function useSetThumbsUp() {
 export const useSetThreadResolved = () =>
   useCommentMutation((args: { id: number; resolved: boolean }) => api.setThreadResolved(args.id, args.resolved));
 
+export const useSetThreadDismissed = () =>
+  useCommentMutation((args: { id: number; dismissed: boolean }) => api.setThreadDismissed(args.id, args.dismissed));
+
 export const useDeleteComment = () => useCommentMutation((id: number) => api.deleteComment(id));
 
 /** Loading on hover makes the click feel instant. */

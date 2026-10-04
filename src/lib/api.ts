@@ -23,6 +23,7 @@ import {
   mockStartSession,
   mockSessions,
   mockRepos,
+  mockSetDismissed,
   mockSetResolved,
   mockThreads,
   mockWorktreeStats,
@@ -137,6 +138,10 @@ export const api = {
 
   setThreadResolved: (id: number, resolved: boolean): Promise<void> =>
     isTauri ? invoke("set_thread_resolved", { id, resolved }) : mockSetResolved(id, resolved),
+
+  /** Closes a thread without acting on it (kept, so agents don't raise it again), or reopens it. */
+  setThreadDismissed: (id: number, dismissed: boolean): Promise<void> =>
+    isTauri ? invoke("set_thread_dismissed", { id, dismissed }) : mockSetDismissed(id, dismissed),
 
   /** Claude Code sessions working on each worktree (by path); worktrees without one are left out. */
   listSessions: (paths: string[]): Promise<Record<string, AgentSession[]>> =>

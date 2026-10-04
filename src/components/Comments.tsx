@@ -1,9 +1,9 @@
-import { CheckCircle2, ChevronRight, MessageSquare, MessageSquarePlus, Pencil, RotateCcw, ThumbsUp, Trash2, User } from "lucide-react";
+import { CheckCircle2, ChevronRight, EyeOff, MessageSquare, MessageSquarePlus, Pencil, RotateCcw, ThumbsUp, Trash2, User } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { showError } from "../lib/api";
 import { markdownPreview } from "../lib/markdown";
 import { clipboardImages, prepareImage, type DraftImage } from "../lib/images";
-import { useAddGeneralThread, useDeleteComment, useEditComment, useReplyThread, useSetThreadResolved, useSetThumbsUp } from "../lib/queries";
+import { useAddGeneralThread, useDeleteComment, useEditComment, useReplyThread, useSetThreadDismissed, useSetThreadResolved, useSetThumbsUp } from "../lib/queries";
 import { agentLabel, cn, timeAgo } from "../lib/utils";
 import { conversationKey, editKey, replyKey, useStore } from "../store";
 import type { CommentMessage, ExcerptRow, GeneralThread, LineRange, Thread, Worktree } from "../types";
@@ -195,6 +195,7 @@ export function ThreadCard({ thread, note }: { thread: Thread | GeneralThread; n
   const revealed = useJustRevealed(thread.id);
   const [expanded, setExpanded] = useState(false);
   const setResolved = useSetThreadResolved();
+  const setDismissed = useSetThreadDismissed();
   const first = thread.messages[0];
   // Picked in the comment list: a resolved thread opens up.
   useEffect(() => {
@@ -209,8 +210,12 @@ export function ThreadCard({ thread, note }: { thread: Thread | GeneralThread; n
           onClick={() => setExpanded(true)}
           className="flex h-8 w-full max-w-[760px] items-center gap-2 rounded-lg border border-border-subtle bg-bg px-3 text-left text-[12px] text-fg-subtle hover:border-border hover:text-fg-muted"
         >
-          <CheckCircle2 className="size-3.5 shrink-0 text-add" />
-          <span className="shrink-0 font-medium">Resolved</span>
+          {thread.dismissed ? (
+            <EyeOff className="size-3.5 shrink-0" />
+          ) : (
+            <CheckCircle2 className="size-3.5 shrink-0 text-add" />
+          )}
+          <span className="shrink-0 font-medium">{thread.dismissed ? "Dismissed" : "Resolved"}</span>
           <span className="min-w-0 flex-1 truncate">{markdownPreview(first?.body ?? "") || (first?.attachments.length ? "Image" : "")}</span>
           <span className="tabular shrink-0 text-fg-faint">
             {thread.messages.length > 1 && `${thread.messages.length} comments`}
@@ -246,13 +251,21 @@ export function ThreadCard({ thread, note }: { thread: Thread | GeneralThread; n
             }}
           >
             <RotateCcw className="size-3.5" />
-            Unresolve
+            {thread.dismissed ? "Reopen" : "Unresolve"}
           </Button>
         ) : (
-          <Button onClick={() => setResolved.mutate({ id: thread.id, resolved: true })} disabled={setResolved.isPending}>
-            <CheckCircle2 className="size-3.5" />
-            Resolve
-          </Button>
+          <>
+            <Tooltip label="Disregard this comment, but keep it so agents don't raise it again">
+              <Button onClick={() => setDismissed.mutate({ id: thread.id, dismissed: true })} disabled={setDismissed.isPending}>
+                <EyeOff className="size-3.5" />
+                Dismiss
+              </Button>
+            </Tooltip>
+            <Button onClick={() => setResolved.mutate({ id: thread.id, resolved: true })} disabled={setResolved.isPending}>
+              <CheckCircle2 className="size-3.5" />
+              Resolve
+            </Button>
+          </>
         )}
       </div>
     </Card>
@@ -515,7 +528,7 @@ export function Conversation({ worktree, threads }: { worktree: Worktree; thread
           <MessageSquare className="size-3.5" />
           Conversation
           <span className="tabular font-normal text-fg-faint">
-            {open > 0 ? `${open} open` : `${threads.length} resolved`}
+            {open > 0 ? `${open} open` : `${threads.length} closed`}
           </span>
         </button>
       )}

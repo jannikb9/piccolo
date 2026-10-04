@@ -379,6 +379,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       range: null,
       position: null,
       resolved: false,
+      dismissed: false,
       excerpt: [],
       pending: false,
       messages: [
@@ -403,6 +404,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       range: lines(24, 26),
       position: lines(24, 26),
       resolved: false,
+      dismissed: false,
       excerpt: excerpt(lines(24, 26)),
       pending: false,
       messages: [
@@ -438,6 +440,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       range: lines(29, 29),
       position: null,
       resolved: false,
+      dismissed: false,
       excerpt: excerpt(lines(29, 29)),
       pending: false,
       messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null, sentAt: null, thumbsUp: false }],
@@ -450,6 +453,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       range: lines(21, 22),
       position: lines(21, 22),
       resolved: false,
+      dismissed: false,
       excerpt: excerpt(lines(21, 22)),
       pending: false,
       messages: [
@@ -474,6 +478,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       range: lines(21, 21),
       position: lines(21, 21),
       resolved: true,
+      dismissed: false,
       excerpt: excerpt(lines(21, 21)),
       pending: false,
       messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null, sentAt: minutesAgo(90), thumbsUp: false }],
@@ -565,6 +570,7 @@ export function mockAddThread(
     range,
     position: range,
     resolved: false,
+    dismissed: false,
     excerpt: excerpt(range),
     pending: false,
     messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null, thumbsUp: false }],
@@ -585,6 +591,7 @@ export function mockAddGeneralThread(worktreePath: string, body: string, images:
     range: null,
     position: null,
     resolved: false,
+    dismissed: false,
     excerpt: [],
     pending: false,
     messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null, thumbsUp: false }],
@@ -635,7 +642,19 @@ export function mockSetThumbsUp(messageId: number, thumbsUp: boolean): Promise<v
 
 export function mockSetResolved(id: number, resolved: boolean): Promise<void> {
   const thread = findThread(id);
-  if (thread) thread.resolved = resolved;
+  if (thread) {
+    thread.resolved = resolved;
+    thread.dismissed = false;
+  }
+  return delay(undefined);
+}
+
+export function mockSetDismissed(id: number, dismissed: boolean): Promise<void> {
+  const thread = findThread(id);
+  if (thread) {
+    thread.resolved = dismissed;
+    thread.dismissed = dismissed;
+  }
   return delay(undefined);
 }
 

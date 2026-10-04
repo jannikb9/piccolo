@@ -157,7 +157,11 @@ pub struct Thread {
     /// Where those lines are now; `None` when they changed (the thread is outdated), or for a
     /// general comment.
     pub position: Option<LineRange>,
+    /// Closed: resolved, or dismissed.
     pub resolved: bool,
+    /// Closed as not worth acting on, so it stays on record (`resolved` is set too, which keeps it
+    /// out of everything open) and an agent reviewing again doesn't raise it twice.
+    pub dismissed: bool,
     /// The diff around the commented lines when the comment was made.
     pub excerpt: Vec<ExcerptRow>,
     pub messages: Vec<Message>,
@@ -304,19 +308,20 @@ impl Store {
         sql(conn.execute_batch(sessions::SCHEMA))?;
         sql(conn.execute_batch(reviews::SCHEMA))?;
         // Columns added after the first release.
-        for (column, definition) in [
-            ("edited_at", "INTEGER"),
-            ("author_name", "TEXT"),
-            ("sent_at", "INTEGER"),
-            ("thumbs_up", "INTEGER NOT NULL DEFAULT 0"),
+        for (table, column, definition) in [
+            ("messages", "edited_at", "INTEGER"),
+            ("messages", "author_name", "TEXT"),
+            ("messages", "sent_at", "INTEGER"),
+            ("messages", "thumbs_up", "INTEGER NOT NULL DEFAULT 0"),
+            ("threads", "dismissed", "INTEGER NOT NULL DEFAULT 0"),
         ] {
             let exists: bool = sql(conn.query_row(
-                "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = ?1",
-                [column],
+                "SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",
+                [table, column],
                 |r| r.get(0),
             ))?;
             if !exists {
-                sql(conn.execute(&format!("ALTER TABLE messages ADD COLUMN {column} {definition}"), []))?;
+                sql(conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"), []))?;
                 // Comments from before sending existed were read with /local-review: count them as sent.
                 if column == "sent_at" {
                     sql(conn.execute("UPDATE messages SET sent_at = created_at WHERE author = 'reviewer'", []))?;
@@ -536,10 +541,21 @@ impl Store {
         Ok(())
     }
 
+    /// Resolves a thread, or reopens it (also when it was dismissed).
     pub fn set_resolved(&self, thread_id: i64, resolved: bool) -> Result<()> {
+        self.close(thread_id, resolved, false)
+    }
+
+    /// Dismisses a thread: closed without being acted on, kept so it isn't raised again. Undone by
+    /// reopening it.
+    pub fn set_dismissed(&self, thread_id: i64, dismissed: bool) -> Result<()> {
+        self.close(thread_id, dismissed, dismissed)
+    }
+
+    fn close(&self, thread_id: i64, resolved: bool, dismissed: bool) -> Result<()> {
         let changed = sql(self.conn.execute(
-            "UPDATE threads SET resolved = ?2, updated_at = ?3 WHERE id = ?1",
-            params![thread_id, resolved, now_ms()],
+            "UPDATE threads SET resolved = ?2, dismissed = ?3, updated_at = ?4 WHERE id = ?1",
+            params![thread_id, resolved, dismissed, now_ms()],
         ))?;
         if changed == 0 {
             return Err(format!("No comment #{thread_id}"));
@@ -662,6 +678,7 @@ fn thread_from_row(row: &Row) -> rusqlite::Result<Thread> {
         range,
         position: range,
         resolved: row.get("resolved")?,
+        dismissed: row.get("dismissed")?,
         excerpt: serde_json::from_str(&json("excerpt")?).unwrap_or_default(),
         messages: Vec::new(),
         pending: false,
@@ -878,6 +895,11 @@ pub async fn set_thread_resolved(id: i64, resolved: bool) -> Result<()> {
 }
 
 #[tauri::command]
+pub async fn set_thread_dismissed(id: i64, dismissed: bool) -> Result<()> {
+    blocking(move || Store::open()?.set_dismissed(id, dismissed)).await
+}
+
+#[tauri::command]
 pub async fn delete_comment(id: i64) -> Result<()> {
     blocking(move || Store::open()?.delete_message(id)).await
 }
@@ -956,6 +978,19 @@ pub(crate) mod tests {
         store.set_resolved(id, true).unwrap();
         assert!(store.threads(&target, false).unwrap().is_empty());
         assert_eq!(store.threads(&target, true).unwrap().len(), 1);
+
+        // Dismissing closes a thread too, but keeps it apart from resolved ones until reopened.
+        store.set_resolved(id, false).unwrap();
+        store.set_dismissed(id, true).unwrap();
+        let thread = store.thread(id).unwrap();
+        assert!(thread.resolved && thread.dismissed);
+        assert!(store.threads(&target, false).unwrap().is_empty());
+        store.set_resolved(id, true).unwrap();
+        assert!(!store.thread(id).unwrap().dismissed);
+        store.set_dismissed(id, true).unwrap();
+        store.set_resolved(id, false).unwrap();
+        let thread = store.thread(id).unwrap();
+        assert!(!thread.resolved && !thread.dismissed);
 
         // Deleting the first message deletes the thread and its replies.
         let first = store.thread(id).unwrap().messages[0].id;
