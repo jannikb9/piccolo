@@ -1,6 +1,6 @@
 import { focusManager, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
-import { useStore } from "../store";
+import { summaryKey, useStore } from "../store";
 import type { DraftImage } from "./images";
 import { toUpload } from "./images";
 import type { AgentKind, AgentSession, DiffOptions, DiffScope, LineRange, RemoteBranch, Repo, Worktree } from "../types";
@@ -135,15 +135,41 @@ export function useSessions(worktree: Worktree): AgentSession[] {
 /** Where comments go: a running session, or a new one of an agent. */
 export type SendTarget = { session: string } | { newAgent: AgentKind };
 
+/** Hands the worktree's pending comments, or `threads` of them, to a session or a new one. */
+const sendComments = (worktree: Worktree, to: SendTarget, threads: number[] | null) =>
+  "session" in to
+    ? api.sendComments(worktree.path, to.session, threads)
+    : api.startSession(worktree.path, to.newAgent, threads);
+
 /** Sends the worktree's pending comments, or `threads` of them, to a session or a new one. */
 export function useSendComments(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ to, threads }: { to: SendTarget; threads: number[] | null }) =>
-      "session" in to
-        ? api.sendComments(worktree.path, to.session, threads)
-        : api.startSession(worktree.path, to.newAgent, threads),
+    mutationFn: ({ to, threads }: { to: SendTarget; threads: number[] | null }) => sendComments(worktree, to, threads),
     onError: (error) => showError("Couldn't send the comments", String(error)),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: ["threads"] });
+      client.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+}
+
+/**
+ * Sends all the worktree's pending comments like submitting a review on GitHub: a summary, when
+ * written, is saved as a general comment first and goes out with them.
+ */
+export function useSendReview(worktree: Worktree) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ to, summary, images }: { to: SendTarget; summary: string; images: DraftImage[] }) => {
+      if (summary.trim() || images.length > 0) {
+        await api.addGeneralThread(worktree.path, summary, images.map(toUpload));
+        // Saved as a pending comment now: should sending fail, it mustn't be saved twice.
+        useStore.getState().setGeneralDraft(summaryKey(worktree.id), null);
+      }
+      return sendComments(worktree, to, null);
+    },
+    onError: (error) => showError("Couldn't send the review", String(error)),
     onSettled: () => {
       client.invalidateQueries({ queryKey: ["threads"] });
       client.invalidateQueries({ queryKey: ["sessions"] });
@@ -182,6 +208,12 @@ export function useAddThread(worktree: Worktree, base: string | null, scope: Dif
       api.addThread({ path: worktree.path, base, scope, ...args, images: images.map(toUpload) }),
   );
 }
+
+/** A comment on the worktree's branch as a whole. */
+export const useAddGeneralThread = (worktree: Worktree) =>
+  useCommentMutation(({ body, images }: { body: string; images: DraftImage[] }) =>
+    api.addGeneralThread(worktree.path, body, images.map(toUpload)),
+  );
 
 export const useReplyThread = () =>
   useCommentMutation((args: { id: number; body: string; images: DraftImage[] }) =>

@@ -1,11 +1,11 @@
-import { CheckCircle2, ChevronRight, Pencil, RotateCcw, Trash2, User } from "lucide-react";
+import { CheckCircle2, ChevronRight, MessageSquare, MessageSquarePlus, Pencil, RotateCcw, Trash2, User } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { showError } from "../lib/api";
 import { clipboardImages, prepareImage, type DraftImage } from "../lib/images";
-import { useDeleteComment, useEditComment, useReplyThread, useSetThreadResolved } from "../lib/queries";
+import { useAddGeneralThread, useDeleteComment, useEditComment, useReplyThread, useSetThreadResolved } from "../lib/queries";
 import { agentLabel, cn, timeAgo } from "../lib/utils";
-import { editKey, replyKey, useStore } from "../store";
-import type { CommentMessage, ExcerptRow, LineRange, Thread } from "../types";
+import { conversationKey, editKey, replyKey, useStore } from "../store";
+import type { CommentMessage, ExcerptRow, GeneralThread, LineRange, Thread, Worktree } from "../types";
 import { DraftImages, MessageImages, useDraftImages } from "./Images";
 import { AgentIcon } from "./AgentIcon";
 import { SendThreadButton } from "./SendToAgent";
@@ -44,6 +44,7 @@ function CommentField({
   onCancel,
   placeholder,
   autoFocus,
+  submitEmpty,
 }: {
   imageKey: string;
   value: string;
@@ -52,6 +53,8 @@ function CommentField({
   onCancel: () => void;
   placeholder: string;
   autoFocus?: boolean;
+  /** ⌘↩ submits with nothing written too (the text is optional). */
+  submitEmpty?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const addImages = useStore((s) => s.addDraftImages);
@@ -67,7 +70,7 @@ function CommentField({
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      if (value.trim() || hasImages) onSubmit();
+      if (submitEmpty || value.trim() || hasImages) onSubmit();
     } else if (e.key === "Escape") {
       e.preventDefault();
       onCancel();
@@ -198,10 +201,32 @@ export function Composer({
   );
 }
 
-export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode }) {
+/** How long a thread picked in the comment list stays highlighted. */
+const HIGHLIGHT_MS = 1600;
+
+/** Whether `threadId` was just picked in the comment list (it may only now scroll into view). */
+function useJustRevealed(threadId: number): boolean {
+  const at = useStore((s) => (s.reveal?.threadId === threadId ? s.reveal.at : 0));
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const left = at + HIGHLIGHT_MS - Date.now();
+    if (left <= 0) return;
+    setOn(true);
+    const timer = setTimeout(() => setOn(false), left);
+    return () => clearTimeout(timer);
+  }, [at]);
+  return on;
+}
+
+export function ThreadCard({ thread, note }: { thread: Thread | GeneralThread; note?: ReactNode }) {
+  const revealed = useJustRevealed(thread.id);
   const [expanded, setExpanded] = useState(false);
   const setResolved = useSetThreadResolved();
   const first = thread.messages[0];
+  // Picked in the comment list: a resolved thread opens up.
+  useEffect(() => {
+    if (revealed) setExpanded(true);
+  }, [revealed]);
 
   if (thread.resolved && !expanded) {
     return (
@@ -227,7 +252,7 @@ export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode 
   const { position } = thread;
   const multiLine = !!position && (position.startSide !== position.endSide || position.startLine !== position.endLine);
   return (
-    <Card>
+    <Card className={cn("transition-shadow duration-500", revealed && "shadow-[0_0_0_2px_var(--accent)]")}>
       {note ??
         (multiLine && (
           <div className="border-b border-border-subtle px-3 py-1.5 text-[12px] text-fg-subtle">
@@ -262,28 +287,35 @@ export function ThreadCard({ thread, note }: { thread: Thread; note?: ReactNode 
 }
 
 /** "You", or the agent's name as it signed ("Codex"), or "Agent". */
-function authorLabel(message: CommentMessage): string {
+export function authorLabel(message: CommentMessage): string {
   if (message.author === "reviewer") return "You";
   return message.authorName ? agentLabel(message.authorName) : "Agent";
 }
 
+/** The author's mark: known agents their own, others a bot, the reviewer a person. */
+export function AuthorAvatar({ message }: { message: CommentMessage }) {
+  const isAgent = message.author === "agent";
+  const brand = isAgent && (message.authorName === "claude" || message.authorName === "codex");
+  return (
+    <span
+      className={cn(
+        "grid size-5 shrink-0 place-items-center rounded-full",
+        brand ? "" : isAgent ? "bg-accent-soft text-accent" : "bg-bg-active text-fg-muted",
+      )}
+    >
+      {isAgent ? <AgentIcon name={message.authorName} className={brand ? "size-4" : "size-3"} /> : <User className="size-3" />}
+    </span>
+  );
+}
+
 function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: boolean }) {
   const isAgent = message.author === "agent";
-  // Known agents show their own mark; others a bot, the reviewer a person.
-  const brand = isAgent && (message.authorName === "claude" || message.authorName === "codex");
   const editing = useStore((s) => s.editDrafts[message.id] !== undefined);
   const setEditDraft = useStore((s) => s.setEditDraft);
   return (
     <div className="group border-border-subtle px-3 py-2.5 [&+&]:border-t">
       <div className="flex h-5 items-center gap-2 text-[12px]">
-        <span
-          className={cn(
-            "grid size-5 shrink-0 place-items-center rounded-full",
-            brand ? "" : isAgent ? "bg-accent-soft text-accent" : "bg-bg-active text-fg-muted",
-          )}
-        >
-          {isAgent ? <AgentIcon name={message.authorName} className={brand ? "size-4" : "size-3"} /> : <User className="size-3" />}
-        </span>
+        <AuthorAvatar message={message} />
         <span className="font-medium text-fg">{authorLabel(message)}</span>
         <Tooltip label={new Date(message.createdAt).toLocaleString()}>
           <span className="tabular text-fg-subtle">{timeAgo(message.createdAt)}</span>
@@ -428,6 +460,121 @@ function ReplyBox({ threadId }: { threadId: number }) {
         onCancel={() => setReplyDraft(threadId, null)}
       />
     </div>
+  );
+}
+
+/** The field of a general comment draft (`draftKey`: see `generalDrafts`). */
+export function GeneralCommentField({
+  draftKey,
+  placeholder,
+  onSubmit,
+  onCancel,
+  submitEmpty,
+}: {
+  draftKey: string;
+  placeholder: string;
+  onSubmit: () => void;
+  onCancel: () => void;
+  submitEmpty?: boolean;
+}) {
+  const body = useStore((s) => s.generalDrafts[draftKey] ?? "");
+  const setGeneralDraft = useStore((s) => s.setGeneralDraft);
+  return (
+    <CommentField
+      imageKey={draftKey}
+      value={body}
+      onChange={(value) => setGeneralDraft(draftKey, value)}
+      onSubmit={onSubmit}
+      onCancel={onCancel}
+      placeholder={placeholder}
+      autoFocus
+      submitEmpty={submitEmpty}
+    />
+  );
+}
+
+/**
+ * Comments on the branch as a whole, above the diff, like the conversation of a GitHub pull
+ * request: agents' summaries and points that aren't about particular lines, and a box to add one.
+ */
+export function Conversation({ worktree, threads }: { worktree: Worktree; threads: GeneralThread[] }) {
+  const collapsed = useStore((s) => !!s.conversationCollapsed[worktree.id]);
+  const toggle = useStore((s) => s.toggleConversation);
+  const open = threads.filter((t) => !t.resolved).length;
+  return (
+    <section className="pt-3 font-sans">
+      {threads.length > 0 && (
+        <button
+          type="button"
+          onClick={() => toggle(worktree.id)}
+          aria-expanded={!collapsed}
+          className="flex items-center gap-1.5 rounded px-1 text-[12px] font-medium text-fg-subtle hover:text-fg-muted"
+        >
+          <ChevronRight className={cn("size-3.5 transition-transform duration-150", !collapsed && "rotate-90")} />
+          <MessageSquare className="size-3.5" />
+          Conversation
+          <span className="tabular font-normal text-fg-faint">
+            {open > 0 ? `${open} open` : `${threads.length} resolved`}
+          </span>
+        </button>
+      )}
+      {!collapsed && (
+        <>
+          {threads.map((thread) => (
+            <ThreadCard key={thread.id} thread={thread} />
+          ))}
+          <GeneralComposer worktree={worktree} />
+        </>
+      )}
+    </section>
+  );
+}
+
+/** A new general comment: a prompt to start one, then the form. */
+function GeneralComposer({ worktree }: { worktree: Worktree }) {
+  const key = conversationKey(worktree.id);
+  const draft = useStore((s) => s.generalDrafts[key]);
+  const setGeneralDraft = useStore((s) => s.setGeneralDraft);
+  const images = useDraftImages(key);
+  const add = useAddGeneralThread(worktree);
+
+  if (draft === undefined) {
+    return (
+      <div className="px-3 py-1.5 [contain:inline-size]">
+        <button
+          type="button"
+          onClick={() => setGeneralDraft(key, "")}
+          className="flex h-8 w-full max-w-[760px] items-center gap-2 rounded-lg border border-border-subtle bg-bg px-3 text-left text-[12px] text-fg-faint hover:border-border hover:text-fg-subtle"
+        >
+          <MessageSquarePlus className="size-3.5 shrink-0" />
+          Comment on the whole branch…
+        </button>
+      </div>
+    );
+  }
+
+  const canSubmit = !!draft.trim() || images.length > 0;
+  const discard = () => setGeneralDraft(key, null);
+  const submit = () => canSubmit && add.mutate({ body: draft, images }, { onSuccess: discard });
+  return (
+    <Card className="focus-within:border-border-strong">
+      <div className="border-b border-border-subtle px-3 py-1.5 text-[12px] text-fg-subtle">Comment on the whole branch</div>
+      <GeneralCommentField
+        draftKey={key}
+        placeholder="Leave a comment about the change as a whole, or paste a screenshot"
+        onSubmit={submit}
+        onCancel={() => !canSubmit && discard()}
+      />
+      <FieldActions
+        hint="⌘↩ to comment"
+        submitLabel="Comment"
+        canSubmit={canSubmit}
+        pending={add.isPending}
+        error={add.error}
+        onSubmit={submit}
+        onCancel={discard}
+      />
+    </Card>
   );
 }
 

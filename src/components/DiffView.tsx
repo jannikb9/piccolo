@@ -30,9 +30,9 @@ import {
 } from "../lib/search";
 import { cn, splitPath } from "../lib/utils";
 import { useStore } from "../store";
-import type { ChangedFile, DiffPatch, LineRange, Side, Thread, Worktree } from "../types";
+import type { ChangedFile, DiffPatch, GeneralThread, LineRange, Side, Thread, Worktree } from "../types";
 import { CodeNavigation } from "./CodeNav";
-import { Composer, DetachedNote, ThreadCard } from "./Comments";
+import { Composer, Conversation, DetachedNote, ThreadCard } from "./Comments";
 import { FindBar } from "./FindBar";
 import { WorktreeContext } from "./SendToAgent";
 import { DiffBlocks, DiffCount, IconButton, StatusBadge, Tooltip, ViewedToggle } from "./ui";
@@ -78,6 +78,7 @@ export function DiffView({
   files,
   diff,
   threads,
+  generalThreads,
   viewRef,
 }: {
   worktree: Worktree;
@@ -86,6 +87,7 @@ export function DiffView({
   files: ChangedFile[];
   diff: DiffPatch;
   threads: Thread[];
+  generalThreads: GeneralThread[];
   viewRef: Ref<DiffViewHandle>;
 }) {
   const layout = useStore((s) => s.layout);
@@ -335,6 +337,34 @@ export function DiffView({
     [],
   );
 
+  // A thread picked in the comment list: scroll to where it shows. Picks from before this view
+  // opened (another worktree or scope) are left alone.
+  const openedAt = useRef(Date.now());
+  const reveal = useStore((s) => s.reveal);
+  const showThread = useRef<(id: number) => void>(() => {});
+  showThread.current = (id) => {
+    if (generalThreads.some((t) => t.id === id)) {
+      if (useStore.getState().conversationCollapsed[worktree.id]) useStore.getState().toggleConversation(worktree.id);
+      return scrollDiff(0);
+    }
+    const thread = threads.find((t) => t.id === id);
+    // Threads on files this diff doesn't show are listed above it.
+    if (!thread || !byPath.has(thread.path)) return scrollDiff(0);
+    if (thread.position) return revealInDiff(thread.path, thread.position.endSide, thread.position.endLine);
+    // Outdated: shown above the file's first hunk.
+    pinActivePath(thread.path);
+    const scroll = () => localRef.current?.scrollTo({ type: "item", id: thread.path, align: "start", behavior: "instant" });
+    if (itemsRef.current.find((item) => item.id === thread.path)?.collapsed) {
+      setCollapsed(worktree.id, thread.path, false);
+      requestAnimationFrame(() => requestAnimationFrame(scroll));
+    } else {
+      scroll();
+    }
+  };
+  useEffect(() => {
+    if (reveal && reveal.at > openedAt.current) showThread.current(reveal.threadId);
+  }, [reveal]);
+
   const loadDiffFiles = useCallback(
     async (fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
       const oldPath = fileDiff.prevName ?? fileDiff.name;
@@ -431,22 +461,27 @@ export function DiffView({
     [worktree, base, byPath, closeDraft],
   );
 
-  // Threads on files that no longer differ can't sit in the diff; list them above it.
+  // Above the diff: the conversation on the whole branch, then threads on files that no longer
+  // differ, which can't sit in it.
   const orphans = useMemo(() => threads.filter((t) => !byPath.has(t.path)), [threads, byPath]);
   const renderViewHeader = useCallback(
-    () =>
-      orphans.length > 0 && (
-        <section className="pt-3 font-sans">
-          <h2 className="flex items-center gap-1.5 px-1 text-[12px] font-medium text-fg-subtle">
-            <MessageSquare className="size-3.5" />
-            Comments on files without changes in this view
-          </h2>
-          {orphans.map((thread) => (
-            <ThreadCard key={thread.id} thread={thread} note={<DetachedNote thread={thread} reason="Not in diff" />} />
-          ))}
-        </section>
-      ),
-    [orphans],
+    () => (
+      <>
+        <Conversation worktree={worktree} threads={generalThreads} />
+        {orphans.length > 0 && (
+          <section className="pt-3 font-sans">
+            <h2 className="flex items-center gap-1.5 px-1 text-[12px] font-medium text-fg-subtle">
+              <MessageSquare className="size-3.5" />
+              Comments on files without changes in this view
+            </h2>
+            {orphans.map((thread) => (
+              <ThreadCard key={thread.id} thread={thread} note={<DetachedNote thread={thread} reason="Not in diff" />} />
+            ))}
+          </section>
+        )}
+      </>
+    ),
+    [worktree, generalThreads, orphans],
   );
 
   const rootRef = useRef<HTMLDivElement>(null);

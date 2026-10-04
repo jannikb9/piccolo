@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open } from "@tauri-apps/plugin-dialog";
 import {
+  mockAddGeneralThread,
   mockAddThread,
   mockAttachmentData,
   mockAddWorktree,
@@ -35,6 +36,7 @@ import type {
   DiffPatch,
   DiffScope,
   FileVersions,
+  GeneralThread,
   LineRange,
   RemoteBranch,
   Repo,
@@ -81,7 +83,7 @@ export const api = {
       : mockFileVersions(),
 
   /** Comment threads on the worktree's branch, positioned for this diff. */
-  listThreads: (path: string, base: string | null, scope: DiffScope): Promise<Thread[]> =>
+  listThreads: (path: string, base: string | null, scope: DiffScope): Promise<(Thread | GeneralThread)[]> =>
     isTauri ? invoke("list_threads", { path, base, scope }) : mockThreads(path),
 
   /** Remote branches as of the last fetch, most recently committed first. */
@@ -112,6 +114,10 @@ export const api = {
     images: ImageUpload[];
   }): Promise<number> =>
     isTauri ? invoke("add_thread", args) : mockAddThread(args.path, args.file, args.range, args.body, args.images),
+
+  /** A comment on the worktree's branch as a whole; resolves to the new thread's id. */
+  addGeneralThread: (path: string, body: string, images: ImageUpload[]): Promise<number> =>
+    isTauri ? invoke("add_general_thread", { path, body, images }) : mockAddGeneralThread(path, body, images),
 
   replyThread: (id: number, body: string, images: ImageUpload[]): Promise<void> =>
     isTauri ? invoke("reply_thread", { id, body, images }) : mockReply(id, body, images),

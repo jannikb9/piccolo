@@ -15,7 +15,7 @@ import type { ReactNode, Ref } from "react";
 import { useAddRepo, useWorktreeStats } from "../lib/queries";
 import { cn, scopeKey, totals } from "../lib/utils";
 import { useStore } from "../store";
-import type { ChangedFile, DiffPatch, DiffScope, Repo, Thread, Worktree } from "../types";
+import type { ChangedFile, DiffPatch, DiffScope, GeneralThread, Repo, Thread, Worktree } from "../types";
 import { CommitPicker } from "./CommitPicker";
 import { DiffView, type DiffViewHandle } from "./DiffView";
 import { SendToAgent } from "./SendToAgent";
@@ -29,6 +29,7 @@ export function ReviewPane({
   filesQuery,
   patchQuery,
   threads,
+  generalThreads,
   viewRef,
 }: {
   repo: Repo;
@@ -38,14 +39,17 @@ export function ReviewPane({
   files: ChangedFile[];
   filesQuery: UseQueryResult<ChangedFile[]>;
   patchQuery: UseQueryResult<DiffPatch>;
+  /** Threads on lines. */
   threads: Thread[];
+  /** Threads on the branch as a whole. */
+  generalThreads: GeneralThread[];
   viewRef: Ref<DiffViewHandle>;
 }) {
   const query = filesQuery.isError ? filesQuery : patchQuery;
 
   return (
     <main className="@container flex h-full min-w-0 flex-col bg-bg">
-      <Toolbar repo={repo} worktree={worktree} scope={scope} files={files} threads={threads} />
+      <Toolbar repo={repo} worktree={worktree} scope={scope} files={files} threads={[...generalThreads, ...threads]} />
       <div className="min-h-0 flex-1">
         {filesQuery.isPending || patchQuery.isPending ? (
           <DiffSkeleton />
@@ -88,6 +92,7 @@ export function ReviewPane({
             files={files}
             diff={patchQuery.data!}
             threads={threads}
+            generalThreads={generalThreads}
             viewRef={viewRef}
           />
         )}
@@ -107,7 +112,7 @@ function Toolbar({
   worktree: Worktree;
   scope: DiffScope;
   files: ChangedFile[];
-  threads: Thread[];
+  threads: (Thread | GeneralThread)[];
 }) {
   const layout = useStore((s) => s.layout);
   const setLayout = useStore((s) => s.setLayout);

@@ -48,6 +48,7 @@ pub fn run() {
             repos::file_versions,
             comments::list_threads,
             comments::add_thread,
+            comments::add_general_thread,
             comments::reply_thread,
             comments::edit_comment,
             comments::set_thread_resolved,

@@ -10,6 +10,7 @@ import type {
   DiffScope,
   ExcerptRow,
   FileVersions,
+  GeneralThread,
   LineRange,
   RemoteBranch,
   Repo,
@@ -370,8 +371,31 @@ const lines = (startLine: number, endLine: number): LineRange => ({
 });
 
 let nextId = 100;
-const threads: Record<string, Thread[]> = {
+const threads: Record<string, (Thread | GeneralThread)[]> = {
   "~/projects/spoke-app/auth-session": [
+    {
+      id: 6,
+      path: null,
+      range: null,
+      position: null,
+      resolved: false,
+      excerpt: [],
+      pending: false,
+      messages: [
+        {
+          id: 6,
+          author: "agent",
+          body: "Moving the refresh into the middleware is the right call. Two things across files: nothing tests an expired token end to end (only isExpiringSoon is unit-tested), and the API client still retries on 401 by refreshing itself, so a request can now refresh twice.",
+          attachments: [],
+          createdAt: minutesAgo(4),
+          editedAt: null,
+          authorName: "codex",
+          sentAt: null,
+        },
+      ],
+      createdAt: minutesAgo(4),
+      updatedAt: minutesAgo(4),
+    },
     {
       id: 1,
       path: "src/auth/session.ts",
@@ -458,12 +482,12 @@ const threads: Record<string, Thread[]> = {
 const findThread = (id: number) => Object.values(threads).flat().find((t) => t.id === id);
 
 /** As the backend decides it: open, with an unsent message from the reviewer last. */
-const isPending = (t: Thread) => {
+const isPending = (t: Thread | GeneralThread) => {
   const last = t.messages[t.messages.length - 1];
   return !t.resolved && last?.author === "reviewer" && last.sentAt === null;
 };
 
-export function mockThreads(worktreePath: string): Promise<Thread[]> {
+export function mockThreads(worktreePath: string): Promise<(Thread | GeneralThread)[]> {
   return delay(structuredClone(threads[worktreePath] ?? []).map((t) => ({ ...t, pending: isPending(t) })));
 }
 
@@ -538,6 +562,26 @@ export function mockAddThread(
     position: range,
     resolved: false,
     excerpt: excerpt(range),
+    pending: false,
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null }],
+    createdAt: now,
+    updatedAt: now,
+  });
+  return delay(id);
+}
+
+export function mockAddGeneralThread(worktreePath: string, body: string, images: ImageUpload[]): Promise<number> {
+  const now = Date.now();
+  const id = nextId++;
+  const list = (threads[worktreePath] ??= []);
+  // After the other general threads, oldest first, as the backend orders them.
+  list.splice(list.filter((t) => t.path === null).length, 0, {
+    id,
+    path: null,
+    range: null,
+    position: null,
+    resolved: false,
+    excerpt: [],
     pending: false,
     messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, sentAt: null }],
     createdAt: now,

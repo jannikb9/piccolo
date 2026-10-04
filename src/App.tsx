@@ -14,7 +14,7 @@ import { hashString } from "./lib/diff";
 import { useChangedFiles, useDiffPatch, useDiffScope, useLiveGitData, useRepos, useThreads } from "./lib/queries";
 import { groupIntoSections } from "./lib/sections";
 import { orderedWorktrees, resolveSelection, useDiffOptions, useStore } from "./store";
-import type { Worktree } from "./types";
+import type { GeneralThread, Thread, Worktree } from "./types";
 
 export default function App() {
   useLiveGitData();
@@ -47,12 +47,19 @@ export default function App() {
   // Threads are re-positioned whenever the diff changes.
   const revision = useMemo(() => (patchQuery.data ? hashString(patchQuery.data.patch) : 0), [patchQuery.data]);
   const threadsQuery = useThreads(worktree, base, scope, revision);
-  const threads = threadsQuery.data ?? [];
+  // Threads on lines go into the diff; general ones (on the whole branch) above it.
+  const { threads, generalThreads } = useMemo(() => {
+    const all = threadsQuery.data ?? [];
+    return {
+      threads: all.filter((t): t is Thread => t.path !== null),
+      generalThreads: all.filter((t): t is GeneralThread => t.path === null),
+    };
+  }, [threadsQuery.data]);
   const commentCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const t of threadsQuery.data ?? []) if (!t.resolved) counts.set(t.path, (counts.get(t.path) ?? 0) + 1);
+    for (const t of threads) if (!t.resolved) counts.set(t.path, (counts.get(t.path) ?? 0) + 1);
     return counts;
-  }, [threadsQuery.data]);
+  }, [threads]);
   // Files grouped into Implementation / Tests / Changesets; the diff follows the same order.
   const { sections, files } = useMemo(() => {
     const sections = groupIntoSections(filesQuery.data ?? []);
@@ -93,6 +100,8 @@ export default function App() {
             fileCount={files.length}
             viewedCount={viewedCount}
             commentCounts={commentCounts}
+            threads={threads}
+            generalThreads={generalThreads}
             loading={!!worktree && filesQuery.isPending}
             onSelect={jumpTo}
             sidebarCollapsed={sidebar.collapsed}
@@ -110,6 +119,7 @@ export default function App() {
               filesQuery={filesQuery}
               patchQuery={patchQuery}
               threads={threads}
+              generalThreads={generalThreads}
               viewRef={viewRef}
             />
           ) : (

@@ -3,7 +3,8 @@
 //!
 //! A thread is anchored to lines on one side of a diff. It keeps the text of those lines, so it can
 //! follow them when the file is edited above them, and a snapshot of the diff around them, so it
-//! still makes sense once the code has changed.
+//! still makes sense once the code has changed. A general thread has no lines: it's about the
+//! branch as a whole, like the text of a review on GitHub.
 
 use crate::git::{self, DiffLine, DiffRange, LineKind, Result, Scope};
 use crate::sessions;
@@ -145,12 +146,14 @@ pub struct NewImage {
 #[serde(rename_all = "camelCase")]
 pub struct Thread {
     pub id: i64,
-    pub path: String,
+    /// The commented file; `None` for a general comment, which is about the whole branch.
+    pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old_path: Option<String>,
-    /// Where the comment was made.
-    pub range: LineRange,
-    /// Where those lines are now; `None` when they changed (the thread is outdated).
+    /// Where the comment was made; `None` for a general comment.
+    pub range: Option<LineRange>,
+    /// Where those lines are now; `None` when they changed (the thread is outdated), or for a
+    /// general comment.
     pub position: Option<LineRange>,
     pub resolved: bool,
     /// The diff around the commented lines when the comment was made.
@@ -258,6 +261,7 @@ impl Store {
         // (not WAL) keeps reads from touching the disk, so the app's file watcher only sees writes.
         sql(conn.busy_timeout(std::time::Duration::from_secs(5)))?;
         sql(conn.pragma_update(None, "foreign_keys", true))?;
+        // General threads are stored with an empty path and no anchor (lines 0, no anchor lines).
         sql(conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS threads (
                 id INTEGER PRIMARY KEY,
@@ -314,7 +318,7 @@ impl Store {
         Ok(Self { conn, images_dir })
     }
 
-    /// Threads on `target`'s branch, ordered by file and line. Positions are left as created;
+    /// Threads on `target`'s branch: general ones first, then by file and line. Positions are left as created;
     /// see [`locate_in_view`] and [`locate_in_worktree`].
     pub fn threads(&self, target: &Target, include_resolved: bool) -> Result<Vec<Thread>> {
         let mut stmt = sql(self.conn.prepare(
@@ -457,6 +461,27 @@ impl Store {
         Ok(id)
     }
 
+    /// Creates a general thread on `target`'s branch: one about the change as a whole.
+    pub fn add_general_thread(&mut self, target: &Target, by: By, body: &str, images: &[NewImage]) -> Result<i64> {
+        let body = body.trim();
+        if body.is_empty() && images.is_empty() {
+            return Err("A comment can't be empty".into());
+        }
+        let now = now_ms();
+        let tx = sql(self.conn.transaction())?;
+        sql(tx.execute(
+            "INSERT INTO threads (repo, branch, worktree, path, start_side, start_line, end_side, end_line,
+                                  anchor_start, anchor_lines, excerpt, created_at, updated_at)
+             VALUES (?1, ?2, ?3, '', 'additions', 0, 'additions', 0, 0, '[]', '[]', ?4, ?4)",
+            params![target.repo, target.branch, target.worktree, now],
+        ))?;
+        let id = tx.last_insert_rowid();
+        let message = insert_message(&tx, id, by, body, now)?;
+        save_images(&tx, &self.images_dir, message, images)?;
+        sql(tx.commit())?;
+        Ok(id)
+    }
+
     pub fn reply(&mut self, thread_id: i64, by: By, body: &str, images: &[NewImage]) -> Result<()> {
         let body = body.trim();
         if body.is_empty() && images.is_empty() {
@@ -591,19 +616,24 @@ fn insert_message(conn: &Connection, thread_id: i64, by: By, body: &str, now: i6
 }
 
 fn thread_from_row(row: &Row) -> rusqlite::Result<Thread> {
-    let range = LineRange {
-        start_side: Side::parse(&row.get::<_, String>("start_side")?),
-        start_line: row.get("start_line")?,
-        end_side: Side::parse(&row.get::<_, String>("end_side")?),
-        end_line: row.get("end_line")?,
-    };
+    let path: String = row.get("path")?;
+    let range = (!path.is_empty())
+        .then(|| -> rusqlite::Result<LineRange> {
+            Ok(LineRange {
+                start_side: Side::parse(&row.get::<_, String>("start_side")?),
+                start_line: row.get("start_line")?,
+                end_side: Side::parse(&row.get::<_, String>("end_side")?),
+                end_line: row.get("end_line")?,
+            })
+        })
+        .transpose()?;
     let json = |column: &str| row.get::<_, String>(column);
     Ok(Thread {
         id: row.get("id")?,
-        path: row.get("path")?,
+        path: (!path.is_empty()).then_some(path),
         old_path: row.get("old_path")?,
         range,
-        position: Some(range),
+        position: range,
         resolved: row.get("resolved")?,
         excerpt: serde_json::from_str(&json("excerpt")?).unwrap_or_default(),
         messages: Vec::new(),
@@ -678,6 +708,7 @@ impl Snapshot {
 /// Where the thread's lines are in `contents` (the end side's file): unchanged, moved by edits
 /// above them (nearest match wins), or `None` when they no longer exist.
 fn relocate(thread: &Thread, contents: &str) -> Option<LineRange> {
+    let range = thread.range?;
     let lines: Vec<&str> = contents.lines().collect();
     let anchor = &thread.anchor_lines;
     if anchor.is_empty() {
@@ -695,17 +726,18 @@ fn relocate(thread: &Thread, contents: &str) -> Option<LineRange> {
     } else {
         (0..lines.len()).filter(|&s| matches_at(s)).min_by_key(|s| s.abs_diff(original))
     };
-    found.map(|start| thread.range.shifted(start as i64 - original as i64))
+    found.map(|start| range.shifted(start as i64 - original as i64))
 }
 
 /// Updates positions for the diff `range` in `wt`, as the app shows it.
 pub fn locate_in_view(threads: &mut [Thread], wt: &Path, range: &DiffRange) {
     let mut cache: HashMap<(Side, String), Option<String>> = HashMap::new();
     for thread in threads {
-        let side = thread.range.end_side;
+        let (Some(lines), Some(path)) = (thread.range, thread.path.clone()) else { continue };
+        let side = lines.end_side;
         let (rev, path) = match side {
-            Side::Additions => (range.new_rev.clone(), thread.path.clone()),
-            Side::Deletions => (Some(range.old_rev.clone()), thread.old_path.clone().unwrap_or_else(|| thread.path.clone())),
+            Side::Additions => (range.new_rev.clone(), path),
+            Side::Deletions => (Some(range.old_rev.clone()), thread.old_path.clone().unwrap_or(path)),
         };
         let contents = cache
             .entry((side, path.clone()))
@@ -717,8 +749,10 @@ pub fn locate_in_view(threads: &mut [Thread], wt: &Path, range: &DiffRange) {
 /// Updates positions of threads on added or unchanged lines against the files on disk, which is
 /// what an agent edits. Comments on removed lines keep their original position.
 pub fn locate_in_worktree(threads: &mut [Thread], wt: &Path) {
-    for thread in threads.iter_mut().filter(|t| t.range.end_side == Side::Additions) {
-        thread.position = std::fs::read_to_string(wt.join(&thread.path)).ok().and_then(|c| relocate(thread, &c));
+    for thread in threads.iter_mut() {
+        let on_new_lines = thread.range.is_some_and(|r| r.end_side == Side::Additions);
+        let Some(path) = thread.path.as_ref().filter(|_| on_new_lines) else { continue };
+        thread.position = std::fs::read_to_string(wt.join(path)).ok().and_then(|c| relocate(thread, &c));
     }
 }
 
@@ -759,6 +793,15 @@ pub async fn add_thread(
         let images = decode_images(images)?;
         let new = NewThread { by: By::REVIEWER, path: &file, old_path: old_file.as_deref(), range, body: &body, images: &images };
         Store::open()?.add_thread(&Target::of(wt)?, wt, &diff_range, new)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn add_general_thread(path: String, body: String, images: Vec<ImageUpload>) -> Result<i64> {
+    blocking(move || {
+        let images = decode_images(images)?;
+        Store::open()?.add_general_thread(&Target::of(Path::new(&path))?, By::REVIEWER, &body, &images)
     })
     .await
 }
@@ -911,7 +954,7 @@ pub(crate) mod tests {
         let id = store
             .add_thread(&target, &wt, &range, NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: upwards, body: "x", images: &[] })
             .unwrap();
-        assert_eq!(store.thread(id).unwrap().range, across);
+        assert_eq!(store.thread(id).unwrap().range, Some(across));
 
         fs::write(wt.join("new.md"), "hello\nworld\n").unwrap();
         let id = store
@@ -924,6 +967,38 @@ pub(crate) mod tests {
 
         let missing = NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: additions(40, 40), body: "z", images: &[] };
         assert!(store.add_thread(&target, &wt, &range, missing).is_err());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn stores_general_threads_on_the_branch() {
+        let (root, wt, mut store) = fixture("general");
+        let target = Target::of(&wt).unwrap();
+        let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
+        let new = NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: additions(3, 3), body: "x", images: &[] };
+        let line = store.add_thread(&target, &wt, &range, new).unwrap();
+        let general = store.add_general_thread(&target, By::REVIEWER, " Split this into two PRs. ", &[]).unwrap();
+        assert!(store.add_general_thread(&target, By::REVIEWER, "  ", &[]).is_err());
+
+        // General threads come first, with no file, lines or snapshot, and nothing to relocate.
+        let mut threads = store.threads(&target, false).unwrap();
+        locate_in_view(&mut threads, &wt, &range);
+        locate_in_worktree(&mut threads, &wt);
+        assert_eq!(threads.iter().map(|t| t.id).collect::<Vec<_>>(), [general, line]);
+        let thread = &threads[0];
+        assert_eq!((thread.path.as_deref(), thread.range, thread.position), (None, None, None));
+        assert!(thread.excerpt.is_empty() && thread.pending);
+        assert_eq!(thread.messages[0].body, "Split this into two PRs.");
+        let json = serde_json::to_value(thread).unwrap();
+        assert!(json["path"].is_null() && json["range"].is_null(), "{json}");
+
+        // Answered and resolved like any thread; other branches don't see it.
+        store.reply(general, By { author: Author::Agent, name: Some("claude") }, "Done", &[]).unwrap();
+        assert!(!store.thread(general).unwrap().pending);
+        store.set_resolved(general, true).unwrap();
+        assert_eq!(store.threads(&target, false).unwrap().len(), 1);
+        assert!(store.threads(&Target::of(&root.join("repo")).unwrap(), true).unwrap().is_empty());
 
         fs::remove_dir_all(&root).unwrap();
     }

@@ -2,7 +2,9 @@ import { Check, ChevronRight, Folder, FolderOpen, MessageSquare } from "lucide-r
 import { useEffect, useRef, useState } from "react";
 import { COLLAPSED_BY_DEFAULT, type FileSection } from "../lib/sections";
 import { cn, totals, type TreeNode } from "../lib/utils";
-import { useStore } from "../store";
+import { useStore, type FileTab } from "../store";
+import type { ChangedFile, GeneralThread, Thread } from "../types";
+import { CommentList } from "./CommentList";
 import { SidebarToggle } from "./Sidebar";
 import { DiffCount, Skeleton, StatusLetter } from "./ui";
 
@@ -12,6 +14,8 @@ export function FilePanel({
   fileCount,
   viewedCount,
   commentCounts,
+  threads,
+  generalThreads,
   loading,
   onSelect,
   sidebarCollapsed,
@@ -21,6 +25,9 @@ export function FilePanel({
   /** Non-empty sections (Implementation, Tests, Changesets) in review order. */
   sections: FileSection[];
   fileCount: number;
+  /** Threads on lines, and on the branch as a whole, for the Comments tab. */
+  threads: Thread[];
+  generalThreads: GeneralThread[];
   viewedCount: number;
   /** Open comment threads per file path. */
   commentCounts: Map<string, number>;
@@ -31,21 +38,25 @@ export function FilePanel({
   onToggleSidebar: () => void;
 }) {
   const progress = fileCount === 0 ? 0 : viewedCount / fileCount;
+  const tab = useStore((s) => s.fileTab);
+  const setTab = useStore((s) => s.setFileTab);
+  const openComments = threads.filter((t) => !t.resolved).length + generalThreads.filter((t) => !t.resolved).length;
+  const files: ChangedFile[] = sections.flatMap((s) => s.files);
 
   return (
     <div className="flex h-full flex-col border-r border-border-subtle bg-bg">
       <header
         data-tauri-drag-region
         className={cn(
-          "flex h-13 shrink-0 items-center gap-2 border-b border-border-subtle px-4",
+          "flex h-13 shrink-0 items-center gap-2 border-b border-border-subtle px-3",
           // The macOS traffic lights end 77px in; leave a clear gap after them.
           sidebarCollapsed && "pl-[86px]",
         )}
       >
-        <span className="pointer-events-none text-[13px] font-medium">Files</span>
-        <span className="tabular pointer-events-none rounded-full bg-bg-hover px-1.5 text-[11px] font-medium text-fg-subtle">
-          {fileCount}
-        </span>
+        <div role="tablist" aria-label="Show" className="flex min-w-0 items-center gap-0.5">
+          <TabButton tab="files" current={tab} onSelect={setTab} label="Files" count={fileCount} />
+          <TabButton tab="comments" current={tab} onSelect={setTab} label="Comments" count={openComments} />
+        </div>
         {sidebarCollapsed && (
           <span className="ml-auto">
             <SidebarToggle collapsed onToggle={onToggleSidebar} />
@@ -57,7 +68,9 @@ export function FilePanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {loading ? (
+        {tab === "comments" ? (
+          worktreeId && <CommentList generalThreads={generalThreads} threads={threads} files={files} onSelectFile={onSelect} />
+        ) : loading ? (
           <div className="space-y-3 px-2 pt-2">
             {[28, 20, 32, 24, 18].map((w, i) => (
               <Skeleton key={i} className="h-3" style={{ width: `${w * 4}px` }} />
@@ -79,6 +92,44 @@ export function FilePanel({
         )}
       </div>
     </div>
+  );
+}
+
+function TabButton({
+  tab,
+  current,
+  onSelect,
+  label,
+  count,
+}: {
+  tab: FileTab;
+  current: FileTab;
+  onSelect: (tab: FileTab) => void;
+  label: string;
+  count: number;
+}) {
+  const active = tab === current;
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={() => onSelect(tab)}
+      className={cn(
+        "flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-[13px] font-medium transition-colors",
+        active ? "bg-bg-hover text-fg" : "text-fg-subtle hover:bg-bg-hover hover:text-fg-muted",
+      )}
+    >
+      <span className="truncate">{label}</span>
+      <span
+        className={cn(
+          "tabular shrink-0 rounded-full px-1.5 text-[11px] font-medium text-fg-subtle",
+          active ? "bg-bg-active" : "bg-bg-hover",
+        )}
+      >
+        {count}
+      </span>
+    </button>
   );
 }
 

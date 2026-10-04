@@ -8,6 +8,9 @@ import type { DiffLayout, DiffOptions, LineRange, Repo, ScopeMode, Worktree } fr
 
 type PathSet = Record<string, true>;
 
+/** What the panel beside the diff lists. */
+export type FileTab = "files" | "comments";
+
 /** A comment being written, before it's saved. */
 export type Draft = { worktreeId: string; path: string; oldPath: string | null; range: LineRange; body: string };
 
@@ -17,6 +20,10 @@ export const draftKey = (worktreeId: string, path: string, range: LineRange) =>
 
 /** Where a thread's reply keeps its pasted images (see `draftImages`). */
 export const replyKey = (threadId: number) => `reply:${threadId}`;
+/** The general comment being written in a worktree's conversation, above the diff. */
+export const conversationKey = (worktreeId: string) => `conversation:${worktreeId}`;
+/** The summary being written in a worktree's send box. */
+export const summaryKey = (worktreeId: string) => `summary:${worktreeId}`;
 /** Where an edit of a message keeps its newly pasted images. */
 export const editKey = (messageId: number) => `edit:${messageId}`;
 
@@ -48,6 +55,13 @@ type State = {
   replyDrafts: Record<number, string>;
   /** Text of messages being edited, by message id. */
   editDrafts: Record<number, string>;
+  /** General comments being written, by `conversationKey` or `summaryKey`; images by the same key. */
+  generalDrafts: Record<string, string>;
+  /** Worktrees whose conversation above the diff is folded away. */
+  conversationCollapsed: PathSet;
+  fileTab: FileTab;
+  /** The thread last picked in the comment list, for the diff to scroll to; `at` tells picks apart. */
+  reveal: { threadId: number; at: number } | null;
   /** Pasted screenshots of drafts, by draft key (see `replyKey` for replies). */
   draftImages: Record<string, DraftImage[]>;
 
@@ -71,6 +85,11 @@ type State = {
   setReplyDraft: (threadId: number, body: string | null) => void;
   /** Starts or updates an edit of a message; `null` ends it. */
   setEditDraft: (messageId: number, body: string | null) => void;
+  /** Starts or updates a general comment; `null` discards it. */
+  setGeneralDraft: (key: string, body: string | null) => void;
+  toggleConversation: (worktreeId: string) => void;
+  setFileTab: (tab: FileTab) => void;
+  revealThread: (threadId: number) => void;
   addDraftImages: (key: string, images: DraftImage[]) => void;
   removeDraftImage: (key: string, id: string) => void;
 };
@@ -101,6 +120,10 @@ export const useStore = create<State>()(
       drafts: {},
       replyDrafts: {},
       editDrafts: {},
+      generalDrafts: {},
+      conversationCollapsed: {},
+      fileTab: "files",
+      reveal: null,
       draftImages: {},
 
       selectWorktree: (id) => set({ selectedWorktreeId: id, activePath: null }),
@@ -162,6 +185,19 @@ export const useStore = create<State>()(
           const { [editKey(messageId)]: __, ...draftImages } = s.draftImages;
           return { editDrafts: rest, draftImages };
         }),
+      setGeneralDraft: (key, body) =>
+        set((s) => {
+          const { [key]: _, ...rest } = s.generalDrafts;
+          if (body !== null) return { generalDrafts: { ...rest, [key]: body } };
+          const { [key]: __, ...draftImages } = s.draftImages;
+          return { generalDrafts: rest, draftImages };
+        }),
+      toggleConversation: (worktreeId) =>
+        set((s) => ({
+          conversationCollapsed: toggle(s.conversationCollapsed, worktreeId, !s.conversationCollapsed[worktreeId]),
+        })),
+      setFileTab: (fileTab) => set({ fileTab }),
+      revealThread: (threadId) => set({ reveal: { threadId, at: Date.now() } }),
       addDraftImages: (key, images) =>
         set((s) => ({ draftImages: { ...s.draftImages, [key]: [...(s.draftImages[key] ?? []), ...images] } })),
       removeDraftImage: (key, id) =>
@@ -183,6 +219,7 @@ export const useStore = create<State>()(
         hideWhitespace: s.hideWhitespace,
         hideImports: s.hideImports,
         codeTheme: s.codeTheme,
+        fileTab: s.fileTab,
       }),
     },
   ),

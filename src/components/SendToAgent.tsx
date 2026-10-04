@@ -1,10 +1,14 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
+import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronDown, Send } from "lucide-react";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { useSendComments, useSessions, type SendTarget } from "../lib/queries";
+import { useSendComments, useSendReview, useSessions, type SendTarget } from "../lib/queries";
 import { agentLabel, cn, timeAgo } from "../lib/utils";
-import type { AgentKind, AgentSession, Thread, Worktree } from "../types";
+import { summaryKey, useStore } from "../store";
+import type { AgentKind, AgentSession, GeneralThread, Thread, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
+import { GeneralCommentField } from "./Comments";
+import { useDraftImages } from "./Images";
 import { Button, Tooltip } from "./ui";
 
 /** The worktree the diff shows, for comment cards the diff library draws. */
@@ -45,14 +49,18 @@ function useJustSent(): [boolean, () => void] {
 
 /**
  * Sends the comments written since the last send to an agent, like submitting a review on GitHub:
- * to the Claude Code session working on the worktree ("Send to Claude"), one of several by name,
- * or a new Claude or Codex session.
+ * a box for an optional summary (a general comment), then where to: the Claude Code session
+ * working on the worktree ("Send to Claude"), one of several by name, or a new Claude or Codex
+ * session.
  */
-export function SendToAgent({ worktree, threads }: { worktree: Worktree; threads: Thread[] }) {
+export function SendToAgent({ worktree, threads }: { worktree: Worktree; threads: (Thread | GeneralThread)[] }) {
   const sessions = useSessions(worktree);
-  const send = useSendComments(worktree);
+  const [open, setOpen] = useState(false);
   const [justSent, markSent] = useJustSent();
   const pending = threads.filter((t) => t.pending).length;
+  const summary = useStore((s) => s.generalDrafts[summaryKey(worktree.id)] ?? "");
+  const summaryImages = useDraftImages(summaryKey(worktree.id));
+  const hasSummary = !!summary.trim() || summaryImages.length > 0;
 
   if (justSent) {
     return (
@@ -62,7 +70,8 @@ export function SendToAgent({ worktree, threads }: { worktree: Worktree; threads
       </Button>
     );
   }
-  if (pending === 0) {
+  // A summary alone can be sent too, as on GitHub.
+  if (pending === 0 && !hasSummary && !open) {
     if (sessions.length === 0) return null;
     return (
       <Tooltip label={<SessionList sessions={sessions} />}>
@@ -74,13 +83,88 @@ export function SendToAgent({ worktree, threads }: { worktree: Worktree; threads
     );
   }
   return (
-    <SendControl
-      sessions={sessions}
-      primary
-      busy={send.isPending}
-      count={pending}
-      onSend={(to) => send.mutate({ to, threads: null }, { onSuccess: markSent })}
-    />
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <Button variant="primary">
+          <Send className="size-3.5" />
+          Send review
+          {pending > 0 && <Count value={pending} inverted />}
+          <ChevronDown className="size-3" />
+        </Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={4}
+          // The field takes focus itself, after any text it holds.
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          className="z-40 w-[440px] max-w-[calc(100vw-32px)] rounded-lg border border-border bg-bg-raised text-[13px] shadow-xl shadow-black/30"
+        >
+          <ReviewForm
+            worktree={worktree}
+            sessions={sessions}
+            pending={pending}
+            canSend={pending > 0 || hasSummary}
+            onClose={() => setOpen(false)}
+            onSent={() => {
+              setOpen(false);
+              markSent();
+            }}
+          />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** The send box: the summary, then where the review goes. */
+function ReviewForm({
+  worktree,
+  sessions,
+  pending,
+  canSend,
+  onClose,
+  onSent,
+}: {
+  worktree: Worktree;
+  sessions: AgentSession[];
+  pending: number;
+  canSend: boolean;
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const send = useSendReview(worktree);
+  const images = useDraftImages(summaryKey(worktree.id));
+  const submit = (to: SendTarget) => {
+    if (!canSend || send.isPending) return;
+    const summary = useStore.getState().generalDrafts[summaryKey(worktree.id)] ?? "";
+    send.mutate({ to, summary, images }, { onSuccess: onSent });
+  };
+  const only = sessions.length === 1 ? sessions[0] : null;
+  return (
+    <>
+      <div className="flex items-baseline gap-2 px-3 pt-2.5 pb-2">
+        <span className="font-medium text-fg">Send review</span>
+        <span className="tabular text-[12px] text-fg-subtle">
+          {pending === 0 ? "summary only" : pending === 1 ? "1 comment" : `${pending} comments`}
+        </span>
+      </div>
+      <div className="mx-3 rounded-md border border-border bg-bg focus-within:border-border-strong">
+        <GeneralCommentField
+          draftKey={summaryKey(worktree.id)}
+          placeholder="Summary (optional): the review as a whole, or paste a screenshot"
+          submitEmpty
+          onSubmit={() => only && submit({ session: only.id })}
+          onCancel={onClose}
+        />
+      </div>
+      <div className="flex items-center gap-2 p-3">
+        <span className="min-w-0 flex-1 text-[11px] text-fg-faint">
+          {only ? "⌘↩ to send · " : ""}A summary is saved as a general comment
+        </span>
+        <SendControl sessions={sessions} primary busy={!canSend || send.isPending} onSend={submit} />
+      </div>
+    </>
   );
 }
 
@@ -237,13 +321,13 @@ function Count({ value, inverted }: { value: number; inverted?: boolean }) {
 }
 
 /** Sends one comment straight away: to the session, one picked by name, or a new one. */
-export function SendThreadButton({ thread }: { thread: Thread }) {
+export function SendThreadButton({ thread }: { thread: Thread | GeneralThread }) {
   const worktree = useContext(WorktreeContext);
   if (!worktree || !thread.pending) return null;
   return <SendThread worktree={worktree} thread={thread} />;
 }
 
-function SendThread({ worktree, thread }: { worktree: Worktree; thread: Thread }) {
+function SendThread({ worktree, thread }: { worktree: Worktree; thread: Thread | GeneralThread }) {
   const sessions = useSessions(worktree);
   const send = useSendComments(worktree);
   return (

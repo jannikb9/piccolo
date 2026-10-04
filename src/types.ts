@@ -140,6 +140,16 @@ export type Thread = {
   updatedAt: number;
 };
 
+/**
+ * A comment on the branch as a whole rather than some lines, like the text of a GitHub review
+ * (`piccolo comment --general`). It has no file, lines or excerpt; replies work as on any thread.
+ */
+export type GeneralThread = Omit<Thread, "path" | "oldPath" | "range" | "position"> & {
+  path: null;
+  range: null;
+  position: null;
+};
+
 /** An agent comments can be sent to in a new session. */
 export type AgentKind = "claude" | "codex";
 

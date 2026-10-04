@@ -18,6 +18,8 @@ Usage:
   piccolo comment <file>:<line>[-<end>] [--removed] <message>
                                      Comment on lines of a file as it is now (--removed: lines the
                                      branch removed, numbered as in the base version)
+  piccolo comment --general <message>
+                                     Comment on the branch as a whole, not on particular lines
   piccolo resolve <id>               Mark a comment resolved
   piccolo reopen <id>                Reopen a resolved comment
   piccolo guide                      How to review this branch as an agent
@@ -157,12 +159,23 @@ fn run(command: &str, args: &[String], folder: &Folder) -> Result<()> {
             Ok(())
         }
         "comment" => {
-            let args = Args::parse(args, &["--as", "--removed"])?;
+            let args = Args::parse(args, &["--as", "--removed", "--general"])?;
+            let name = agent_name(args.name.clone())?;
+            let by = By { author: Author::Agent, name: name.as_deref() };
+            if args.has("--general") {
+                if args.has("--removed") {
+                    return Err("a general comment isn't on lines, so it can't be on removed ones".into());
+                }
+                let body = message(&args.positional)?;
+                let target = folder.target()?;
+                let id = Store::open()?.add_general_thread(&target, by, &body, &[])?;
+                println!("Commented on {} (#{id}).", target.label());
+                return Ok(());
+            }
             let location = args.positional.first().ok_or_else(|| format!("missing <file>:<line>\n\n{HELP}"))?;
             let body = message(&args.positional[1..])?;
             let side = if args.has("--removed") { Side::Deletions } else { Side::Additions };
-            let name = agent_name(args.name)?;
-            println!("{}", add_comment(&mut Store::open()?, &folder.path, location, side, &body, name.as_deref())?);
+            println!("{}", add_comment(&mut Store::open()?, &folder.path, location, side, &body, by)?);
             Ok(())
         }
         "resolve" | "reopen" => {
@@ -277,7 +290,7 @@ fn list(folder: &Folder, only: &[i64], include_resolved: bool, json: bool) -> Re
 
 /// Starts a thread on `<file>:<line>[-<end>]`, against the same diff the app shows by default:
 /// everything since the branch forked from its base, uncommitted work included.
-fn add_comment(store: &mut Store, cwd: &Path, location: &str, side: Side, body: &str, name: Option<&str>) -> Result<String> {
+fn add_comment(store: &mut Store, cwd: &Path, location: &str, side: Side, body: &str, by: By) -> Result<String> {
     let (file, lines) = location
         .rsplit_once(':')
         .ok_or_else(|| format!("expected <file>:<line> or <file>:<start>-<end>, not {location}"))?;
@@ -293,7 +306,7 @@ fn add_comment(store: &mut Store, cwd: &Path, location: &str, side: Side, body: 
         .find(|f| f.path == path)
         .and_then(|f| f.old_path);
     let new = NewThread {
-        by: By { author: Author::Agent, name },
+        by,
         path: &path,
         old_path: old_path.as_deref(),
         range: LineRange { start_side: side, start_line: start, end_side: side, end_line: end },
@@ -373,6 +386,7 @@ You're reviewing the changes on {branch} in {worktree}, {compared}. Your comment
    - `piccolo{via} comment --as <your name> <file>:<line> \"...\"`
    - `piccolo{via} comment --as <your name> <file>:<start>-<end> \"...\"`
    - `piccolo{via} comment --as <your name> --removed <file>:<line> \"...\"` for lines the branch removed, numbered as in the old version
+   - `piccolo{via} comment --as <your name> --general \"...\"` for a point about the change as a whole rather than particular lines: the approach, something missing, how the parts fit together
    For a long message, pass `-` instead and write it to stdin.
 4. What's worth a comment: bugs, missed cases, risky or surprising behaviour, unclear names or structure, tests that don't check what they claim. One issue per comment: say what's wrong and why, and suggest a fix. No praise, and no nits a formatter or linter would catch.
 5. Finish with one line in the chat: how many comments you left, and the most important one.
@@ -403,8 +417,12 @@ fn format_threads(target: &Target, threads: &[Thread], include_resolved: bool, v
         if thread.resolved {
             out.push_str(" (resolved)");
         }
-        out.push_str("\n\n");
-        out.push_str(&format_excerpt(&thread.excerpt));
+        out.push('\n');
+        // General comments have no code to show.
+        if !thread.excerpt.is_empty() {
+            out.push('\n');
+            out.push_str(&format_excerpt(&thread.excerpt));
+        }
         for message in &thread.messages {
             let who = author_label(message.author, message.author_name.as_deref());
             let body = message.body.trim();
@@ -442,12 +460,14 @@ fn describe(range: &LineRange) -> String {
 }
 
 fn location(thread: &Thread) -> String {
-    let path = &thread.path;
+    let (Some(path), Some(range)) = (&thread.path, thread.range) else {
+        return "General comment (on the branch as a whole)".into();
+    };
     match &thread.position {
-        None => format!("{path} (outdated: the code changed since this comment on {})", describe(&thread.range)),
+        None => format!("{path} (outdated: the code changed since this comment on {})", describe(&range)),
         Some(p) if p.start_side == Side::Additions && p.end_side == Side::Additions => {
-            let moved = if *p != thread.range {
-                format!(" (was {} when commented)", lines(thread.range.start_line, thread.range.end_line))
+            let moved = if *p != range {
+                format!(" (was {} when commented)", lines(range.start_line, range.end_line))
             } else {
                 String::new()
             };
@@ -533,7 +553,7 @@ mod tests {
         fs::create_dir_all(wt.join("src")).unwrap();
         fs::write(wt.join("src/new.rs"), "fn a() {}\nfn b() {}\n").unwrap();
         let comment = |store: &mut Store, cwd: &Path, location: &str, side: Side| {
-            add_comment(store, cwd, location, side, "Why?", Some("codex"))
+            add_comment(store, cwd, location, side, "Why?", By { author: Author::Agent, name: Some("codex") })
         };
 
         // Changed, unchanged and untracked lines, with paths relative to the current folder.
@@ -543,7 +563,13 @@ mod tests {
         comment(&mut store, &wt.join("src"), "../a.txt:3", Side::Deletions).unwrap();
 
         let threads = store.threads(&Target::of(&wt).unwrap(), false).unwrap();
-        let summary: Vec<_> = threads.iter().map(|t| (t.path.as_str(), t.range.start_side, t.range.start_line, t.range.end_line)).collect();
+        let summary: Vec<_> = threads
+            .iter()
+            .map(|t| {
+                let range = t.range.unwrap();
+                (t.path.as_deref().unwrap(), range.start_side, range.start_line, range.end_line)
+            })
+            .collect();
         assert_eq!(
             summary,
             [("a.txt", Side::Deletions, 3, 3), ("a.txt", Side::Additions, 3, 4), ("a.txt", Side::Additions, 6, 6), ("src/new.rs", Side::Additions, 2, 2)]
@@ -563,6 +589,27 @@ mod tests {
     }
 
     #[test]
+    fn lists_general_comments_first() {
+        use crate::comments::tests::fixture;
+
+        let (root, wt, mut store) = fixture("cli-general");
+        let target = Target::of(&wt).unwrap();
+        add_comment(&mut store, &wt, "a.txt:3", Side::Additions, "Why?", By::REVIEWER).unwrap();
+        let codex = By { author: Author::Agent, name: Some("codex") };
+        let id = store.add_general_thread(&target, codex, "The parser and the UI change belong in separate PRs.", &[]).unwrap();
+
+        let threads = store.threads(&target, false).unwrap();
+        let out = format_threads(&target, &threads, false, "");
+        let expected = format!(
+            "\n## #{id} · General comment (on the branch as a whole)\n\n**Codex:** The parser and the UI change belong in separate PRs.\n\n## #"
+        );
+        assert!(out.contains(&expected), "{out}");
+        assert!(out.contains("· a.txt:3\n\n```\n"), "{out}");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn guides_reviewers_with_the_branch_base() {
         use crate::comments::tests::fixture;
 
@@ -573,6 +620,7 @@ mod tests {
         assert!(in_worktree.contains("compared with main, from where it branched off"), "{in_worktree}");
         assert!(in_worktree.contains("`piccolo comment --as <your name> <file>:<line>"), "{in_worktree}");
         assert!(in_worktree.contains("`git status --short`"), "{in_worktree}");
+        assert!(in_worktree.contains("`piccolo comment --as <your name> --general"), "{in_worktree}");
 
         // Named from elsewhere, every suggested command names the worktree.
         let via = format!(" -C {}", shell_quote(&target.worktree));
