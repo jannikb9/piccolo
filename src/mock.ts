@@ -516,7 +516,7 @@ function mockAttachments(images: ImageUpload[]): Attachment[] {
   return images.map(({ width, height, data }) => {
     const id = nextId++;
     mockImages.set(id, data);
-    return { id, width, height, path: `~/Library/Application Support/dev.jb.review/attachments/${id}.png` };
+    return { id, width, height, path: `~/Library/Application Support/dev.jb.piccolo/attachments/${id}.png` };
   });
 }
 

@@ -14,9 +14,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Must match `identifier` in tauri.conf.json: the database sits in the app's data folder. It
-/// predates the name Piccolo and stays, so existing comments and settings keep their place.
-const APP_IDENTIFIER: &str = "dev.jb.review";
+/// Must match `identifier` in tauri.conf.json: the database sits in the app's data folder.
+const APP_IDENTIFIER: &str = "dev.jb.piccolo";
 const DB_FILE: &str = "comments.db";
 /// Pasted images are saved as `<id>.png` in this folder next to the database.
 const IMAGES_DIR: &str = "attachments";
