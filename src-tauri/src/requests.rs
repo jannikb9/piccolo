@@ -2,10 +2,8 @@
 //! it on: a new session is opened with a prompt to run `piccolo guide --request <id>`, which claims
 //! the request for the session it runs in, and the agent says it's finished with `piccolo done`.
 //! In between, its comments come in one by one like anyone's. An agent can review unasked, too:
-//! `done` then records the review it did. Agents that speak ACP are run in the background by
-//! Piccolo itself instead (acp.rs).
+//! `done` then records the review it did.
 
-use crate::acp;
 use crate::comments::{blocking, now_ms, sql, Store, Target};
 use crate::git::{self, Result};
 use crate::sessions::{self, shell_quote, Agent, Caller};
@@ -24,8 +22,7 @@ pub(crate) const SCHEMA: &str = "
         head TEXT,
         requested_at INTEGER NOT NULL,
         started_at INTEGER,
-        finished_at INTEGER,
-        error TEXT
+        finished_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS review_requests_by_branch ON review_requests (repo, branch);";
 
@@ -50,10 +47,6 @@ pub struct Request {
     pub finished_at: Option<i64>,
     /// Comments and replies the agent wrote on the branch while reviewing.
     pub comments: i64,
-    /// Why it ended without finishing, for reviews Piccolo ran.
-    pub error: Option<String>,
-    /// Piccolo ran it and kept a log of what the agent did.
-    pub log: bool,
 }
 
 fn request_from_row(row: &Row) -> rusqlite::Result<Request> {
@@ -66,8 +59,6 @@ fn request_from_row(row: &Row) -> rusqlite::Result<Request> {
         started_at: row.get("started_at")?,
         finished_at: row.get("finished_at")?,
         comments: 0,
-        error: row.get("error")?,
-        log: false,
     })
 }
 
@@ -78,7 +69,6 @@ pub fn list(store: &Store, target: &Target) -> Result<Vec<Request>> {
     let mut requests = sql(rows.collect::<rusqlite::Result<Vec<_>>>())?;
     for request in &mut requests {
         request.comments = store.review_comments(target, request)?;
-        request.log = acp::log_path(request.id).exists();
     }
     Ok(requests)
 }
@@ -191,22 +181,9 @@ impl Store {
         Ok(request)
     }
 
-    /// Withdraws a request, and removes its log.
+    /// Withdraws a request.
     pub fn cancel_request(&self, id: i64) -> Result<()> {
         sql(self.conn.execute("DELETE FROM review_requests WHERE id = ?1", [id]))?;
-        let _ = std::fs::remove_file(acp::log_path(id));
-        Ok(())
-    }
-
-    /// Names the session doing request `id`.
-    pub fn set_request_session(&self, id: i64, session: &str) -> Result<()> {
-        sql(self.conn.execute("UPDATE review_requests SET session_id = ?2 WHERE id = ?1", params![id, session]))?;
-        Ok(())
-    }
-
-    /// Records why request `id` ended without the review finishing.
-    pub fn set_request_error(&self, id: i64, error: &str) -> Result<()> {
-        sql(self.conn.execute("UPDATE review_requests SET error = ?2 WHERE id = ?1", params![id, error]))?;
         Ok(())
     }
 
@@ -249,9 +226,8 @@ fn prompt(request: &Request, worktree: &str, again: bool) -> String {
 // ---------------------------------------------------------------------------------------------
 // Tauri commands
 
-/// Asks for a review of the worktree at `path`: from the running session `session`, from a new
-/// Claude or Codex session in its desktop app, or from an ACP agent (by its id in [`acp::CATALOG`])
-/// that Piccolo runs in the background.
+/// Asks for a review of the worktree at `path`: from the running session `session`, or from a new
+/// Claude or Codex session in its desktop app.
 #[tauri::command]
 pub async fn request_review(path: String, agent: Option<String>, session: Option<String>) -> Result<Request> {
     blocking(move || {
@@ -274,7 +250,7 @@ pub async fn request_review(path: String, agent: Option<String>, session: Option
                 let agent = match name.as_str() {
                     "claude" => Agent::Claude,
                     "codex" => Agent::Codex,
-                    id => return acp::start(&store, &target, id, head.as_deref()),
+                    other => return Err(format!("Piccolo can't start a {other} session")),
                 };
                 let request = store.request_review(&target, &name, None, head.as_deref())?;
                 if let Err(e) = sessions::open_new_session(agent, &target.worktree, &prompt(&request, &target.worktree, false)) {
@@ -289,11 +265,10 @@ pub async fn request_review(path: String, agent: Option<String>, session: Option
     .await
 }
 
-/// Stops a review Piccolo is running; otherwise withdraws the request, or removes a finished review
-/// from the list.
+/// Withdraws a request, or removes a finished review from the list.
 #[tauri::command]
 pub async fn cancel_review_request(id: i64) -> Result<()> {
-    blocking(move || if acp::stop(id) { Ok(()) } else { Store::open()?.cancel_request(id) }).await
+    blocking(move || Store::open()?.cancel_request(id)).await
 }
 
 #[cfg(test)]

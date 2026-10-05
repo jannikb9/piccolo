@@ -156,7 +156,7 @@ export function useSessions(worktree: Worktree): AgentSession[] {
   return useAllSessions().data?.[worktree.path] ?? NO_SESSIONS;
 }
 
-const NO_ACTIVITY: SessionActivity = { unseen: {}, open: [], requests: [] };
+const NO_ACTIVITY: SessionActivity = { unseen: {}, open: [], written: {}, requests: [] };
 
 /** What each of the worktree's sessions hasn't seen, and the reviews requested on it. */
 export function useSessionActivity(worktree: Worktree): SessionActivity {
@@ -169,38 +169,21 @@ export function useSessionActivity(worktree: Worktree): SessionActivity {
   );
 }
 
-/** Where comments go: a running session, or a new one of an agent. */
-export type SendTarget = { session: string } | { newAgent: AgentKind };
-
-/**
- * Sends `threads`, or else what the session hasn't seen (all open comments for a new one), to a
- * session or a new one.
- */
+/** Sends a session (by id) the comments it hasn't seen. */
 export function useSendComments(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ to, threads }: { to: SendTarget; threads: number[] | null }) =>
-      "session" in to
-        ? api.sendComments(worktree.path, to.session, threads)
-        : api.startSession(worktree.path, to.newAgent, threads),
+    mutationFn: (session: string) => api.sendComments(worktree.path, session),
     onError: (error) => showError("Couldn't send the comments", String(error)),
     onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
   });
 }
 
-/** Installed agents that speak ACP. Checked again now and then, for agents installed meanwhile. */
-export function useInstalledAgents() {
-  return useQuery({ queryKey: ["agents"], queryFn: api.listAgents, staleTime: 60_000 }).data ?? [];
-}
-
-/**
- * Asks a running session, or a new session of an agent, to review the worktree: Claude or Codex in
- * its app, or an ACP agent in the background.
- */
+/** Asks a running session, or a new Claude or Codex session in its app, to review the worktree. */
 export function useRequestReview(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (to: { session: string } | { agent: string }) => api.requestReview(worktree.path, to),
+    mutationFn: (to: { session: string } | { agent: AgentKind }) => api.requestReview(worktree.path, to),
     onError: (error) => showError("Couldn't request a review", String(error)),
     onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
   });

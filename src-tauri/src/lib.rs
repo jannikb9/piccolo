@@ -1,5 +1,4 @@
 pub mod cli;
-mod acp;
 mod comments;
 mod git;
 mod imports;
@@ -62,11 +61,8 @@ pub fn run() {
             sessions::list_sessions,
             sessions::session_activity,
             sessions::send_comments,
-            sessions::start_session,
             requests::request_review,
             requests::cancel_review_request,
-            acp::list_agents,
-            acp::open_review_log,
             navigate::find_symbol,
             navigate::file_text,
         ])

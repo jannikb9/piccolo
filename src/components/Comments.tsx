@@ -11,7 +11,6 @@ import { DraftImages, MessageImages, useDraftImages } from "./Images";
 import { AgentIcon } from "./AgentIcon";
 import { Markdown } from "./Markdown";
 import { MarkdownEditor } from "./MarkdownEditor";
-import { SendThreadButton } from "./SendToAgent";
 import { Button, Tooltip } from "./ui";
 
 /** "line 12", "lines 12–14"; ranges across both sides of a unified diff name the sides. */
@@ -239,7 +238,6 @@ export function ThreadCard({ thread, note }: { thread: Thread | GeneralThread; n
       ))}
       <div className="flex items-start gap-2 border-t border-border-subtle p-2">
         <ReplyBox threadId={thread.id} />
-        <SendThreadButton thread={thread} />
         {thread.resolved ? (
           <Button
             onClick={() => {

@@ -18,7 +18,7 @@
 
 use crate::comments::{blocking, now_ms, sql, Store, Target};
 use crate::git::{self, Result};
-use crate::{acp, programs};
+use crate::programs;
 use crate::requests::{self, Request};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -484,13 +484,10 @@ impl Store {
         sql(rows.collect())
     }
 
-    /// Sends `session` the threads of `only` (or all those it hasn't seen) on `target`'s branch,
-    /// and counts them as seen. Returns the threads sent.
-    fn send(&mut self, session: &Session, target: &Target, only: Option<&[i64]>) -> Result<Vec<i64>> {
-        let ids = match only {
-            Some(ids) => self.open_among(target, ids)?,
-            None => self.unseen(target, Some(&session.id))?,
-        };
+    /// Sends `session` the threads it hasn't seen on `target`'s branch, and counts them as seen.
+    /// Returns the threads sent.
+    fn send(&mut self, session: &Session, target: &Target) -> Result<Vec<i64>> {
+        let ids = self.unseen(target, Some(&session.id))?;
         if ids.is_empty() {
             return Err("There are no comments to send".into());
         }
@@ -500,24 +497,23 @@ impl Store {
         Ok(ids)
     }
 
-    /// Those of `ids` that are open threads on `target`'s branch.
-    fn open_among(&self, target: &Target, ids: &[i64]) -> Result<Vec<i64>> {
-        Ok(self.unseen(target, None)?.into_iter().filter(|id| ids.contains(id)).collect())
+    /// Comments and replies each session wrote on `target`'s branch, by session id.
+    fn written(&self, target: &Target) -> Result<HashMap<String, i64>> {
+        let mut stmt = sql(self.conn.prepare(
+            "SELECT m.session_id, COUNT(*) FROM messages m JOIN threads t ON t.id = m.thread_id
+             WHERE m.session_id IS NOT NULL
+               AND t.repo = ?1 AND (t.branch = ?2 OR (?2 IS NULL AND t.branch IS NULL AND t.worktree = ?3))
+             GROUP BY m.session_id",
+        ))?;
+        let rows = sql(stmt.query_map(params![target.repo, target.branch, target.worktree], |r| Ok((r.get(0)?, r.get(1)?))))?;
+        sql(rows.collect())
     }
 }
 
 /// The sessions working on each of `worktrees`, from the registry and the traces in `store`.
 fn sessions_by_worktree(store: &Store, worktrees: &[String]) -> Result<HashMap<String, Vec<Session>>> {
     let codex = codex_binary();
-    let mut matched = match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?, &codex_titles(&codex_index()), codex.as_deref());
-    // Reviews Piccolo runs itself: it knows whether they still run.
-    let running = acp::running_sessions();
-    for session in matched.values_mut().flatten().filter(|s| acp::is_run(&s.id)) {
-        let busy = running.contains(&session.id);
-        session.running = Some(busy);
-        session.status = busy.then(|| "busy".into());
-    }
-    Ok(matched)
+    Ok(match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?, &codex_titles(&codex_index()), codex.as_deref()))
 }
 
 /// The sessions working on the worktree at `path`.
@@ -539,6 +535,8 @@ pub struct Activity {
     pub unseen: HashMap<String, Vec<i64>>,
     /// All open threads, which a new session would be given.
     pub open: Vec<i64>,
+    /// Comments and replies each session wrote on the branch, by session id.
+    pub written: HashMap<String, i64>,
     /// Reviews requested on the branch, newest first.
     pub requests: Vec<Request>,
 }
@@ -562,39 +560,25 @@ pub async fn session_activity(path: String) -> Result<Activity> {
         for session in sessions_of(&store, &path)? {
             unseen.insert(session.id.clone(), store.unseen(&target, Some(&session.id))?);
         }
-        Ok(Activity { unseen, open: store.unseen(&target, None)?, requests: requests::list(&store, &target)? })
+        Ok(Activity {
+            unseen,
+            open: store.unseen(&target, None)?,
+            written: store.written(&target)?,
+            requests: requests::list(&store, &target)?,
+        })
     })
     .await
 }
 
-/// Sends session `session` what it hasn't seen on the worktree, or `threads`.
+/// Sends session `session` what it hasn't seen on the worktree.
 #[tauri::command]
-pub async fn send_comments(path: String, session: String, threads: Option<Vec<i64>>) -> Result<Vec<i64>> {
+pub async fn send_comments(path: String, session: String) -> Result<Vec<i64>> {
     blocking(move || {
         let mut store = Store::open()?;
         let sessions = sessions_of(&store, &path)?;
         let session = sessions.iter().find(|s| s.id == session).ok_or("That session isn't running any more")?;
         let target = Target::of(Path::new(&path))?;
-        store.send(session, &target, threads.as_deref())
-    })
-    .await
-}
-
-/// Opens a new `agent` session on the worktree at `path` with its open comments, or `threads`.
-#[tauri::command]
-pub async fn start_session(path: String, agent: Agent, threads: Option<Vec<i64>>) -> Result<Vec<i64>> {
-    blocking(move || {
-        let store = Store::open()?;
-        let target = Target::of(Path::new(&path))?;
-        let ids = match threads {
-            Some(ids) => store.open_among(&target, &ids)?,
-            None => store.unseen(&target, None)?,
-        };
-        if ids.is_empty() {
-            return Err("There are no open comments to send".into());
-        }
-        open_new_session(agent, &target.worktree, &message(Some(agent), &target.worktree, &ids))?;
-        Ok(ids)
+        store.send(session, &target)
     })
     .await
 }
@@ -710,7 +694,7 @@ mod tests {
         let new = NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: additions(3, 3), body: "x", images: &[] };
         let id = store.add_thread(&target, &wt, &range, new).unwrap();
         let session = found.iter().find(|s| s.id == thread).unwrap();
-        assert_eq!(store.send(session, &target, None).unwrap(), [id]);
+        assert_eq!(store.send(session, &target).unwrap(), [id]);
         let queued = std::fs::read_to_string(&log).unwrap();
         assert!(queued.starts_with(&format!("queue\n--thread\n{thread}\n--message\n")), "{queued}");
         // Codex gets the steps spelled out, signing as itself.
@@ -719,7 +703,7 @@ mod tests {
 
         // A failure says why, and leaves the comment unseen.
         let failing = found.iter().find(|s| s.id.starts_with("00000000")).unwrap();
-        let error = store.send(failing, &target, None).unwrap_err();
+        let error = store.send(failing, &target).unwrap_err();
         assert!(error.contains("no such thread"), "{error}");
         assert_eq!(store.unseen(&target, Some(&failing.id)).unwrap(), [id]);
 
@@ -776,6 +760,10 @@ mod tests {
         assert!(unseen(&store, Some("claude-1")).is_empty());
         assert_eq!(unseen(&store, None), [codexs]);
 
+        // What each session wrote counts, closed threads too; the reviewer has no session.
+        let written = store.written(&target).unwrap();
+        assert_eq!((written.len(), written["codex-1"], written["claude-1"]), (2, 1, 1));
+
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -804,18 +792,13 @@ mod tests {
             frame["message"]["content"].as_str().unwrap().to_string()
         };
 
-        // One comment, then the rest; then nothing's left that it hasn't seen.
+        // What it hasn't seen; then nothing's left to send.
         let session = &sessions[0];
-        assert_eq!(store.send(session, &target, Some(&[second])).unwrap(), [second]);
+        assert_eq!(store.send(session, &target).unwrap(), [first, second]);
         let text = received();
-        assert!(text.contains(&format!("a review comment from Piccolo: #{second}")), "{text}");
-        assert!(text.contains(&format!("piccolo -C {} comments {second}", target.worktree)), "{text}");
-        assert_eq!(store.send(session, &target, None).unwrap(), [first]);
-        assert!(received().contains(&format!("#{first}")));
-        assert!(store.send(session, &target, None).is_err());
-        // A comment can always be sent again.
-        assert_eq!(store.send(session, &target, Some(&[first])).unwrap(), [first]);
-        received();
+        assert!(text.contains(&format!("review comments from Piccolo: #{first}, #{second}")), "{text}");
+        assert!(text.contains(&format!("piccolo -C {} comments {first} {second}", target.worktree)), "{text}");
+        assert!(store.send(session, &target).is_err());
 
         // Codex gets the steps instead of the skill, signing its replies.
         let codex = message(Some(Agent::Codex), &target.worktree, &[first, second]);
@@ -828,7 +811,7 @@ mod tests {
         store.reply(first, By::REVIEWER, "Not quite", &[]).unwrap();
         drop(listener);
         std::fs::remove_file(format!("/tmp/review-test-{}-s1.sock", std::process::id())).unwrap();
-        assert!(store.send(session, &target, None).is_err());
+        assert!(store.send(session, &target).is_err());
         assert_eq!(store.unseen(&target, Some("s1")).unwrap(), [first]);
 
         std::fs::remove_dir_all(&root).unwrap();

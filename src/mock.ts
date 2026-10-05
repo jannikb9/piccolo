@@ -2,6 +2,7 @@
 import { hashString } from "./lib/diff";
 import type { ImageUpload } from "./lib/images";
 import type {
+  AgentKind,
   AgentSession,
   Attachment,
   ChangedFile,
@@ -11,7 +12,6 @@ import type {
   ExcerptRow,
   FileVersions,
   GeneralThread,
-  InstalledAgent,
   LineRange,
   RemoteBranch,
   Repo,
@@ -520,18 +520,6 @@ const mockSessionList: AgentSession[] = [
     reachable: true,
   },
   {
-    id: "acp-3",
-    agent: "gemini",
-    title: null,
-    status: null,
-    running: false,
-    cwd: null,
-    inWorktree: false,
-    startedAt: null,
-    lastSeen: minutesAgo(9),
-    reachable: false,
-  },
-  {
     id: "mock-old",
     agent: "claude",
     title: "Second opinion on token storage",
@@ -546,9 +534,8 @@ const mockSessionList: AgentSession[] = [
 ];
 
 const mockRequests: ReviewRequest[] = [
-  { id: 3, agent: "gemini", sessionId: "acp-3", head: "a1b2c3d", requestedAt: minutesAgo(9), startedAt: minutesAgo(9), finishedAt: minutesAgo(8), comments: 0, error: "The agent isn't signed in: run `gemini` in a terminal once and sign in, then ask again", log: true },
-  { id: 2, agent: "codex", sessionId: "mock-codex", head: "a1b2c3d", requestedAt: minutesAgo(6), startedAt: minutesAgo(5), finishedAt: null, comments: 2, error: null, log: false },
-  { id: 1, agent: "claude", sessionId: "mock-old", head: "9f8e7d6", requestedAt: minutesAgo(150), startedAt: minutesAgo(149), finishedAt: minutesAgo(131), comments: 0, error: null, log: false },
+  { id: 2, agent: "codex", sessionId: "mock-codex", head: "a1b2c3d", requestedAt: minutesAgo(6), startedAt: minutesAgo(5), finishedAt: null, comments: 2 },
+  { id: 1, agent: "claude", sessionId: "mock-old", head: "9f8e7d6", requestedAt: minutesAgo(150), startedAt: minutesAgo(149), finishedAt: minutesAgo(131), comments: 0 },
 ];
 
 /** The session an agent's mock message came from. */
@@ -570,6 +557,16 @@ const unseenBy = (worktreePath: string, session: string | null) =>
     )
     .map((t) => t.id);
 
+/** Comments and replies each session wrote, by the agent names its mock messages are signed with. */
+function mockWritten(worktreePath: string): Record<string, number> {
+  const written: Record<string, number> = {};
+  for (const message of (threads[worktreePath] ?? []).flatMap((t) => t.messages)) {
+    const session = message.author === "agent" ? sessionOfAgent[message.authorName ?? ""] : undefined;
+    if (session) written[session] = (written[session] ?? 0) + 1;
+  }
+  return written;
+}
+
 export function mockSessions(paths: string[]): Promise<Record<string, AgentSession[]>> {
   if (!paths.includes(mockWorktree) || localStorage.getItem("mock-sessions") === "0") return delay({});
   return delay({ [mockWorktree]: structuredClone(mockSessionList) });
@@ -581,73 +578,37 @@ export function mockSessionActivity(worktreePath: string): Promise<SessionActivi
   return delay({
     unseen: Object.fromEntries(sessions.map((s) => [s.id, unseenBy(worktreePath, s.id)])),
     open: unseenBy(worktreePath, null),
+    written: none ? {} : mockWritten(worktreePath),
     requests: none ? [] : structuredClone(mockRequests),
   });
 }
 
-export const mockStartSession = (worktreePath: string, _agent: string, only: number[] | null): Promise<number[]> => {
-  const open = unseenBy(worktreePath, null).filter((id) => !only || only.includes(id));
-  return open.length ? delay(open) : Promise.reject("There are no open comments to send");
-};
-
-export function mockSendComments(worktreePath: string, session: string, only: number[] | null): Promise<number[]> {
-  const sent = only ? unseenBy(worktreePath, null).filter((id) => only.includes(id)) : unseenBy(worktreePath, session);
+export function mockSendComments(worktreePath: string, session: string): Promise<number[]> {
+  const sent = unseenBy(worktreePath, session);
   if (sent.length === 0) return Promise.reject("There are no comments to send");
   for (const id of sent) (seen[session] ??= {})[id] = Date.now();
   return delay(sent);
 }
 
-const mockAgents: InstalledAgent[] = [
-  { id: "gemini", name: "Gemini CLI", author: "gemini" },
-  { id: "opencode", name: "OpenCode", author: "opencode" },
-];
-
-export const mockInstalledAgents = (): Promise<InstalledAgent[]> => delay(mockAgents);
-
-export function mockRequestReview(_worktreePath: string, to: { session: string } | { agent: string }): Promise<ReviewRequest> {
+export function mockRequestReview(_worktreePath: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> {
   const session = "session" in to ? mockSessionList.find((s) => s.id === to.session) : undefined;
-  const background = "agent" in to ? mockAgents.find((a) => a.id === to.agent) : undefined;
-  const id = Math.max(0, ...mockRequests.map((r) => r.id)) + 1;
   const request: ReviewRequest = {
-    id,
-    agent: session?.agent ?? background?.author ?? ("agent" in to ? to.agent : "claude"),
-    sessionId: session?.id ?? (background ? `acp-${id}` : null),
+    id: Math.max(0, ...mockRequests.map((r) => r.id)) + 1,
+    agent: session?.agent ?? ("agent" in to ? to.agent : "claude"),
+    sessionId: session?.id ?? null,
     head: "f00ba12",
     requestedAt: Date.now(),
-    startedAt: background ? Date.now() : null,
+    startedAt: null,
     finishedAt: null,
     comments: 0,
-    error: null,
-    log: !!background,
   };
   mockRequests.unshift(request);
-  if (background) {
-    mockSessionList.unshift({
-      id: request.sessionId!,
-      agent: background.author,
-      title: null,
-      status: "busy",
-      running: true,
-      cwd: null,
-      inWorktree: false,
-      startedAt: null,
-      lastSeen: Date.now(),
-      reachable: false,
-    });
-  }
   return delay(request);
 }
 
 export function mockCancelRequest(id: number): Promise<void> {
   const index = mockRequests.findIndex((r) => r.id === id);
-  const request = mockRequests[index];
-  // A background review is stopped, and stays listed.
-  if (request?.log && request.finishedAt === null) {
-    request.finishedAt = Date.now();
-    request.error = "Stopped";
-    const session = mockSessionList.find((s) => s.id === request.sessionId);
-    if (session) Object.assign(session, { running: false, status: null });
-  } else if (index !== -1) mockRequests.splice(index, 1);
+  if (index !== -1) mockRequests.splice(index, 1);
   return delay(undefined);
 }
 

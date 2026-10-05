@@ -34,7 +34,6 @@ import type { ChangedFile, DiffPatch, GeneralThread, LineRange, Side, Thread, Wo
 import { CodeNavigation } from "./CodeNav";
 import { Composer, Conversation, DetachedNote, ThreadCard } from "./Comments";
 import { FindBar } from "./FindBar";
-import { WorktreeContext } from "./SendToAgent";
 import { CopyButton, DiffBlocks, DiffCount, StatusBadge, Tooltip, ViewedToggle } from "./ui";
 
 /** What an annotation row under a diff line holds. */
@@ -499,7 +498,6 @@ export function DiffView({
           onClose={closeFind}
         />
       )}
-      <WorktreeContext.Provider value={worktree}>
         <CodeView<Note>
           ref={setRefs}
           containerRef={containerRef}
@@ -512,7 +510,6 @@ export function DiffView({
           className="h-full overflow-auto px-4"
           style={viewStyle}
         />
-      </WorktreeContext.Provider>
       <CodeNavigation
         rootRef={rootRef}
         scrollerRef={containerRef}

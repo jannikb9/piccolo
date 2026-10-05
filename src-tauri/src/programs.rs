@@ -30,11 +30,6 @@ pub fn search_path() -> &'static [PathBuf] {
     })
 }
 
-/// [`search_path`] as a `PATH` value, for programs Piccolo starts.
-pub fn path_variable() -> std::ffi::OsString {
-    std::env::join_paths(search_path()).unwrap_or_default()
-}
-
 /// The program `name` in [`search_path`].
 pub fn find(name: &str) -> Option<PathBuf> {
     search_path().iter().map(|dir| dir.join(name)).find(|p| is_executable(p))
