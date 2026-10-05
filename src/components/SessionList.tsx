@@ -1,7 +1,7 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronDown, LoaderCircle, Plus, Send, X } from "lucide-react";
-import { createContext, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useCancelReviewRequest, useRequestReview, useSendComments, useSessionActivity, useSessions } from "../lib/queries";
 import { agentLabel, ago, cn, timeAgo } from "../lib/utils";
 import type { AgentKind, AgentSession, ReviewRequest, SessionActivity, Worktree } from "../types";
@@ -94,9 +94,45 @@ const MenuClosed = createContext<() => void>(() => {});
 
 /**
  * The toolbar's agents, like a pull request's reviewers: one overlapping mark per agent on the
- * branch, which fan out on hover while a popover lists every session and what it's doing.
+ * branch, which fan out on hover while a popover lists every session and what it's doing, and a
+ * "+" that asks for a review.
  */
 export function AgentsButton({ worktree }: { worktree: Worktree }) {
+  const { sessions, current, waiting, requestOf } = useSessionGroups(worktree);
+  // Until someone is asked to review, the "+" says what it does.
+  const unreviewed = waiting.length === 0 && current.every((session) => !requestOf(session));
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {waiting.length + current.length > 0 && <AgentMarks worktree={worktree} />}
+      <AddReviewer worktree={worktree} sessions={sessions} labeled={unreviewed} />
+    </div>
+  );
+}
+
+/** The "+" that asks for a review straight from the toolbar, labeled until the branch has a reviewer. */
+function AddReviewer({ worktree, sessions, labeled }: { worktree: Worktree; sessions: AgentSession[]; labeled: boolean }) {
+  const request = useRequestReview(worktree);
+  return (
+    <RequestReviewMenu sessions={sessions} onAsk={(to) => request.mutate(to)} tooltip="Ask an agent to review this branch">
+      <button
+        type="button"
+        aria-label="Request review"
+        disabled={request.isPending}
+        className={cn(
+          "flex h-6 min-w-6 shrink-0 items-center justify-center gap-1 rounded-full border border-dashed border-border-strong text-fg-subtle hover:border-fg-subtle hover:text-fg data-[state=open]:border-fg-subtle data-[state=open]:text-fg",
+          labeled && "@2xl:pr-2.5 @2xl:pl-2",
+        )}
+      >
+        <Plus className="size-3.5" />
+        {/* In a narrow toolbar the branch name needs the room; the tooltip still says it. */}
+        {labeled && <span className="hidden text-[12px] font-medium whitespace-nowrap @2xl:inline">Request review</span>}
+      </button>
+    </RequestReviewMenu>
+  );
+}
+
+/** The agents' marks and what they're doing, with the popover listing their sessions. */
+function AgentMarks({ worktree }: { worktree: Worktree }) {
   const { current, waiting, requestOf } = useSessionGroups(worktree);
   const [open, setOpen] = useState(false);
   // Opened by a click, it stays until dismissed; opened by hovering, until the pointer leaves.
@@ -151,7 +187,7 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
   const size = 24;
   const spread = 4;
   const overlap = -9;
-  const width = marks.length === 0 ? size : marks.length * size + (marks.length - 1) * spread;
+  const width = marks.length * size + (marks.length - 1) * spread;
 
   return (
     <Popover.Root
@@ -181,12 +217,7 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
           className="group/agents flex h-7 shrink-0 items-center gap-2 rounded-md px-1 text-[12px] text-fg-muted hover:text-fg data-[state=open]:text-fg"
         >
           <span className="flex justify-end" style={{ width }}>
-            {marks.length === 0 ? (
-              <span className="grid size-6 place-items-center rounded-full border border-dashed border-border-strong text-fg-subtle group-hover/agents:text-fg-muted">
-                <Plus className="size-3.5" />
-              </span>
-            ) : (
-              marks.map(([agent, state], i) => (
+            {marks.map(([agent, state], i) => (
                 <span
                   key={agent}
                   style={{ zIndex: marks.length - i, "--overlap": `${overlap}px`, "--spread": `${spread}px` } as CSSProperties}
@@ -199,8 +230,7 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
                   <AgentIcon name={agent} className="size-3.5" />
                   <StateBadge state={state} />
                 </span>
-              ))
-            )}
+              ))}
           </span>
           {/* In a narrow toolbar the branch name needs the room; the spinner still shows the review. */}
           {label && <span className="hidden whitespace-nowrap @5xl:inline">{label}</span>}
@@ -245,14 +275,7 @@ export function SessionList({ worktree }: { worktree: Worktree }) {
   return (
     <div className="flex flex-col gap-2">
       <RequestReview worktree={worktree} sessions={sessions} />
-      {waiting.length + current.length === 0 ? (
-        <p className="px-2 py-6 text-center text-[12px] leading-5 text-fg-subtle">
-          No agent is working on this branch.
-          <br />
-          Sessions appear here once they run in the worktree or use <code className="font-mono">piccolo</code> on it.
-        </p>
-      ) : (
-        <ul className="flex flex-col">
+      <ul className="flex flex-col">
           {waiting.map((request) => (
             <WaitingRow key={request.id} request={request} />
           ))}
@@ -266,35 +289,52 @@ export function SessionList({ worktree }: { worktree: Worktree }) {
               unseen={unseenBy(activity, session).length}
             />
           ))}
-        </ul>
-      )}
+      </ul>
     </div>
   );
 }
 
-/** "Request review": a new Claude or Codex session in its app, or a running session asked by name. */
+/** The popover's "Request review" button. */
 function RequestReview({ worktree, sessions }: { worktree: Worktree; sessions: AgentSession[] }) {
   const request = useRequestReview(worktree);
   const [justAsked, markAsked] = useJustDone();
-  const ask = (to: { session: string } | { agent: AgentKind }) => request.mutate(to, { onSuccess: markAsked });
+  return (
+    <RequestReviewMenu sessions={sessions} onAsk={(to) => request.mutate(to, { onSuccess: markAsked })}>
+      <Button variant="primary" disabled={request.isPending || justAsked} className="w-full justify-center disabled:opacity-100">
+        {justAsked ? <Check className="size-3.5" /> : null}
+        {justAsked ? "Review requested" : "Request review"}
+        {!justAsked && <ChevronDown className="size-3" />}
+      </Button>
+    </RequestReviewMenu>
+  );
+}
+
+/** Who to ask for a review: a new Claude or Codex session in its app, or a running session by name. */
+function RequestReviewMenu({
+  sessions,
+  onAsk,
+  tooltip,
+  children,
+}: {
+  sessions: AgentSession[];
+  onAsk: (to: { session: string } | { agent: AgentKind }) => void;
+  tooltip?: string;
+  /** The button that opens the menu. */
+  children: ReactNode;
+}) {
   const reachable = sessions.filter((s) => s.reachable);
   const menuClosed = useContext(MenuClosed);
   const label = (text: string) => (
     <DropdownMenuPrimitive.Label className="px-2 pt-1 pb-0.5 text-[11px] text-fg-faint">{text}</DropdownMenuPrimitive.Label>
   );
+  const trigger = <DropdownMenuPrimitive.Trigger asChild>{children}</DropdownMenuPrimitive.Trigger>;
   return (
     // Not modal: it opens from a hover popover, which a modal menu would make lose the pointer.
     <DropdownMenuPrimitive.Root modal={false} onOpenChange={(open) => !open && menuClosed()}>
-      <DropdownMenuPrimitive.Trigger asChild>
-        <Button variant="primary" disabled={request.isPending || justAsked} className="w-full justify-center disabled:opacity-100">
-          {justAsked ? <Check className="size-3.5" /> : null}
-          {justAsked ? "Review requested" : "Request review"}
-          {!justAsked && <ChevronDown className="size-3" />}
-        </Button>
-      </DropdownMenuPrimitive.Trigger>
+      {tooltip ? <Tooltip label={tooltip}>{trigger}</Tooltip> : trigger}
       <DropdownMenuPrimitive.Portal>
         <DropdownMenuPrimitive.Content
-          align="start"
+          align="end"
           sideOffset={4}
           className="z-50 w-80 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
         >
@@ -304,7 +344,7 @@ function RequestReview({ worktree, sessions }: { worktree: Worktree; sessions: A
               icon={agent}
               title={`New ${agentLabel(agent)} session`}
               detail={app}
-              onSelect={() => ask({ agent })}
+              onSelect={() => onAsk({ agent })}
             />
           ))}
           {reachable.length > 0 && (
@@ -317,7 +357,7 @@ function RequestReview({ worktree, sessions }: { worktree: Worktree; sessions: A
                   icon={session.agent}
                   title={sessionName(session)}
                   time={session.startedAt ? timeAgo(session.startedAt) : undefined}
-                  onSelect={() => ask({ session: session.id })}
+                  onSelect={() => onAsk({ session: session.id })}
                 />
               ))}
             </>

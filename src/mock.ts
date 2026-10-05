@@ -492,7 +492,8 @@ const mockWorktree = "~/projects/spoke-app/auth-session";
 
 /**
  * The first worktree's sessions: Claude building it, Codex reviewing it right now, and an earlier
- * Claude review that ended. `localStorage["mock-sessions"] = "0"` starts without any.
+ * Claude review that ended. `localStorage["mock-sessions"]` = "0" starts without any, "author" with
+ * only Claude building it.
  */
 const mockSessionList: AgentSession[] = [
   {
@@ -569,17 +570,19 @@ function mockWritten(worktreePath: string): Record<string, number> {
 
 export function mockSessions(paths: string[]): Promise<Record<string, AgentSession[]>> {
   if (!paths.includes(mockWorktree) || localStorage.getItem("mock-sessions") === "0") return delay({});
-  return delay({ [mockWorktree]: structuredClone(mockSessionList) });
+  return delay({ [mockWorktree]: structuredClone(onlyAuthor() ? mockSessionList.slice(0, 1) : mockSessionList) });
 }
+
+const onlyAuthor = () => localStorage.getItem("mock-sessions") === "author";
 
 export function mockSessionActivity(worktreePath: string): Promise<SessionActivity> {
   const none = worktreePath !== mockWorktree || localStorage.getItem("mock-sessions") === "0";
-  const sessions = none ? [] : mockSessionList;
+  const sessions = none ? [] : onlyAuthor() ? mockSessionList.slice(0, 1) : mockSessionList;
   return delay({
     unseen: Object.fromEntries(sessions.map((s) => [s.id, unseenBy(worktreePath, s.id)])),
     open: unseenBy(worktreePath, null),
     written: none ? {} : mockWritten(worktreePath),
-    requests: none ? [] : structuredClone(mockRequests),
+    requests: none ? [] : structuredClone(onlyAuthor() ? mockRequests.filter((r) => !r.sessionId || r.sessionId === "mock-1") : mockRequests),
   });
 }
 
