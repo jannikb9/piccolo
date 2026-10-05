@@ -9,7 +9,7 @@ import type { DiffLayout, DiffOptions, DiffScope, LineRange, Repo, Worktree } fr
 type PathSet = Record<string, true>;
 
 /** What the panel beside the diff lists. */
-export type FileTab = "files" | "comments" | "sessions";
+export type FileTab = "files" | "comments";
 
 /** A comment being written, before it's saved. */
 export type Draft = { worktreeId: string; path: string; oldPath: string | null; range: LineRange; body: string };
@@ -203,6 +203,12 @@ export const useStore = create<State>()(
     }),
     {
       name: "review-ui",
+      // Version 1 dropped the Sessions tab: its sessions moved to the toolbar.
+      version: 1,
+      migrate: (state) => {
+        const s = state as { fileTab?: string };
+        return { ...s, fileTab: s.fileTab === "sessions" ? "files" : s.fileTab } as State;
+      },
       // Viewed state is kept in memory until it can be tied to file contents (milestone 4).
       partialize: (s) => ({
         selectedWorktreeId: s.selectedWorktreeId,

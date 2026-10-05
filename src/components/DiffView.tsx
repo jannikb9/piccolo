@@ -7,7 +7,7 @@ import type {
   SelectedLineRange,
 } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
-import { ChevronRight, Copy, MessageSquare } from "lucide-react";
+import { ChevronRight, MessageSquare } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
@@ -35,7 +35,7 @@ import { CodeNavigation } from "./CodeNav";
 import { Composer, Conversation, DetachedNote, ThreadCard } from "./Comments";
 import { FindBar } from "./FindBar";
 import { WorktreeContext } from "./SendToAgent";
-import { DiffBlocks, DiffCount, IconButton, StatusBadge, Tooltip, ViewedToggle } from "./ui";
+import { CopyButton, DiffBlocks, DiffCount, StatusBadge, Tooltip, ViewedToggle } from "./ui";
 
 /** What an annotation row under a diff line holds. */
 type Note =
@@ -614,16 +614,7 @@ function FileHeader({
         <span className="truncate text-fg-subtle">{dir}</span>
         <span className="shrink-0 font-medium text-fg">{base}</span>
       </span>
-      <IconButton
-        label="Copy path"
-        className="size-5 shrink-0 opacity-0 group-hover:opacity-100"
-        onClick={(e) => {
-          e.stopPropagation();
-          navigator.clipboard.writeText(file.path);
-        }}
-      >
-        <Copy className="size-3" />
-      </IconButton>
+      <CopyButton text={file.path} label="Copy path" className="size-5 shrink-0 opacity-0 group-hover:opacity-100 data-copied:opacity-100" />
       {note && <span className="truncate text-[12px] text-fg-subtle">{note}</span>}
 
       <span className="ml-auto flex shrink-0 items-center gap-3">

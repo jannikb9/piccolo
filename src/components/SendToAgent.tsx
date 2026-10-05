@@ -1,9 +1,8 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { Check, ChevronDown, LoaderCircle, Send } from "lucide-react";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { ChevronDown, Send } from "lucide-react";
+import { createContext, useContext, type ReactNode } from "react";
 import { useSendComments, useSessionActivity, useSessions, type SendTarget } from "../lib/queries";
-import { agentLabel, ago, cn, timeAgo } from "../lib/utils";
-import { useStore } from "../store";
+import { agentLabel, timeAgo } from "../lib/utils";
 import type { AgentKind, AgentSession, GeneralThread, ReviewRequest, SessionActivity, Thread, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
 import { Button, Tooltip } from "./ui";
@@ -53,113 +52,23 @@ export function useSessionRoles(worktree: Worktree) {
 export const unseenBy = (activity: SessionActivity, session: AgentSession | null) =>
   session ? (activity.unseen[session.id] ?? []) : activity.open;
 
-/** True for two seconds after the returned function is called, to confirm a send. */
-export function useJustDone(): [boolean, () => void] {
-  const [doneAt, setDoneAt] = useState(0);
-  useEffect(() => {
-    if (!doneAt) return;
-    const timer = setTimeout(() => setDoneAt(0), 2000);
-    return () => clearTimeout(timer);
-  }, [doneAt]);
-  return [doneAt > 0, () => setDoneAt(Date.now())];
-}
-
 /**
- * The toolbar's view of the agents: who's reviewing right now, and a button that sends the session
- * building the branch what it hasn't seen ("Send to Claude 3"). Comments are posted as they're
- * written; this only tells an agent there's something to read.
+ * A comment's send button. With a session building the branch it sends there, and an arrow beside
+ * it opens the other choices; otherwise the button itself opens them: the running sessions by
+ * name, then a new Claude or Codex session.
  */
-export function SendToAgent({ worktree }: { worktree: Worktree }) {
-  const { sessions, activity, author } = useSessionRoles(worktree);
-  const send = useSendComments(worktree);
-  const [justSent, markSent] = useJustDone();
-  const count = unseenBy(activity, author).length;
-  const reviewing = activity.requests.filter(isUnderway);
-
-  return (
-    <>
-      {reviewing.length > 0 && <ReviewingChip requests={reviewing} sessions={sessions} />}
-      {justSent ? (
-        <Button disabled className="disabled:opacity-100">
-          <Check className="size-3.5 text-add" />
-          Sent
-        </Button>
-      ) : (
-        count > 0 && (
-          <SendControl
-            sessions={sessions}
-            author={author}
-            primary
-            count={count}
-            busy={send.isPending}
-            onSend={(to) => send.mutate({ to, threads: null }, { onSuccess: markSent })}
-          />
-        )
-      )}
-    </>
-  );
-}
-
-/** "Codex is reviewing": opens the Sessions tab, where reviews are followed. */
-function ReviewingChip({ requests, sessions }: { requests: ReviewRequest[]; sessions: AgentSession[] }) {
-  const setFileTab = useStore((s) => s.setFileTab);
-  const agents = [...new Set(requests.map((r) => r.agent))];
-  const waiting = requests.every((r) => r.startedAt === null);
-  const label =
-    requests.length === 1 ? `${agentLabel(agents[0])} ${waiting ? "is starting" : "is reviewing"}` : `${requests.length} reviews`;
-  return (
-    <Tooltip
-      label={
-        <span className="flex max-w-80 flex-col gap-0.5">
-          {requests.map((r) => {
-            const session = sessions.find((s) => s.id === r.sessionId);
-            return (
-              <span key={r.id} className="truncate">
-                {session ? sessionName(session) : `${agentLabel(r.agent)}, new session`} ·{" "}
-                {r.startedAt === null ? `asked ${ago(r.requestedAt)}` : `${r.comments} so far`}
-              </span>
-            );
-          })}
-          <span className="text-fg-subtle">Show sessions</span>
-        </span>
-      }
-    >
-      <button
-        type="button"
-        onClick={() => setFileTab("sessions")}
-        className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-fg-muted hover:bg-bg-hover hover:text-fg"
-      >
-        <LoaderCircle className="size-3.5 animate-spin text-mod" />
-        {agents.length === 1 && <AgentIcon name={agents[0]} className="size-3.5" />}
-        {label}
-      </button>
-    </Tooltip>
-  );
-}
-
-/**
- * The send button. With a session building the branch it sends there ("Send to Claude"), and an
- * arrow beside it opens the other choices; otherwise the button itself opens them: the running
- * sessions by name, then a new Claude or Codex session.
- */
-export function SendControl({
+function SendControl({
   sessions,
   author,
-  primary,
   busy,
-  count,
   onSend,
 }: {
   sessions: AgentSession[];
   author: AgentSession | null;
-  primary?: boolean;
   busy: boolean;
-  count?: number;
   onSend: (to: SendTarget) => void;
 }) {
   const reachable = sessions.filter((s) => s.reachable);
-  const variant = primary ? "primary" : "ghost";
-  const countBadge = count !== undefined && <Count value={count} inverted={primary} />;
   const menu = (trigger: ReactNode) => (
     <DropdownMenuPrimitive.Root>
       <DropdownMenuPrimitive.Trigger asChild>{trigger}</DropdownMenuPrimitive.Trigger>
@@ -196,10 +105,9 @@ export function SendControl({
 
   if (!author) {
     return menu(
-      <Button variant={variant} disabled={busy}>
+      <Button variant="ghost" disabled={busy}>
         <Send className="size-3.5" />
-        {primary ? "Send to…" : "Send"}
-        {countBadge}
+        Send
         <ChevronDown className="size-3" />
       </Button>,
     );
@@ -215,20 +123,14 @@ export function SendControl({
         }
       >
         <span>
-          <Button variant={variant} disabled={busy} onClick={() => onSend({ session: author.id })} className="rounded-r-none">
+          <Button variant="ghost" disabled={busy} onClick={() => onSend({ session: author.id })} className="rounded-r-none">
             <Send className="size-3.5" />
-            {primary ? `Send to ${agentLabel(author.agent)}` : "Send"}
-            {countBadge}
+            Send
           </Button>
         </span>
       </Tooltip>
       {menu(
-        <Button
-          variant={variant}
-          disabled={busy}
-          aria-label="Send to another session"
-          className={cn("rounded-l-none px-1.5", primary && "border-l border-black/25")}
-        >
+        <Button variant="ghost" disabled={busy} aria-label="Send to another session" className="rounded-l-none px-1.5">
           <ChevronDown className="size-3" />
         </Button>,
       )}
@@ -261,19 +163,6 @@ export function MenuRow({
       <span className="tabular text-[11px] text-fg-faint">{time}</span>
       {detail && <span className="col-start-2 col-end-4 truncate text-[11.5px] text-fg-subtle">{detail}</span>}
     </DropdownMenuPrimitive.Item>
-  );
-}
-
-function Count({ value, inverted }: { value: number; inverted?: boolean }) {
-  return (
-    <span
-      className={cn(
-        "tabular rounded-full px-1.5 text-[11px] leading-4",
-        inverted ? "bg-black/20 text-primary-fg" : "bg-bg-active text-fg-muted",
-      )}
-    >
-      {value}
-    </span>
   );
 }
 

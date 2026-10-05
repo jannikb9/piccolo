@@ -1,6 +1,7 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Check,
   Columns2,
   Copy,
   FolderGit2,
@@ -18,8 +19,8 @@ import { useStore } from "../store";
 import type { ChangedFile, DiffPatch, DiffScope, GeneralThread, Repo, Thread, Worktree } from "../types";
 import { CommitPicker } from "./CommitPicker";
 import { DiffView, type DiffViewHandle } from "./DiffView";
-import { SendToAgent } from "./SendToAgent";
-import { DiffCount, IconButton, Segmented, Skeleton, Tooltip } from "./ui";
+import { AgentsButton } from "./SessionList";
+import { DiffCount, IconButton, Segmented, Skeleton, Tooltip, useJustDone } from "./ui";
 
 export function ReviewPane({
   repo,
@@ -128,40 +129,7 @@ function Toolbar({
       className="flex h-13 shrink-0 items-center gap-3 border-b border-border-subtle px-4"
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        <span
-          className={cn(
-            "group flex h-6 min-w-24 items-center gap-1.5 rounded-md pr-1 pl-2 text-[12.5px] font-medium",
-            merged ? "bg-merged-soft text-merged" : "bg-bg-hover",
-          )}
-        >
-          {merged ? (
-            <Tooltip label={`Merged into ${repo.defaultBranch}`}>
-              <GitMerge className="size-3.5 shrink-0" />
-            </Tooltip>
-          ) : (
-            <GitBranch className="size-3.5 shrink-0 text-fg-subtle" />
-          )}
-          <Tooltip
-            label={
-              repo.defaultBranch ? (
-                <>
-                  Into <span className="font-mono">{repo.defaultBranch}</span>
-                </>
-              ) : (
-                "No main or master branch found; showing uncommitted changes"
-              )
-            }
-          >
-            <span className="selectable truncate">{branch}</span>
-          </Tooltip>
-          <IconButton
-            label="Copy branch name"
-            className="size-5 opacity-0 group-hover:opacity-100"
-            onClick={() => navigator.clipboard.writeText(branch)}
-          >
-            <Copy className="size-3" />
-          </IconButton>
-        </span>
+        <BranchChip branch={branch} base={repo.defaultBranch} merged={merged} />
         <span className="pointer-events-none ml-2 hidden shrink-0 items-center gap-2 text-[12px] text-fg-subtle @4xl:flex">
           <span className="tabular">
             {files.length} {files.length === 1 ? "file" : "files"}
@@ -199,9 +167,60 @@ function Toolbar({
             { value: "unified", label: <Rows2 className="size-3.5" />, tooltip: "Unified" },
           ]}
         />
-        <SendToAgent worktree={worktree} />
+        <AgentsButton worktree={worktree} />
       </div>
     </header>
+  );
+}
+
+/**
+ * The branch name, copied by a click. Hovering swaps its icon for a copy icon, the cue that a
+ * click copies; after a click it shows a check and the tooltip says so. Long names are cut short
+ * and the tooltip has the whole name.
+ */
+function BranchChip({ branch, base, merged }: { branch: string; base: string | null; merged: boolean }) {
+  const [copied, markCopied] = useJustDone();
+  const BranchIcon = merged ? GitMerge : GitBranch;
+  return (
+    <Tooltip
+      label={
+        <span className="flex max-w-120 flex-col gap-0.5">
+          <span className="font-mono break-all text-fg">{branch}</span>
+          {base ? (
+            <span>
+              {merged ? "Merged into" : "Into"} <span className="font-mono">{base}</span>
+            </span>
+          ) : (
+            "No main or master branch found; showing uncommitted changes"
+          )}
+          <span className="text-fg-subtle">{copied ? "Copied" : "Click to copy"}</span>
+        </span>
+      }
+    >
+      <button
+        type="button"
+        aria-label={`Copy branch name ${branch}`}
+        onClick={(e) => {
+          // Keeps the tooltip open, so it can say the name was copied.
+          e.preventDefault();
+          navigator.clipboard.writeText(branch).then(markCopied);
+        }}
+        className={cn(
+          "group flex h-6 max-w-80 min-w-24 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium transition-colors",
+          merged ? "bg-merged-soft text-merged hover:bg-merged/25" : "bg-bg-hover hover:bg-bg-active",
+        )}
+      >
+        {copied ? (
+          <Check className={cn("size-3.5 shrink-0", !merged && "text-fg-muted")} strokeWidth={2.5} />
+        ) : (
+          <>
+            <BranchIcon className={cn("size-3.5 shrink-0 group-hover:hidden", !merged && "text-fg-subtle")} />
+            <Copy className={cn("hidden size-3.5 shrink-0 group-hover:block", !merged && "text-fg-muted")} />
+          </>
+        )}
+        <span className="truncate">{branch}</span>
+      </button>
+    </Tooltip>
   );
 }
 

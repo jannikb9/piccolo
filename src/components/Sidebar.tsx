@@ -241,7 +241,7 @@ function WorktreeRow({
   const chosenScope = useStore((s) => s.scopes[wt.id]);
   const diffOptions = useDiffOptions();
   const stats = useWorktreeStats(wt, base);
-  // Only running sessions: the Sessions tab lists the rest.
+  // Only running sessions: the toolbar's agents popover lists the rest.
   const sessions = useSessions(wt).filter((s) => s.running);
   const deleteWorktree = useDeleteWorktree();
   // Shared by right-click and the "⋮" button.

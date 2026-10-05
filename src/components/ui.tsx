@@ -2,8 +2,8 @@ import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
-import { Check } from "lucide-react";
-import type { ComponentProps, CSSProperties, KeyboardEvent, ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
+import { useEffect, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "../lib/utils";
 import type { FileStatus } from "../types";
 
@@ -128,6 +128,38 @@ export function IconButton({ label, className, ...props }: ComponentProps<"butto
         {...props}
       />
     </Tooltip>
+  );
+}
+
+/** True for two seconds after the returned function is called, to confirm an action. */
+export function useJustDone(): [boolean, () => void] {
+  const [doneAt, setDoneAt] = useState(0);
+  useEffect(() => {
+    if (!doneAt) return;
+    const timer = setTimeout(() => setDoneAt(0), 2000);
+    return () => clearTimeout(timer);
+  }, [doneAt]);
+  return [doneAt > 0, () => setDoneAt(Date.now())];
+}
+
+/**
+ * Copies `text`, then shows a check for a moment. Shown while copied even where it's otherwise
+ * hidden until hover (style that with `data-copied:`).
+ */
+export function CopyButton({ text, label, className }: { text: string; label: string; className?: string }) {
+  const [copied, markCopied] = useJustDone();
+  return (
+    <IconButton
+      label={copied ? "Copied" : label}
+      data-copied={copied || undefined}
+      className={className}
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(text).then(markCopied);
+      }}
+    >
+      {copied ? <Check className="size-3" strokeWidth={2.5} /> : <Copy className="size-3" />}
+    </IconButton>
   );
 }
 
