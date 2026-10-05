@@ -77,7 +77,7 @@ export function ReviewPane({
               <>
                 <span className="font-mono">{worktree.branch ?? worktree.head}</span> has no differences from{" "}
                 <span className="font-mono">{repo.defaultBranch}</span>
-                {scope === "committed" && " in its commits"}.
+                {scope === "committed" && worktree.dirty && " in its commits"}.
               </>
             ) : (
               "There are no uncommitted changes in this worktree."
@@ -114,8 +114,6 @@ function Toolbar({
 }) {
   const layout = useStore((s) => s.layout);
   const setLayout = useStore((s) => s.setLayout);
-  const setScope = useStore((s) => s.setScope);
-  const selectCommit = useStore((s) => s.selectCommit);
   const hideWhitespace = useStore((s) => s.hideWhitespace);
   const toggleHideWhitespace = useStore((s) => s.toggleHideWhitespace);
   const hideImports = useStore((s) => s.hideImports);
@@ -174,20 +172,6 @@ function Toolbar({
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <CommitPicker worktree={worktree} base={repo.defaultBranch} scope={scope} />
-        <Segmented
-          label="Changes to show"
-          // Nothing is chosen while a single commit is shown; choosing a mode leaves the commit.
-          value={typeof scope === "string" ? scope : null}
-          onChange={(mode) => {
-            setScope(mode);
-            selectCommit(worktree.id, null);
-          }}
-          options={[
-            { value: "all", label: "All", tooltip: "Committed and uncommitted changes" },
-            { value: "committed", label: "Committed", tooltip: "Commits on this branch only" },
-            { value: "uncommitted", label: "Uncommitted", tooltip: "Working tree changes only" },
-          ]}
-        />
         <div className="flex items-center gap-0.5">
           <IconButton
             label={hideWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}

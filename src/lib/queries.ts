@@ -3,7 +3,7 @@ import { useEffect, useMemo } from "react";
 import { useStore } from "../store";
 import type { DraftImage } from "./images";
 import { toUpload } from "./images";
-import type { AgentKind, AgentSession, SessionActivity, DiffOptions, DiffScope, GeneralThread, LineRange, RemoteBranch, Repo, Thread, Worktree } from "../types";
+import type { AgentKind, AgentSession, SessionActivity, Commit, DiffOptions, DiffScope, GeneralThread, LineRange, RemoteBranch, Repo, ScopeMode, Thread, Worktree } from "../types";
 import {
   api,
   confirmAction,
@@ -71,15 +71,38 @@ export function useCommits(worktree: Worktree | undefined, base: string | null) 
 }
 
 /**
- * What the diff shows: the commit chosen for this worktree, or else the scope mode. A commit that
- * left the branch (amended, rebased away) falls back to the mode.
+ * What the diff shows when nothing was chosen: everything while there are uncommitted changes,
+ * else the branch's commits. Without a base there are no commits to compare, only the working tree.
  */
+export function defaultScope(worktree: Worktree, base: string | null): ScopeMode {
+  return worktree.dirty || !base ? "all" : "committed";
+}
+
+/**
+ * The scope chosen for the worktree, while it still applies: a commit that left the branch
+ * (amended, rebased away) or uncommitted changes that got committed fall back to the default.
+ */
+export function resolveScope(
+  worktree: Worktree,
+  base: string | null,
+  chosen: DiffScope | undefined,
+  commits: Commit[] | undefined,
+): DiffScope {
+  if (!chosen) return defaultScope(worktree, base);
+  const applies =
+    typeof chosen === "object"
+      ? !commits || commits.some((c) => c.sha === chosen.commit)
+      : chosen === "committed"
+        ? !!base
+        : worktree.dirty;
+  return applies ? chosen : defaultScope(worktree, base);
+}
+
+/** What the diff shows: the scope chosen in the commit picker, or else the worktree's default. */
 export function useDiffScope(worktree: Worktree | undefined, base: string | null): DiffScope {
-  const mode = useStore((s) => s.scope);
-  const sha = useStore((s) => (worktree ? s.commits[worktree.id] : undefined));
+  const chosen = useStore((s) => (worktree ? s.scopes[worktree.id] : undefined));
   const commits = useCommits(worktree, base).data;
-  const known = !!sha && (!commits || commits.some((c) => c.sha === sha));
-  return useMemo(() => (known ? { commit: sha! } : mode), [known, sha, mode]);
+  return useMemo(() => (worktree ? resolveScope(worktree, base, chosen, commits) : "all"), [worktree, base, chosen, commits]);
 }
 
 export function useChangedFiles(worktree: Worktree | undefined, base: string | null, scope: DiffScope, options: DiffOptions) {

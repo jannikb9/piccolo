@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import {
   prefetchWorktree,
+  resolveScope,
   useAddRepo,
   useDeleteWorktree,
   useRemoveRepo,
@@ -237,7 +238,7 @@ function WorktreeRow({
   shortcut?: number;
 }) {
   const selectWorktree = useStore((s) => s.selectWorktree);
-  const scope = useStore((s) => s.scope);
+  const chosenScope = useStore((s) => s.scopes[wt.id]);
   const diffOptions = useDiffOptions();
   const stats = useWorktreeStats(wt, base);
   // Only running sessions: the Sessions tab lists the rest.
@@ -294,7 +295,7 @@ function WorktreeRow({
           <button
             type="button"
             onClick={() => selectWorktree(wt.id)}
-            onPointerEnter={() => prefetchWorktree(wt, base, scope, diffOptions)}
+            onPointerEnter={() => prefetchWorktree(wt, base, resolveScope(wt, base, chosenScope, undefined), diffOptions)}
             aria-current={selected ? "page" : undefined}
             className={cn(
               "group grid w-full grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left transition-colors",

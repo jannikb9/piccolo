@@ -65,7 +65,7 @@ export type FileVersions = {
   new: string | null;
 };
 
-/** Which of the branch's changes to show; chosen with the toolbar's segmented control. */
+/** Which of the branch's changes to show; chosen in the toolbar's commit picker. */
 export type ScopeMode = "all" | "committed" | "uncommitted";
 /** A scope mode, or what a single commit changed. */
 export type DiffScope = ScopeMode | { commit: string };
