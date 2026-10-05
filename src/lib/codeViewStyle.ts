@@ -70,11 +70,20 @@ export const unsafeCSS = /* css */ `
     --diffs-bg-selection-override: color-mix(in oklab, var(--accent) 30%, var(--bg));
     --diffs-bg-selection-number-override: color-mix(in oklab, var(--accent) 45%, var(--bg));
   }
+  /* Smaller than the library's full-line square, with its right edge where the library puts it,
+     so it sits just after the line number instead of over it. */
   [data-utility-button] {
+    width: 16px;
+    height: 16px;
+    margin-top: calc((1lh - 16px) / 2);
+    margin-right: calc((1lh - 1ch) * -1);
     background-color: var(--accent);
     color: var(--accent-fg);
-    border-radius: 5px;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+    border-radius: 4px;
+  }
+  [data-utility-button] [data-icon] {
+    width: 12px;
+    height: 12px;
   }
   [data-utility-button]:hover {
     filter: brightness(1.12);
