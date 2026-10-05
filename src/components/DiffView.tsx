@@ -29,7 +29,7 @@ import {
   type SearchMatch,
 } from "../lib/search";
 import { cn, splitPath } from "../lib/utils";
-import { useStore } from "../store";
+import { useDiffLayout, useStore } from "../store";
 import type { ChangedFile, DiffPatch, GeneralThread, LineRange, Side, Thread, Worktree } from "../types";
 import { CodeNavigation } from "./CodeNav";
 import { Composer, Conversation, DetachedNote, ThreadCard } from "./Comments";
@@ -89,7 +89,7 @@ export function DiffView({
   generalThreads: GeneralThread[];
   viewRef: Ref<DiffViewHandle>;
 }) {
-  const layout = useStore((s) => s.layout);
+  const layout = useDiffLayout();
   const viewed = useStore((s) => s.viewed[worktree.id]);
   const collapsedOverrides = useStore((s) => s.collapsed[worktree.id]);
   const setActivePath = useStore((s) => s.setActivePath);

@@ -30,7 +30,10 @@ type State = {
   collapsedRepos: PathSet;
   /** File list sections the user opened or closed; others use `COLLAPSED_BY_DEFAULT`. */
   collapsedSections: Partial<Record<SectionId, boolean>>;
+  /** The layout chosen in the toolbar; a narrow diff pane shows unified regardless (`useDiffLayout`). */
   layout: DiffLayout;
+  /** Whether the diff pane is too narrow for split diffs. */
+  narrowDiff: boolean;
   /** worktreeId → the changes chosen in the commit picker; worktrees without one use `defaultScope`. */
   scopes: Record<string, DiffScope>;
   hideWhitespace: boolean;
@@ -66,6 +69,7 @@ type State = {
   toggleRepo: (id: string) => void;
   setSectionCollapsed: (id: SectionId, collapsed: boolean) => void;
   setLayout: (layout: DiffLayout) => void;
+  setNarrowDiff: (narrow: boolean) => void;
   /** `null` goes back to the worktree's default. */
   setScope: (worktreeId: string, scope: DiffScope | null) => void;
   toggleHideWhitespace: () => void;
@@ -104,6 +108,7 @@ export const useStore = create<State>()(
       collapsedRepos: {},
       collapsedSections: {},
       layout: "split",
+      narrowDiff: false,
       scopes: {},
       hideWhitespace: false,
       hideImports: false,
@@ -125,6 +130,7 @@ export const useStore = create<State>()(
       toggleRepo: (id) => set((s) => ({ collapsedRepos: toggle(s.collapsedRepos, id, !s.collapsedRepos[id]) })),
       setSectionCollapsed: (id, collapsed) => set((s) => ({ collapsedSections: { ...s.collapsedSections, [id]: collapsed } })),
       setLayout: (layout) => set({ layout }),
+      setNarrowDiff: (narrowDiff) => set({ narrowDiff }),
       setScope: (wt, scope) =>
         set((s) => {
           const { [wt]: _, ...rest } = s.scopes;
@@ -252,3 +258,6 @@ export function resolveSelection(repos: Repo[], selectedId: string | null) {
   const repo = repos.find((r) => r.worktrees.length > 0);
   return repo ? { repo, worktree: sortWorktrees(repo.worktrees)[0] } : undefined;
 }
+
+/** The diff layout to show: the chosen one, or unified while the diff pane is too narrow for split. */
+export const useDiffLayout = (): DiffLayout => useStore((s) => (s.narrowDiff ? "unified" : s.layout));

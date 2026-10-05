@@ -12,7 +12,7 @@ import {
   Pilcrow,
   Rows2,
 } from "lucide-react";
-import type { ReactNode, Ref } from "react";
+import { useLayoutEffect, useRef, type ReactNode, type Ref } from "react";
 import { useAddRepo, useWorktreeStats } from "../lib/queries";
 import { cn, scopeKey, totals } from "../lib/utils";
 import { useStore } from "../store";
@@ -47,9 +47,21 @@ export function ReviewPane({
   viewRef: Ref<DiffViewHandle>;
 }) {
   const query = filesQuery.isError ? filesQuery : patchQuery;
+  const mainRef = useRef<HTMLElement>(null);
+  const setNarrowDiff = useStore((s) => s.setNarrowDiff);
+  // Measured before the first paint, so a narrow pane never shows a split diff first.
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const check = () => setNarrowDiff(main.clientWidth < SPLIT_MIN_WIDTH);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, [setNarrowDiff]);
 
   return (
-    <main className="@container flex h-full min-w-0 flex-col bg-bg">
+    <main ref={mainRef} className="@container flex h-full min-w-0 flex-col bg-bg">
       <Toolbar repo={repo} worktree={worktree} scope={scope} files={files} />
       <div className="min-h-0 flex-1">
         {filesQuery.isPending || patchQuery.isPending ? (
@@ -102,6 +114,9 @@ export function ReviewPane({
   );
 }
 
+/** Narrower than this, the diff pane shows unified diffs: split halves would wrap nearly every line. */
+const SPLIT_MIN_WIDTH = 768;
+
 function Toolbar({
   repo,
   worktree,
@@ -114,6 +129,7 @@ function Toolbar({
   files: ChangedFile[];
 }) {
   const layout = useStore((s) => s.layout);
+  const narrow = useStore((s) => s.narrowDiff);
   const setLayout = useStore((s) => s.setLayout);
   const hideWhitespace = useStore((s) => s.hideWhitespace);
   const toggleHideWhitespace = useStore((s) => s.toggleHideWhitespace);
@@ -158,15 +174,18 @@ function Toolbar({
             <Import className="size-3.5" />
           </IconButton>
         </div>
-        <Segmented
-          label="Diff layout"
-          value={layout}
-          onChange={setLayout}
-          options={[
-            { value: "split", label: <Columns2 className="size-3.5" />, tooltip: "Split" },
-            { value: "unified", label: <Rows2 className="size-3.5" />, tooltip: "Unified" },
-          ]}
-        />
+        {/* A narrow pane is always unified, so there's nothing to choose. */}
+        {!narrow && (
+          <Segmented
+            label="Diff layout"
+            value={layout}
+            onChange={setLayout}
+            options={[
+              { value: "split", label: <Columns2 className="size-3.5" />, tooltip: "Split" },
+              { value: "unified", label: <Rows2 className="size-3.5" />, tooltip: "Unified" },
+            ]}
+          />
+        )}
         <AgentsButton worktree={worktree} />
       </div>
     </header>
