@@ -147,6 +147,9 @@ export const api = {
   setThreadDismissed: (id: number, dismissed: boolean): Promise<void> =>
     isTauri ? invoke("set_thread_dismissed", { id, dismissed }) : mockSetDismissed(id, dismissed),
 
+  /** Agents a new session can be opened for: those whose desktop app is installed. */
+  availableAgents: (): Promise<AgentKind[]> => (isTauri ? invoke("available_agents") : Promise.resolve(["claude", "codex"])),
+
   /** Agent sessions working on each worktree (by path); worktrees without one are left out. */
   listSessions: (paths: string[]): Promise<Record<string, AgentSession[]>> =>
     isTauri ? invoke("list_sessions", { paths }) : mockSessions(paths),
@@ -155,9 +158,14 @@ export const api = {
   sessionActivity: (path: string): Promise<SessionActivity> =>
     isTauri ? invoke("session_activity", { path }) : mockSessionActivity(path),
 
-  /** Sends `session` the comments it hasn't seen; resolves to the threads sent. */
-  sendComments: (path: string, session: string): Promise<number[]> =>
-    isTauri ? invoke("send_comments", { path, session }) : mockSendComments(path, session),
+  /**
+   * Sends comments to address: to the running `session`, those it hasn't seen; to a new Claude or
+   * Codex session in its app, every open one.
+   */
+  sendComments: (path: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> =>
+    isTauri
+      ? invoke("send_comments", { path, session: "session" in to ? to.session : null, agent: "agent" in to ? to.agent : null })
+      : mockSendComments(path, to),
 
   /** Asks the running `session` to review the worktree, or a new Claude or Codex session in its app. */
   requestReview: (path: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> =>

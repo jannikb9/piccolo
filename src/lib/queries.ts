@@ -156,7 +156,14 @@ export function useSessions(worktree: Worktree): AgentSession[] {
   return useAllSessions().data?.[worktree.path] ?? NO_SESSIONS;
 }
 
-const NO_ACTIVITY: SessionActivity = { unseen: {}, open: [], written: {}, requests: [] };
+const NO_AGENTS: AgentKind[] = [];
+
+/** Agents a new session can be opened for; installing an app shows up when the window regains focus. */
+export function useAvailableAgents(): AgentKind[] {
+  return useQuery({ queryKey: ["available-agents"], queryFn: api.availableAgents, staleTime: 60_000 }).data ?? NO_AGENTS;
+}
+
+const NO_ACTIVITY: SessionActivity = { unseen: {}, open: [], startedBy: {}, written: {}, requests: [] };
 
 /** What each of the worktree's sessions hasn't seen, and the reviews requested on it. */
 export function useSessionActivity(worktree: Worktree): SessionActivity {
@@ -169,11 +176,11 @@ export function useSessionActivity(worktree: Worktree): SessionActivity {
   );
 }
 
-/** Sends a session (by id) the comments it hasn't seen. */
+/** Sends comments to address to a running session (what it hasn't seen), or a new one (all open ones). */
 export function useSendComments(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (session: string) => api.sendComments(worktree.path, session),
+    mutationFn: (to: { session: string } | { agent: AgentKind }) => api.sendComments(worktree.path, to),
     onError: (error) => showError("Couldn't send the comments", String(error)),
     onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
   });

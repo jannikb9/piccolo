@@ -178,21 +178,27 @@ export type AgentSession = {
   reachable: boolean;
 };
 
-/** A review asked of an agent (src-tauri/src/requests.rs). */
+/**
+ * What an agent was asked to do (src-tauri/src/requests.rs): review the branch, or address comments
+ * on it. A session's role follows from the latest one it was asked.
+ */
 export type ReviewRequest = {
   id: number;
+  kind: "review" | "implement";
   /** Who was asked: `claude`, `codex`, or another agent's name. */
   agent: string;
-  /** The session reviewing, once it took the request on. */
+  /** The session doing it, once it took the request on. */
   sessionId: string | null;
-  /** The commit the branch was at when the review was asked for. */
+  /** The commit the branch was at when it was asked. */
   head: string | null;
+  /** The comments to address, for an implement request. */
+  threads: number[];
   requestedAt: number;
   /** When the agent took it on; `null` while waiting for it to start. */
   startedAt: number | null;
   /** When the agent said it's done. */
   finishedAt: number | null;
-  /** Comments and replies the agent wrote while reviewing. */
+  /** Comments and replies the agent wrote meanwhile. */
   comments: number;
 };
 
@@ -202,6 +208,8 @@ export type SessionActivity = {
   unseen: Record<string, number[]>;
   /** All open threads, which a new session is given. */
   open: number[];
+  /** Who started each open thread: an agent's name, or `null` for the reviewer. */
+  startedBy: Record<number, string | null>;
   /** Comments and replies each session wrote on the branch, by session id. */
   written: Record<string, number>;
   /** Newest first. */

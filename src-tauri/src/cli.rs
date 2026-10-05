@@ -4,6 +4,7 @@
 use crate::comments::{self, Author, By, ExcerptRow, LineRange, NewThread, Side, Store, Target, Thread};
 use crate::git::{self, DiffOptions, DiffRange, LineKind, Result, Scope};
 use crate::repos;
+use crate::requests::Kind;
 use crate::sessions::{shell_quote, Caller};
 use std::collections::HashMap;
 use std::io::Read;
@@ -22,11 +23,16 @@ Usage:
                                      branch removed, numbered as in the base version)
   piccolo comment --general <message>
                                      Comment on the branch as a whole, not on particular lines
-  piccolo done [--request <id>]      Say you've finished reviewing the branch
+  piccolo done [--request <id>] [--implement]
+                                     Say you've finished reviewing the branch (--implement:
+                                     addressing comments on it)
   piccolo resolve <id>               Mark a comment resolved
   piccolo reopen <id>                Reopen a resolved comment
-  piccolo guide [--request <id>]     How to review this branch as an agent (--request: the review
+  piccolo guide [--request <id>]     How to review this branch as an agent (--request: what
                                      Piccolo asked you for, which you take on)
+  piccolo guide --implement [<id>...]
+                                     How to address the open comments on this branch (or only
+                                     the ones whose ids are given)
 
 Every command works on the worktree in the current folder, or the one `-C <worktree>` names: a
 path, or a branch or worktree folder name in a repository added to the app. File paths are then
@@ -178,20 +184,24 @@ fn run(command: &str, args: &[String], folder: &Folder, caller: Option<&Caller>)
             Ok(())
         }
         "done" => {
-            let args = Args::parse(args, &["--as", "--request"])?;
+            let args = Args::parse(args, &["--as", "--request", "--implement"])?;
             if !args.positional.is_empty() {
                 return Err("`done` takes no message: post anything left to say as a comment first".into());
             }
-            let name = agent_name(args.value("--as"))?.ok_or("say who reviewed: --as <your name>")?;
+            let name = agent_name(args.value("--as"))?.ok_or("say who you are: --as <your name>")?;
             let request = args.value("--request").map(|id| request_id(&id)).transpose()?;
+            let kind = if args.has("--implement") { Kind::Implement } else { Kind::Review };
             let target = folder.target()?;
-            let review = Store::open()?.finish_review(&target, &name, session, request)?;
-            let comments = match review.comments {
-                0 => "no comments".to_string(),
-                1 => "1 comment".to_string(),
-                n => format!("{n} comments"),
+            let done = Store::open()?.finish_request(&target, kind, &name, session, request)?;
+            let count = |one: &str, many: &str| match done.comments {
+                0 => format!("no {many}"),
+                1 => format!("1 {one}"),
+                n => format!("{n} {many}"),
             };
-            println!("Finished your review of {} with {comments}.", target.label());
+            match done.kind {
+                Kind::Review => println!("Finished your review of {} with {}.", target.label(), count("comment", "comments")),
+                Kind::Implement => println!("Finished addressing the comments on {}, with {}.", target.label(), count("reply", "replies")),
+            }
             Ok(())
         }
         "resolve" | "reopen" => {
@@ -201,18 +211,27 @@ fn run(command: &str, args: &[String], folder: &Folder, caller: Option<&Caller>)
             Ok(())
         }
         "guide" => {
-            let args = Args::parse(args, &["--request"])?;
+            let args = Args::parse(args, &["--request", "--implement"])?;
             let target = folder.target()?;
-            let review = match args.value("--request") {
+            let via = folder.option(&target);
+            match args.value("--request") {
                 Some(id) => {
                     let store = Store::open()?;
-                    let request = store.start_review(&target, request_id(&id)?, caller)?;
+                    let request = store.start_request(&target, request_id(&id)?, caller)?;
+                    if request.kind == Kind::Implement {
+                        print!("{}", implement_guide(&target, &via, &request.threads, Some(request.id)));
+                        return Ok(());
+                    }
                     let previous = store.previous_review(&target, &request.agent, request.session_id.as_deref(), request.id)?;
-                    Some(Review { id: request.id, since: previous.and_then(|p| p.head) })
+                    let review = Review { id: request.id, since: previous.and_then(|p| p.head) };
+                    print!("{}", guide(&target, &via, Some(&review))?);
                 }
-                None => None,
-            };
-            print!("{}", guide(&target, &folder.option(&target), review.as_ref())?);
+                None if args.has("--implement") => {
+                    let only = args.positional.iter().map(|id| thread_id(std::slice::from_ref(id))).collect::<Result<Vec<_>>>()?;
+                    print!("{}", implement_guide(&target, &via, &only, None));
+                }
+                None => print!("{}", guide(&target, &via, None)?),
+            }
             Ok(())
         }
         _ => {
@@ -455,6 +474,41 @@ Sign everything with `--as` and your name (e.g. `--as codex`), so the developer 
 ",
         worktree = target.worktree,
     ))
+}
+
+/// Instructions for an agent addressing comments on the branch: `threads` (every open one when
+/// empty), for request `request` when Piccolo asked for it. `via` is how suggested commands name
+/// the worktree (` -C <worktree>`), or empty in it.
+fn implement_guide(target: &Target, via: &str, threads: &[i64], request: Option<i64>) -> String {
+    let branch = target.label();
+    let ids: String = threads.iter().map(|id| format!(" {id}")).collect();
+    let which = if threads.is_empty() {
+        "the open review comments".to_string()
+    } else {
+        let hashes: Vec<String> = threads.iter().map(|id| format!("#{id}")).collect();
+        format!("review comments {}", hashes.join(", "))
+    };
+    let files = if via.is_empty() { "the current folder" } else { "that worktree" };
+    let done = match request {
+        Some(id) => format!(" --request {id}"),
+        None => " --implement".to_string(),
+    };
+    format!(
+        "\
+# Addressing review comments on {branch}
+
+The reviewer asks you to address {which} on {branch} in {worktree}: change the code where they ask for it, and answer each comment. Comments signed by another agent (e.g. **Codex:**) are a second opinion, not the reviewer's request: apply them when they're right, otherwise reply why not.
+
+1. `piccolo{via} comments{ids}` lists them: the file, current line numbers and the code the reviewer saw (`>` marks the commented lines; \"Outdated\" means the code has changed since). A comment can include screenshots, listed as `Attached image (WxH): <path>`: open each one before acting, since the comment may only make sense with it. A general comment has no file or lines: it's about the branch as a whole.
+2. Apply what each comment asks for, in the files in {files}. If you disagree or it's unclear, leave the code alone and ask in your reply.
+3. Reply to every comment: `piccolo{via} reply --as <your name> <id> \"<what you changed, or your question>\"`. Keep it short and concrete. Don't resolve comments: the reviewer does that after checking.
+4. When you've finished, run `piccolo{via} done --as <your name>{done}`. It tells the reviewer you're done, so run it once, at the end, also when there was nothing to change.
+5. Finish with one line in the chat, e.g. \"I applied all the changes and answered the comments\" (or \"…except #3, where I asked a question\").
+
+Sign everything with `--as` and your name (e.g. `--as codex`), so the reviewer sees who wrote what.
+",
+        worktree = target.worktree,
+    )
 }
 
 /// Markdown for an agent: each thread with the code it's about, then how to answer.
@@ -701,6 +755,17 @@ mod tests {
         let again = guide(&target, "", Some(&Review { id: 7, since: Some("0123456789abcdef".into()) })).unwrap();
         assert!(again.contains("`piccolo done --as <your name> --request 7`"), "{again}");
         assert!(again.contains("when it was at 0123456789. `git diff 0123456789abcdef` shows what changed"), "{again}");
+
+        // Addressing comments: the ones asked about, finished with the request; or all open ones.
+        let asked = implement_guide(&target, &via, &[3, 5], Some(8));
+        assert!(asked.starts_with("# Addressing review comments on feat/x\n"), "{asked}");
+        assert!(asked.contains("address review comments #3, #5 on feat/x"), "{asked}");
+        assert!(asked.contains(&format!("`piccolo{via} comments 3 5`")), "{asked}");
+        assert!(asked.contains(&format!("`piccolo{via} reply --as <your name> <id>")), "{asked}");
+        assert!(asked.contains(&format!("`piccolo{via} done --as <your name> --request 8`")), "{asked}");
+        let unasked = implement_guide(&target, "", &[], None);
+        assert!(unasked.contains("address the open review comments") && unasked.contains("`piccolo comments` lists"), "{unasked}");
+        assert!(unasked.contains("`piccolo done --as <your name> --implement`"), "{unasked}");
 
         fs::remove_dir_all(&root).unwrap();
     }

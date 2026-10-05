@@ -535,8 +535,8 @@ const mockSessionList: AgentSession[] = [
 ];
 
 const mockRequests: ReviewRequest[] = [
-  { id: 2, agent: "codex", sessionId: "mock-codex", head: "a1b2c3d", requestedAt: minutesAgo(6), startedAt: minutesAgo(5), finishedAt: null, comments: 2 },
-  { id: 1, agent: "claude", sessionId: "mock-old", head: "9f8e7d6", requestedAt: minutesAgo(150), startedAt: minutesAgo(149), finishedAt: minutesAgo(131), comments: 0 },
+  { id: 2, kind: "review", agent: "codex", sessionId: "mock-codex", head: "a1b2c3d", threads: [], requestedAt: minutesAgo(6), startedAt: minutesAgo(5), finishedAt: null, comments: 2 },
+  { id: 1, kind: "review", agent: "claude", sessionId: "mock-old", head: "9f8e7d6", threads: [], requestedAt: minutesAgo(150), startedAt: minutesAgo(149), finishedAt: minutesAgo(131), comments: 0 },
 ];
 
 /** The session an agent's mock message came from. */
@@ -581,25 +581,42 @@ export function mockSessionActivity(worktreePath: string): Promise<SessionActivi
   return delay({
     unseen: Object.fromEntries(sessions.map((s) => [s.id, unseenBy(worktreePath, s.id)])),
     open: unseenBy(worktreePath, null),
+    startedBy: Object.fromEntries(
+      (threads[worktreePath] ?? [])
+        .filter((t) => !t.resolved)
+        .map((t) => [t.id, t.messages[0]?.author === "agent" ? (t.messages[0].authorName ?? "agent") : null]),
+    ),
     written: none ? {} : mockWritten(worktreePath),
-    requests: none ? [] : structuredClone(onlyAuthor() ? mockRequests.filter((r) => !r.sessionId || r.sessionId === "mock-1") : mockRequests),
+    requests: structuredClone(
+      worktreePath !== mockWorktree
+        ? []
+        : // Without sessions, only requests to new sessions that haven't started.
+          mockRequests.filter((r) => (none ? !r.sessionId : !onlyAuthor() || !r.sessionId || r.sessionId === "mock-1")),
+    ),
   });
 }
 
-export function mockSendComments(worktreePath: string, session: string): Promise<number[]> {
+export function mockSendComments(worktreePath: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> {
+  const session = "session" in to ? to.session : null;
   const sent = unseenBy(worktreePath, session);
   if (sent.length === 0) return Promise.reject("There are no comments to send");
-  for (const id of sent) (seen[session] ??= {})[id] = Date.now();
-  return delay(sent);
+  if (session) for (const id of sent) (seen[session] ??= {})[id] = Date.now();
+  return mockAsk("implement", to, sent);
 }
 
 export function mockRequestReview(_worktreePath: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> {
+  return mockAsk("review", to, []);
+}
+
+function mockAsk(kind: ReviewRequest["kind"], to: { session: string } | { agent: AgentKind }, sent: number[]): Promise<ReviewRequest> {
   const session = "session" in to ? mockSessionList.find((s) => s.id === to.session) : undefined;
   const request: ReviewRequest = {
     id: Math.max(0, ...mockRequests.map((r) => r.id)) + 1,
+    kind,
     agent: session?.agent ?? ("agent" in to ? to.agent : "claude"),
     sessionId: session?.id ?? null,
     head: "f00ba12",
+    threads: sent,
     requestedAt: Date.now(),
     startedAt: null,
     finishedAt: null,

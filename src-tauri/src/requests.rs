@@ -1,12 +1,16 @@
-//! Reviews the reviewer asks agents for. A request names the agent, and the session once one takes
-//! it on: a new session is opened with a prompt to run `piccolo guide --request <id>`, which claims
-//! the request for the session it runs in, and the agent says it's finished with `piccolo done`.
-//! In between, its comments come in one by one like anyone's. An agent can review unasked, too:
-//! `done` then records the review it did.
+//! What the reviewer asks agents to do: review the branch, or address comments on it (implement
+//! them). A request names the agent, and the session once one takes it on: a new session is opened
+//! with a prompt to run `piccolo guide --request <id>`, which claims the request for the session it
+//! runs in and prints the steps for its kind, and the agent says it's finished with `piccolo done`.
+//! In between, its comments and replies come in one by one like anyone's. An agent can do either
+//! unasked, too: `done` then records what it did.
+//!
+//! A session's role on the branch follows from what it was last asked: reviewers review, and the
+//! session building the branch, or asked to address comments, implements.
 
 use crate::comments::{blocking, now_ms, sql, Store, Target};
 use crate::git::{self, Result};
-use crate::sessions::{self, shell_quote, Agent, Caller};
+use crate::sessions::{self, shell_quote, Agent, Caller, Session};
 use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
 use std::path::Path;
@@ -22,39 +26,67 @@ pub(crate) const SCHEMA: &str = "
         head TEXT,
         requested_at INTEGER NOT NULL,
         started_at INTEGER,
-        finished_at INTEGER
+        finished_at INTEGER,
+        kind TEXT NOT NULL DEFAULT 'review',
+        threads TEXT
     );
     CREATE INDEX IF NOT EXISTS review_requests_by_branch ON review_requests (repo, branch);";
 
 /// Rows on `target`'s branch, with `?1` its repository, `?2` its branch and `?3` its worktree.
 const ON_BRANCH: &str = "repo = ?1 AND (branch = ?2 OR (?2 IS NULL AND branch IS NULL AND worktree = ?3))";
 
-/// A requested review.
+/// What an agent is asked to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// Review the branch, commenting on it.
+    Review,
+    /// Address comments on the branch: change the code and answer them.
+    Implement,
+}
+
+impl Kind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Kind::Review => "review",
+            Kind::Implement => "implement",
+        }
+    }
+}
+
+/// A request to an agent.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Request {
     pub id: i64,
+    pub kind: Kind,
     /// Who was asked: `claude`, `codex`, or another agent's name.
     pub agent: String,
-    /// The session doing the review, once it took it on (or when an existing one was asked).
+    /// The session doing it, once it took it on (or when an existing one was asked).
     pub session_id: Option<String>,
     /// The commit the branch was at when it was asked for.
     pub head: Option<String>,
+    /// The comments to address, for an implement request.
+    pub threads: Vec<i64>,
     pub requested_at: i64,
     /// When the agent took it on (`piccolo guide --request`).
     pub started_at: Option<i64>,
     /// When the agent said it's done (`piccolo done`).
     pub finished_at: Option<i64>,
-    /// Comments and replies the agent wrote on the branch while reviewing.
+    /// Comments and replies the agent wrote on the branch meanwhile.
     pub comments: i64,
 }
 
 fn request_from_row(row: &Row) -> rusqlite::Result<Request> {
+    let kind: String = row.get("kind")?;
+    let threads: Option<String> = row.get("threads")?;
     Ok(Request {
         id: row.get("id")?,
+        kind: if kind == "implement" { Kind::Implement } else { Kind::Review },
         agent: row.get("agent")?,
         session_id: row.get("session_id")?,
         head: row.get("head")?,
+        threads: threads.unwrap_or_default().split_whitespace().filter_map(|id| id.parse().ok()).collect(),
         requested_at: row.get("requested_at")?,
         started_at: row.get("started_at")?,
         finished_at: row.get("finished_at")?,
@@ -62,44 +94,91 @@ fn request_from_row(row: &Row) -> rusqlite::Result<Request> {
     })
 }
 
-/// Reviews requested on `target`'s branch, newest first, with the comments each brought.
+/// Requests on `target`'s branch, newest first, with the comments each brought.
 pub fn list(store: &Store, target: &Target) -> Result<Vec<Request>> {
     let mut stmt = sql(store.conn.prepare(&format!("SELECT * FROM review_requests WHERE {ON_BRANCH} ORDER BY id DESC")))?;
     let rows = sql(stmt.query_map(params![target.repo, target.branch, target.worktree], request_from_row))?;
     let mut requests = sql(rows.collect::<rusqlite::Result<Vec<_>>>())?;
     for request in &mut requests {
-        request.comments = store.review_comments(target, request)?;
+        request.comments = store.written_during(target, request)?;
     }
     Ok(requests)
 }
 
+/// Who's asked: a session working on the worktree, or a new session of an agent in its app.
+#[derive(Clone, Copy)]
+pub enum Asked<'a> {
+    Session(&'a Session),
+    New(Agent),
+}
+
 impl Store {
-    /// Asks `agent` for a review of `target`'s branch, at commit `head`; `session` when an existing
-    /// session is asked.
-    pub fn request_review(&self, target: &Target, agent: &str, session: Option<&str>, head: Option<&str>) -> Result<Request> {
-        let now = now_ms();
+    /// Asks `to` for `kind` of work on `target`'s branch, at commit `head`, and hands it the prompt.
+    /// Comments to address are those the session hasn't seen (every open one, for a new session),
+    /// and count as seen once sent. Nothing is recorded when the prompt can't be handed over.
+    pub fn ask(&self, target: &Target, kind: Kind, to: Asked, head: Option<&str>) -> Result<Request> {
+        let (agent, session) = match to {
+            Asked::Session(session) => (session.agent.as_str(), Some(session.id.as_str())),
+            Asked::New(agent) => (agent.name(), None),
+        };
+        let threads = match kind {
+            Kind::Review => Vec::new(),
+            Kind::Implement => self.unseen(target, session)?,
+        };
+        if kind == Kind::Implement && threads.is_empty() {
+            return Err("There are no comments to send".into());
+        }
+        let request = self.add_request(target, kind, agent, session, head, &threads)?;
+        let again = kind == Kind::Review && self.previous_review(target, agent, session, request.id)?.is_some();
+        let text = prompt(&request, &target.worktree, again);
+        let handed = match to {
+            Asked::Session(session) => sessions::deliver(session, &text),
+            Asked::New(agent) => sessions::open_new_session(agent, &target.worktree, &text),
+        };
+        if let Err(e) = handed {
+            self.cancel_request(request.id)?;
+            return Err(e);
+        }
+        if let Some(session) = session {
+            self.mark_seen(session, &threads)?;
+        }
+        Ok(request)
+    }
+
+    /// Records a request to `agent` for `kind` of work on `target`'s branch, at commit `head`;
+    /// `session` when an existing session is asked, `threads` the comments to address.
+    pub fn add_request(
+        &self,
+        target: &Target,
+        kind: Kind,
+        agent: &str,
+        session: Option<&str>,
+        head: Option<&str>,
+        threads: &[i64],
+    ) -> Result<Request> {
+        let threads = (!threads.is_empty()).then(|| threads.iter().map(i64::to_string).collect::<Vec<_>>().join(" "));
         sql(self.conn.execute(
-            "INSERT INTO review_requests (repo, branch, worktree, agent, session_id, head, requested_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![target.repo, target.branch, target.worktree, agent, session, head, now],
+            "INSERT INTO review_requests (repo, branch, worktree, kind, agent, session_id, head, threads, requested_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![target.repo, target.branch, target.worktree, kind.as_str(), agent, session, head, threads, now_ms()],
         ))?;
         self.request(self.conn.last_insert_rowid())
     }
 
     pub fn request(&self, id: i64) -> Result<Request> {
         let request = sql(self.conn.query_row("SELECT * FROM review_requests WHERE id = ?1", [id], request_from_row).optional())?;
-        request.ok_or_else(|| format!("No review request #{id}"))
+        request.ok_or_else(|| format!("No request #{id}"))
     }
 
     /// Takes on request `id` for `target`'s branch, from `caller`'s session when known.
-    pub fn start_review(&self, target: &Target, id: i64, caller: Option<&Caller>) -> Result<Request> {
+    pub fn start_request(&self, target: &Target, id: i64, caller: Option<&Caller>) -> Result<Request> {
         let on_branch: bool = sql(self.conn.query_row(
             &format!("SELECT COUNT(*) > 0 FROM review_requests WHERE id = ?4 AND {ON_BRANCH}"),
             params![target.repo, target.branch, target.worktree, id],
             |r| r.get(0),
         ))?;
         if !on_branch {
-            return Err(format!("review request #{id} isn't for {}", target.label()));
+            return Err(format!("request #{id} isn't for {}", target.label()));
         }
         sql(self.conn.execute(
             "UPDATE review_requests SET started_at = COALESCE(started_at, ?2), session_id = COALESCE(session_id, ?3)
@@ -117,7 +196,7 @@ impl Store {
             .query_row(
                 &format!(
                     "SELECT * FROM review_requests
-                     WHERE {ON_BRANCH} AND id < ?6 AND finished_at IS NOT NULL
+                     WHERE {ON_BRANCH} AND kind = 'review' AND id < ?6 AND finished_at IS NOT NULL
                        AND (session_id = ?5 OR (?5 IS NULL AND agent = ?4))
                      ORDER BY id DESC LIMIT 1"
                 ),
@@ -127,23 +206,23 @@ impl Store {
             .optional())
     }
 
-    /// Finishes the review `agent` is doing of `target`'s branch: request `id`, else the one its
-    /// session took on, else the latest one asked of it. Without any, records the review it did
+    /// Finishes the work of `kind` `agent` is doing on `target`'s branch: request `id`, else the
+    /// one its session took on, else the latest one asked of it. Without any, records what it did
     /// unasked, from its first comment since its previous review.
-    pub fn finish_review(&self, target: &Target, agent: &str, session: Option<&str>, id: Option<i64>) -> Result<Request> {
+    pub fn finish_request(&self, target: &Target, kind: Kind, agent: &str, session: Option<&str>, id: Option<i64>) -> Result<Request> {
         let now = now_ms();
         let open: Option<i64> = match id {
-            Some(id) => Some(self.start_review(target, id, None)?.id),
+            Some(id) => Some(self.start_request(target, id, None)?.id),
             None => sql(self
                 .conn
                 .query_row(
                     &format!(
                         "SELECT id FROM review_requests
-                         WHERE {ON_BRANCH} AND finished_at IS NULL
+                         WHERE {ON_BRANCH} AND kind = ?6 AND finished_at IS NULL
                            AND ((?5 IS NOT NULL AND session_id = ?5) OR (session_id IS NULL AND agent = ?4))
                          ORDER BY session_id IS NULL, id DESC LIMIT 1"
                     ),
-                    params![target.repo, target.branch, target.worktree, agent, session],
+                    params![target.repo, target.branch, target.worktree, agent, session, kind.as_str()],
                     |r| r.get(0),
                 )
                 .optional())?,
@@ -162,7 +241,7 @@ impl Store {
                     params![target.repo, target.branch, target.worktree, agent, session, since],
                     |r| r.get(0),
                 ))?;
-                let request = self.request_review(target, agent, session, None)?;
+                let request = self.add_request(target, kind, agent, session, None, &[])?;
                 sql(self.conn.execute(
                     "UPDATE review_requests SET requested_at = ?2, started_at = ?2 WHERE id = ?1",
                     params![request.id, first.unwrap_or(now)],
@@ -177,7 +256,7 @@ impl Store {
             params![id, now, session],
         ))?;
         let mut request = self.request(id)?;
-        request.comments = self.review_comments(target, &request)?;
+        request.comments = self.written_during(target, &request)?;
         Ok(request)
     }
 
@@ -187,9 +266,9 @@ impl Store {
         Ok(())
     }
 
-    /// Messages the reviewing agent wrote on `target`'s branch while `request` ran: from its
-    /// session, or signed with its name when the session isn't known.
-    fn review_comments(&self, target: &Target, request: &Request) -> Result<i64> {
+    /// Messages the agent wrote on `target`'s branch while `request` ran: from its session, or
+    /// signed with its name when the session isn't known.
+    fn written_during(&self, target: &Target, request: &Request) -> Result<i64> {
         let Some(from) = request.started_at else { return Ok(0) };
         sql(self.conn.query_row(
             &format!(
@@ -212,24 +291,28 @@ impl Store {
     }
 }
 
-/// The prompt that asks an agent for review `request` of the worktree at `worktree`.
+/// The prompt that hands `request` on the worktree at `worktree` to an agent.
 fn prompt(request: &Request, worktree: &str, again: bool) -> String {
-    let again = if again { " again, now that it has changed" } else { "" };
-    format!(
-        "Piccolo asks you to review the changes in the worktree {worktree}{again}. Run `piccolo -C {} guide --request {}` \
-         and follow the steps it prints.",
-        shell_quote(worktree),
-        request.id,
-    )
+    let guide = format!("Run `piccolo -C {} guide --request {}` and follow the steps it prints.", shell_quote(worktree), request.id);
+    match request.kind {
+        Kind::Review => {
+            let again = if again { " again, now that it has changed" } else { "" };
+            format!("Piccolo asks you to review the changes in the worktree {worktree}{again}. {guide}")
+        }
+        Kind::Implement => {
+            let what = if request.threads.len() == 1 { "a review comment" } else { "review comments" };
+            let ids: Vec<String> = request.threads.iter().map(|id| format!("#{id}")).collect();
+            format!("The reviewer sent you {what} from Piccolo to address: {}, on the worktree {worktree}. {guide}", ids.join(", "))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
 // Tauri commands
 
-/// Asks for a review of the worktree at `path`: from the running session `session`, or from a new
-/// Claude or Codex session in its desktop app.
-#[tauri::command]
-pub async fn request_review(path: String, agent: Option<String>, session: Option<String>) -> Result<Request> {
+/// Asks for `kind` of work on the worktree at `path`: from the session `session` working on it, or
+/// from a new Claude or Codex session in its desktop app.
+async fn ask(path: String, kind: Kind, agent: Option<Agent>, session: Option<String>) -> Result<Request> {
     blocking(move || {
         let store = Store::open()?;
         let target = Target::of(Path::new(&path))?;
@@ -238,34 +321,29 @@ pub async fn request_review(path: String, agent: Option<String>, session: Option
             (Some(session), _) => {
                 let sessions = sessions::sessions_of(&store, &path)?;
                 let session = sessions.iter().find(|s| s.id == session).ok_or("That session isn't running any more")?;
-                let request = store.request_review(&target, &session.agent, Some(&session.id), head.as_deref())?;
-                let again = store.previous_review(&target, &session.agent, Some(&session.id), request.id)?.is_some();
-                if let Err(e) = sessions::deliver(session, &prompt(&request, &target.worktree, again)) {
-                    store.cancel_request(request.id)?;
-                    return Err(e);
-                }
-                Ok(request)
+                store.ask(&target, kind, Asked::Session(session), head.as_deref())
             }
-            (None, Some(name)) => {
-                let agent = match name.as_str() {
-                    "claude" => Agent::Claude,
-                    "codex" => Agent::Codex,
-                    other => return Err(format!("Piccolo can't start a {other} session")),
-                };
-                let request = store.request_review(&target, &name, None, head.as_deref())?;
-                if let Err(e) = sessions::open_new_session(agent, &target.worktree, &prompt(&request, &target.worktree, false)) {
-                    store.cancel_request(request.id)?;
-                    return Err(e);
-                }
-                Ok(request)
-            }
-            (None, None) => Err("Say who should review".into()),
+            (None, Some(agent)) => store.ask(&target, kind, Asked::New(agent), head.as_deref()),
+            (None, None) => Err("Say which agent to ask".into()),
         }
     })
     .await
 }
 
-/// Withdraws a request, or removes a finished review from the list.
+/// Asks for a review of the worktree at `path`.
+#[tauri::command]
+pub async fn request_review(path: String, agent: Option<Agent>, session: Option<String>) -> Result<Request> {
+    ask(path, Kind::Review, agent, session).await
+}
+
+/// Sends the comments on the worktree at `path` to an agent to address: those a session hasn't
+/// seen, or every open one for a new session.
+#[tauri::command]
+pub async fn send_comments(path: String, agent: Option<Agent>, session: Option<String>) -> Result<Request> {
+    ask(path, Kind::Implement, agent, session).await
+}
+
+/// Withdraws a request, or removes a finished one from the list.
 #[tauri::command]
 pub async fn cancel_review_request(id: i64) -> Result<()> {
     blocking(move || Store::open()?.cancel_request(id)).await
@@ -292,11 +370,11 @@ mod tests {
         let wait = || std::thread::sleep(std::time::Duration::from_millis(2));
 
         // Asked, then taken on by the session that runs the guide.
-        let request = store.request_review(&target, "codex", None, Some("abc")).unwrap();
+        let request = store.add_request(&target, Kind::Review, "codex", None, Some("abc"), &[]).unwrap();
         assert_eq!((request.started_at, request.session_id.as_deref()), (None, None));
         let other = Target::of(&root.join("repo")).unwrap();
-        assert!(store.start_review(&other, request.id, Some(&codex)).is_err());
-        let started = store.start_review(&target, request.id, Some(&codex)).unwrap();
+        assert!(store.start_request(&other, request.id, Some(&codex)).is_err());
+        let started = store.start_request(&target, request.id, Some(&codex)).unwrap();
         assert_eq!(started.session_id.as_deref(), Some("thread-1"));
         assert!(started.started_at.is_some());
 
@@ -309,24 +387,24 @@ mod tests {
         assert_eq!(list(&store, &target).unwrap()[0].comments, 2);
 
         // `done` finishes the request the session took on.
-        let done = store.finish_review(&target, "codex", Some("thread-1"), None).unwrap();
+        let done = store.finish_request(&target, Kind::Review, "codex", Some("thread-1"), None).unwrap();
         assert_eq!((done.id, done.comments), (request.id, 2));
         assert!(done.finished_at.is_some());
 
         // Asked again: the previous review is found, and only new comments count.
-        let again = store.request_review(&target, "codex", Some("thread-1"), Some("def")).unwrap();
+        let again = store.add_request(&target, Kind::Review, "codex", Some("thread-1"), Some("def"), &[]).unwrap();
         let previous = store.previous_review(&target, "codex", Some("thread-1"), again.id).unwrap().unwrap();
         assert_eq!(previous.head.as_deref(), Some("abc"));
-        store.start_review(&target, again.id, Some(&codex)).unwrap();
+        store.start_request(&target, again.id, Some(&codex)).unwrap();
         wait();
         store.reply(first, by_codex, "Still there", &[]).unwrap();
-        assert_eq!(store.finish_review(&target, "codex", Some("thread-1"), None).unwrap().comments, 1);
+        assert_eq!(store.finish_request(&target, Kind::Review, "codex", Some("thread-1"), None).unwrap().comments, 1);
 
         // A review nobody asked for is recorded when it's done, from its first comment.
         wait();
         comment(&mut store, By::agent(Some("gemini")), 5);
         wait();
-        let unasked = store.finish_review(&target, "gemini", None, None).unwrap();
+        let unasked = store.finish_request(&target, Kind::Review, "gemini", None, None).unwrap();
         assert_eq!(unasked.comments, 1);
         assert!(unasked.started_at < unasked.finished_at);
 
@@ -336,6 +414,20 @@ mod tests {
         assert_eq!(list(&store, &target).unwrap().len(), 2);
         let text = prompt(&again, "/wt/a b", true);
         assert!(text.contains("`piccolo -C '/wt/a b' guide --request ") && text.contains("again"), "{text}");
+
+        // Asked to address comments: the comments are kept, and a review asked afterwards isn't
+        // taken for a second one.
+        let implement = store.add_request(&target, Kind::Implement, "claude", None, None, &[first, 9]).unwrap();
+        assert_eq!((implement.kind, implement.threads.clone()), (Kind::Implement, vec![first, 9]));
+        let text = prompt(&implement, "/wt", false);
+        assert!(text.contains(&format!("to address: #{first}, #9, on the worktree /wt")) && text.contains("guide --request "), "{text}");
+        let claude = Caller { id: "claude-1".into(), agent: "claude".into() };
+        store.start_request(&target, implement.id, Some(&claude)).unwrap();
+        // `done` for a review doesn't finish it; for the work it was asked, it does.
+        assert_ne!(store.finish_request(&target, Kind::Review, "claude", Some("claude-1"), None).unwrap().id, implement.id);
+        let finished = store.finish_request(&target, Kind::Implement, "claude", Some("claude-1"), None).unwrap();
+        assert_eq!((finished.id, finished.kind), (implement.id, Kind::Implement));
+        assert!(store.previous_review(&target, "claude", Some("claude-1"), i64::MAX).unwrap().unwrap().id != implement.id);
 
         std::fs::remove_dir_all(&root).unwrap();
     }

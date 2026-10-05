@@ -1,79 +1,61 @@
-import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
-import { Check, ChevronDown, LoaderCircle, Plus, Send, X } from "lucide-react";
-import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { useCancelReviewRequest, useRequestReview, useSendComments, useSessionActivity, useSessions } from "../lib/queries";
-import { agentLabel, ago, cn, timeAgo } from "../lib/utils";
+import { LoaderCircle, Plus, X } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useAvailableAgents,
+  useCancelReviewRequest,
+  useRequestReview,
+  useSendComments,
+  useSessionActivity,
+  useSessions,
+} from "../lib/queries";
+import { agentLabel, ago, cn } from "../lib/utils";
 import type { AgentKind, AgentSession, ReviewRequest, SessionActivity, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
-import { Button, IconButton, Tooltip, useJustDone } from "./ui";
+import { Button, IconButton, Tooltip } from "./ui";
 
-/** Agents a new session can be opened for, in their desktop apps. */
-const NEW_SESSIONS: { agent: AgentKind; app: string }[] = [
-  { agent: "claude", app: "Opens in the Claude app" },
-  { agent: "codex", app: "Opens in the ChatGPT app" },
-];
+/** Where a new session of each agent opens. */
+const APPS: Record<AgentKind, string> = {
+  claude: "Opens in the Claude app",
+  codex: "Opens in the ChatGPT app",
+};
 
 /** A session as the app names it: its title, else its agent. */
 const sessionName = (session: AgentSession) => session.title ?? `${agentLabel(session.agent)} session`;
 
-/** A review still going: asked for, or taken on but not finished. */
+/** A request still going: asked, or taken on but not finished. */
 const isUnderway = (request: ReviewRequest) => request.finishedAt === null;
 
-/**
- * The worktree's sessions and what they haven't seen, with the one comments go to by default: the
- * first running session that isn't one asked to review (the one building the branch).
- */
-function useSessionRoles(worktree: Worktree) {
-  const sessions = useSessions(worktree);
-  const activity = useSessionActivity(worktree);
-  const reviewers = new Set(activity.requests.map((r) => r.sessionId).filter(Boolean));
-  const author = sessions.find((s) => s.reachable && !reviewers.has(s.id)) ?? null;
-  return { sessions, activity, author, reviewers };
-}
-
-/** What `session` would be sent: what it hasn't seen, or every open comment for a new session. */
+/** What `session` would be sent to address: what it hasn't seen, or every open comment for a new session. */
 const unseenBy = (activity: SessionActivity, session: AgentSession | null) =>
   session ? (activity.unseen[session.id] ?? []) : activity.open;
 
-function MenuRow({
-  icon,
-  title,
-  time,
-  detail,
-  onSelect,
-}: {
-  icon: string;
-  title: string;
-  time?: string;
-  detail?: string | null;
-  onSelect: () => void;
-}) {
-  return (
-    <DropdownMenuPrimitive.Item
-      onSelect={onSelect}
-      className="grid cursor-default grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded px-2 py-1.5 outline-none data-[highlighted]:bg-bg-hover data-[highlighted]:text-fg"
-    >
-      <AgentIcon name={icon} className="size-4" />
-      <span title={title} className="truncate font-medium text-fg">
-        {title}
-      </span>
-      <span className="tabular text-[11px] text-fg-faint">{time}</span>
-      {detail && <span className="col-start-2 col-end-4 truncate text-[11.5px] text-fg-subtle">{detail}</span>}
-    </DropdownMenuPrimitive.Item>
-  );
+const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
+
+/** Who started `threads`, e.g. "3 by you · 2 by Codex". */
+function startedBy(threads: number[], activity: SessionActivity) {
+  const counts = new Map<string | null, number>();
+  for (const id of threads) {
+    const by = activity.startedBy[id] ?? null;
+    counts.set(by, (counts.get(by) ?? 0) + 1);
+  }
+  return [...counts]
+    .sort(([a], [b]) => (a === null ? -1 : b === null ? 1 : a.localeCompare(b)))
+    .map(([by, count]) => `${count} by ${by === null ? "you" : agentLabel(by)}`)
+    .join(" · ");
 }
 
-/** A review that finished in the last hour stays in view, even when its session ended. */
+/** A request that finished in the last hour stays in view, even when its session ended. */
 const RECENT_MS = 60 * 60 * 1000;
 
 /**
- * The worktree's sessions as the list shows them: reviews asked of sessions that haven't started,
- * and sessions still around (running, reviewing or just done). Those that ended are left out.
+ * The agents on a worktree: requests to new sessions that haven't started, and sessions still
+ * around (running, at work or just done); those that ended are left out. Any of them can review the
+ * branch or address its comments; what each is doing comes from its latest request.
  */
-function useSessionGroups(worktree: Worktree) {
-  const roles = useSessionRoles(worktree);
-  const { sessions, activity } = roles;
+function useAgents(worktree: Worktree) {
+  const sessions = useSessions(worktree);
+  const activity = useSessionActivity(worktree);
   // A session's latest request; requests come newest first.
   const requestOf = (session: AgentSession) => activity.requests.find((r) => r.sessionId === session.id);
   const waiting = activity.requests.filter((r) => isUnderway(r) && !r.sessionId);
@@ -81,59 +63,28 @@ function useSessionGroups(worktree: Worktree) {
     const request = requestOf(session);
     return session.running !== false || (!!request && (isUnderway(request) || request.finishedAt! > Date.now() - RECENT_MS));
   };
-  return { ...roles, requestOf, waiting, current: sessions.filter(isCurrent) };
+  return { activity, requestOf, waiting, current: sessions.filter(isCurrent) };
 }
 
 type AgentState = "running" | "busy" | "idle";
 
-/**
- * For a menu inside the hover popover: a menu that closes under the pointer leaves it outside the
- * popover without a pointer-leave event, so the popover checks where the pointer goes next.
- */
-const MenuClosed = createContext<() => void>(() => {});
+/** A session's state: busy while a turn or a request runs, else running or not. */
+function stateOf(session: AgentSession, request: ReviewRequest | undefined): AgentState {
+  if (session.status === "busy" || (!!request && isUnderway(request))) return "busy";
+  return session.running ? "running" : "idle";
+}
+
+/** What an agent is doing about a request, e.g. "is reviewing". */
+const doing = (request: ReviewRequest) =>
+  request.startedAt === null ? "is starting" : request.kind === "review" ? "is reviewing" : "is addressing comments";
 
 /**
  * The toolbar's agents, like a pull request's reviewers: one overlapping mark per agent on the
- * branch, which fan out on hover while a popover lists every session and what it's doing, and a
- * "+" that asks for a review.
+ * branch, which fan out on hover, and a "+" ("Add agent" while there are none). Both open the
+ * panel listing the agents, where any can be asked to review or to address the comments.
  */
 export function AgentsButton({ worktree }: { worktree: Worktree }) {
-  const { sessions, current, waiting, requestOf } = useSessionGroups(worktree);
-  // Until someone is asked to review, the "+" says what it does.
-  const unreviewed = waiting.length === 0 && current.every((session) => !requestOf(session));
-  return (
-    <div className="flex shrink-0 items-center gap-1">
-      {waiting.length + current.length > 0 && <AgentMarks worktree={worktree} />}
-      <AddReviewer worktree={worktree} sessions={sessions} labeled={unreviewed} />
-    </div>
-  );
-}
-
-/** The "+" that asks for a review straight from the toolbar, labeled until the branch has a reviewer. */
-function AddReviewer({ worktree, sessions, labeled }: { worktree: Worktree; sessions: AgentSession[]; labeled: boolean }) {
-  const request = useRequestReview(worktree);
-  return (
-    <RequestReviewMenu sessions={sessions} onAsk={(to) => request.mutate(to)} tooltip="Ask an agent to review this branch">
-      <button
-        type="button"
-        aria-label="Request review"
-        disabled={request.isPending}
-        className={cn(
-          "flex h-6 min-w-6 shrink-0 items-center justify-center gap-1 rounded-full border border-dashed border-border-strong text-fg-subtle hover:border-fg-subtle hover:text-fg data-[state=open]:border-fg-subtle data-[state=open]:text-fg",
-          labeled && "@2xl:pr-2.5 @2xl:pl-2",
-        )}
-      >
-        <Plus className="size-3.5" />
-        {/* In a narrow toolbar the branch name needs the room; the tooltip still says it. */}
-        {labeled && <span className="hidden text-[12px] font-medium whitespace-nowrap @2xl:inline">Request review</span>}
-      </button>
-    </RequestReviewMenu>
-  );
-}
-
-/** The agents' marks and what they're doing, with the popover listing their sessions. */
-function AgentMarks({ worktree }: { worktree: Worktree }) {
-  const { current, waiting, requestOf } = useSessionGroups(worktree);
+  const { current, waiting, requestOf } = useAgents(worktree);
   const [open, setOpen] = useState(false);
   // Opened by a click, it stays until dismissed; opened by hovering, until the pointer leaves.
   const [pinned, setPinned] = useState(false);
@@ -149,15 +100,7 @@ function AgentMarks({ worktree }: { worktree: Worktree }) {
     setOpen(false);
     setPinned(false);
   };
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const menuClosed = () => {
-    const onMove = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (!triggerRef.current?.contains(target) && !contentRef.current?.contains(target)) hover(false);
-    };
-    document.addEventListener("pointermove", onMove, { once: true });
-  };
 
   // One mark per agent, in list order, busy when any of its sessions is.
   const agents = new Map<string, AgentState>();
@@ -166,21 +109,17 @@ function AgentMarks({ worktree }: { worktree: Worktree }) {
     if (was !== "busy" && (state !== "idle" || !was)) agents.set(agent, state);
   };
   for (const request of waiting) mark(request.agent, "busy");
-  for (const session of current) {
-    const request = requestOf(session);
-    const busy = session.status === "busy" || (!!request && isUnderway(request));
-    mark(session.agent, busy ? "busy" : session.running ? "running" : "idle");
-  }
+  for (const session of current) mark(session.agent, stateOf(session, requestOf(session)));
   const marks = [...agents];
+  const empty = marks.length === 0;
 
-  const reviewing = [...waiting, ...current.map(requestOf).filter((r): r is ReviewRequest => !!r && isUnderway(r))];
-  const reviewers = [...new Set(reviewing.map((r) => r.agent))];
+  const underway = [...waiting, ...current.map(requestOf).filter((r): r is ReviewRequest => !!r && isUnderway(r))];
   const label =
-    reviewing.length === 0
+    underway.length === 0
       ? null
-      : reviewing.length > 1
-        ? `${reviewing.length} reviews`
-        : `${agentLabel(reviewers[0])} ${reviewing[0].startedAt === null ? "is starting" : "is reviewing"}`;
+      : underway.length > 1
+        ? `${underway.length} agents at work`
+        : `${agentLabel(underway[0].agent)} ${doing(underway[0])}`;
 
   // Room for the marks fanned out, so the toolbar doesn't shift as they spread; collapsed, they sit
   // at its right end.
@@ -199,9 +138,8 @@ function AgentMarks({ worktree }: { worktree: Worktree }) {
     >
       <Popover.Trigger asChild>
         <button
-          ref={triggerRef}
           type="button"
-          aria-label="Agents on this branch"
+          aria-label={empty ? "Add agent" : "Agents on this branch"}
           onPointerEnter={() => hover(true)}
           onPointerLeave={() => hover(false)}
           onClick={(e) => {
@@ -216,8 +154,9 @@ function AgentMarks({ worktree }: { worktree: Worktree }) {
           }}
           className="group/agents flex h-7 shrink-0 items-center gap-2 rounded-md px-1 text-[12px] text-fg-muted hover:text-fg data-[state=open]:text-fg"
         >
-          <span className="flex justify-end" style={{ width }}>
-            {marks.map(([agent, state], i) => (
+          {!empty && (
+            <span className="flex justify-end" style={{ width }}>
+              {marks.map(([agent, state], i) => (
                 <span
                   key={agent}
                   style={{ zIndex: marks.length - i, "--overlap": `${overlap}px`, "--spread": `${spread}px` } as CSSProperties}
@@ -231,219 +170,253 @@ function AgentMarks({ worktree }: { worktree: Worktree }) {
                   <StateBadge state={state} />
                 </span>
               ))}
-          </span>
-          {/* In a narrow toolbar the branch name needs the room; the spinner still shows the review. */}
+            </span>
+          )}
+          {/* In a narrow toolbar the branch name needs the room; the spinner still shows the work. */}
           {label && <span className="hidden whitespace-nowrap @5xl:inline">{label}</span>}
+          <span
+            className={cn(
+              "flex h-6 min-w-6 shrink-0 items-center justify-center gap-1 rounded-full border border-dashed border-border-strong text-fg-subtle group-hover/agents:border-fg-subtle group-hover/agents:text-fg group-data-[state=open]/agents:border-fg-subtle group-data-[state=open]/agents:text-fg",
+              empty && "@2xl:pr-2.5 @2xl:pl-2",
+            )}
+          >
+            <Plus className="size-3.5" />
+            {empty && <span className="hidden text-[12px] font-medium whitespace-nowrap @2xl:inline">Add agent</span>}
+          </span>
         </button>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content
           ref={contentRef}
+          tabIndex={-1}
           align="end"
           sideOffset={6}
           onPointerEnter={() => hover(true)}
           onPointerLeave={() => hover(false)}
-          // Hovering mustn't take focus from the diff; a click lets the popover keep it.
-          onOpenAutoFocus={(e) => !pinned && e.preventDefault()}
+          // Hovering mustn't take focus from the diff. A click gives it to the panel, not its first
+          // button, whose tooltip would open.
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            if (pinned) contentRef.current?.focus();
+          }}
           onCloseAutoFocus={(e) => e.preventDefault()}
-          className="z-40 max-h-[min(560px,calc(100vh-80px))] w-[360px] max-w-[calc(100vw-32px)] overflow-y-auto rounded-lg border border-border bg-bg-raised p-2 shadow-xl shadow-black/30"
+          className="z-40 max-h-[min(560px,calc(100vh-80px))] w-[400px] outline-none max-w-[calc(100vw-32px)] overflow-y-auto rounded-lg border border-border bg-bg-raised p-2 shadow-xl shadow-black/30"
         >
-          <MenuClosed.Provider value={menuClosed}>
-            <SessionList worktree={worktree} />
-          </MenuClosed.Provider>
+          <AgentPanel worktree={worktree} />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
   );
 }
 
-/** A dot on an agent's mark for its state: green running, a spinner while busy or reviewing. */
+/** A dot on an agent's mark for its state: green running, a spinner while busy. */
 function StateBadge({ state }: { state: AgentState }) {
   if (state === "busy") return <LoaderCircle className="absolute -right-1 -bottom-1 size-3 animate-spin rounded-full bg-bg text-mod" />;
   if (state === "running") return <span className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-add ring-2 ring-bg" />;
   return null;
 }
 
+type Ask = { session: string } | { agent: AgentKind };
+
 /**
- * The agents on a worktree, like the reviewers of a pull request: the session building the branch
- * and those reviewing it, each with the comments it wrote. Reviews are requested here, and
- * comments sent to any session that can take them.
+ * The agents on a worktree and those that can be added, each of which can be asked to review the
+ * branch or to address its comments, unless it's at work already.
  */
-export function SessionList({ worktree }: { worktree: Worktree }) {
-  const { sessions, activity, requestOf, waiting, current } = useSessionGroups(worktree);
+export function AgentPanel({ worktree }: { worktree: Worktree }) {
+  const { activity, requestOf, waiting, current } = useAgents(worktree);
+  const available = useAvailableAgents();
+  const review = useRequestReview(worktree);
+  const implement = useSendComments(worktree);
+  const pending = review.isPending || implement.isPending;
+  const actions = (to: Ask, unseen: number[], seenAll: string) => (
+    <Actions
+      unseen={unseen}
+      from={startedBy(unseen, activity)}
+      seenAll={activity.open.length === 0 ? "There are no open comments" : seenAll}
+      disabled={pending}
+      onReview={() => review.mutate(to)}
+      onImplement={() => implement.mutate(to)}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-2">
-      <RequestReview worktree={worktree} sessions={sessions} />
-      <ul className="flex flex-col">
+      {waiting.length + current.length > 0 && (
+        <Section title="On this branch">
           {waiting.map((request) => (
             <WaitingRow key={request.id} request={request} />
           ))}
-          {current.map((session) => (
-            <SessionRow
-              key={session.id}
-              worktree={worktree}
-              session={session}
-              request={requestOf(session)}
-              written={activity.written[session.id] ?? 0}
-              unseen={unseenBy(activity, session).length}
-            />
-          ))}
-      </ul>
+          {current.map((session) => {
+            const request = requestOf(session);
+            const state = stateOf(session, request);
+            return (
+              <SessionRow
+                key={session.id}
+                session={session}
+                request={request}
+                state={state}
+                written={activity.written[session.id] ?? 0}
+                actions={
+                  session.reachable && state !== "busy"
+                    ? actions({ session: session.id }, unseenBy(activity, session), "It has seen every open comment")
+                    : null
+                }
+              />
+            );
+          })}
+        </Section>
+      )}
+      <Section title="Add agent">
+        {available.map((agent) => (
+          <Row key={agent} icon={agent} title={agentLabel(agent)} detail={APPS[agent]}>
+            {actions({ agent }, unseenBy(activity, null), "")}
+          </Row>
+        ))}
+        {available.length === 0 && (
+          <p className="px-2 py-3 text-[12px] leading-5 text-fg-subtle">
+            Install the Claude or ChatGPT app to start agents from Piccolo. Agents that run{" "}
+            <code className="font-mono">piccolo</code> on this branch show up here too.
+          </p>
+        )}
+      </Section>
     </div>
   );
 }
 
-/** The popover's "Request review" button. */
-function RequestReview({ worktree, sessions }: { worktree: Worktree; sessions: AgentSession[] }) {
-  const request = useRequestReview(worktree);
-  const [justAsked, markAsked] = useJustDone();
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <RequestReviewMenu sessions={sessions} onAsk={(to) => request.mutate(to, { onSuccess: markAsked })}>
-      <Button variant="primary" disabled={request.isPending || justAsked} className="w-full justify-center disabled:opacity-100">
-        {justAsked ? <Check className="size-3.5" /> : null}
-        {justAsked ? "Review requested" : "Request review"}
-        {!justAsked && <ChevronDown className="size-3" />}
-      </Button>
-    </RequestReviewMenu>
+    <section>
+      <h3 className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-fg-faint">{title}</h3>
+      <ul className="flex flex-col">{children}</ul>
+    </section>
   );
 }
 
-/** Who to ask for a review: a new Claude or Codex session in its app, or a running session by name. */
-function RequestReviewMenu({
-  sessions,
-  onAsk,
-  tooltip,
+/** An agent or session in the panel: its mark, name and what it's doing, then what can be done with it. */
+function Row({
+  icon,
+  state = "idle",
+  title,
+  detail,
   children,
 }: {
-  sessions: AgentSession[];
-  onAsk: (to: { session: string } | { agent: AgentKind }) => void;
-  tooltip?: string;
-  /** The button that opens the menu. */
-  children: ReactNode;
+  icon: string;
+  state?: AgentState;
+  title: string;
+  detail: ReactNode;
+  children?: ReactNode;
 }) {
-  const reachable = sessions.filter((s) => s.reachable);
-  const menuClosed = useContext(MenuClosed);
-  const label = (text: string) => (
-    <DropdownMenuPrimitive.Label className="px-2 pt-1 pb-0.5 text-[11px] text-fg-faint">{text}</DropdownMenuPrimitive.Label>
-  );
-  const trigger = <DropdownMenuPrimitive.Trigger asChild>{children}</DropdownMenuPrimitive.Trigger>;
   return (
-    // Not modal: it opens from a hover popover, which a modal menu would make lose the pointer.
-    <DropdownMenuPrimitive.Root modal={false} onOpenChange={(open) => !open && menuClosed()}>
-      {tooltip ? <Tooltip label={tooltip}>{trigger}</Tooltip> : trigger}
-      <DropdownMenuPrimitive.Portal>
-        <DropdownMenuPrimitive.Content
-          align="end"
-          sideOffset={4}
-          className="z-50 w-80 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
-        >
-          {NEW_SESSIONS.map(({ agent, app }) => (
-            <MenuRow
-              key={agent}
-              icon={agent}
-              title={`New ${agentLabel(agent)} session`}
-              detail={app}
-              onSelect={() => onAsk({ agent })}
-            />
-          ))}
-          {reachable.length > 0 && (
-            <>
-              <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />
-              {label("Ask a running session")}
-              {reachable.map((session) => (
-                <MenuRow
-                  key={session.id}
-                  icon={session.agent}
-                  title={sessionName(session)}
-                  time={session.startedAt ? timeAgo(session.startedAt) : undefined}
-                  onSelect={() => onAsk({ session: session.id })}
-                />
-              ))}
-            </>
-          )}
-        </DropdownMenuPrimitive.Content>
-      </DropdownMenuPrimitive.Portal>
-    </DropdownMenuPrimitive.Root>
+    <li className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-bg-hover">
+      <StatusIcon agent={icon} state={state} />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span title={title} className="truncate text-[12.5px] font-medium text-fg">
+          {title}
+        </span>
+        <span className="tabular truncate text-[11.5px] text-fg-subtle">{detail}</span>
+      </span>
+      {children}
+    </li>
   );
 }
 
-/** What a session is doing, as its row's second line says it. */
+/** "Review" and "Implement": what an agent can be asked to do. Implementing needs comments it hasn't seen. */
+function Actions({
+  unseen,
+  from,
+  seenAll,
+  disabled,
+  onReview,
+  onImplement,
+}: {
+  unseen: number[];
+  from: string;
+  /** Why there's nothing to implement. */
+  seenAll: string;
+  disabled: boolean;
+  onReview: () => void;
+  onImplement: () => void;
+}) {
+  const small = "h-6 border border-border px-2 text-[11.5px]";
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      <Tooltip label="Ask it to review the branch">
+        <Button disabled={disabled} onClick={onReview} className={small}>
+          Review
+        </Button>
+      </Tooltip>
+      <Tooltip label={unseen.length === 0 ? seenAll : `Send it ${plural(unseen.length, "comment")} to address: ${from}`}>
+        {/* A disabled button gets no pointer events, so the tooltip hangs on this. */}
+        <span>
+          <Button disabled={disabled || unseen.length === 0} onClick={onImplement} className={small}>
+            Implement
+            {unseen.length > 0 && <span className="tabular text-fg-subtle">{unseen.length}</span>}
+          </Button>
+        </span>
+      </Tooltip>
+    </span>
+  );
+}
+
+/** A session on the branch: what it's doing, or what it wrote. */
 function SessionRow({
-  worktree,
   session,
   request,
+  state,
   written,
-  unseen,
+  actions,
 }: {
-  worktree: Worktree;
   session: AgentSession;
   request: ReviewRequest | undefined;
+  state: AgentState;
   written: number;
-  unseen: number;
+  actions: ReactNode;
 }) {
-  const send = useSendComments(worktree);
   const cancel = useCancelReviewRequest();
-  const [justSent, markSent] = useJustDone();
   const underway = !!request && isUnderway(request);
-  const busy = underway || session.status === "busy";
-  const text = written === 1 ? "1 comment" : `${written} comments`;
+  const detail = underway
+    ? request.startedAt === null
+      ? request.kind === "review"
+        ? "Asked to review"
+        : `Asked to address ${plural(request.threads.length, "comment")}`
+      : request.kind === "review"
+        ? "Reviewing"
+        : `Addressing ${plural(request.threads.length, "comment")}`
+    : session.status === "busy"
+      ? "Working"
+      : plural(written, "comment");
 
   return (
-    <li className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-bg-hover">
-      <StatusIcon agent={session.agent} state={busy ? "busy" : session.running ? "running" : "idle"} />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span title={sessionName(session)} className="truncate text-[12.5px] font-medium text-fg">
-          {sessionName(session)}
-        </span>
-        <span className="tabular truncate text-[11.5px] text-fg-subtle">{text}</span>
-      </span>
-      {session.reachable && (unseen > 0 || justSent) && (
-        <Tooltip label={`Send it the ${unseen === 1 ? "comment" : `${unseen} comments`} it hasn't seen`}>
-          <span>
-            <Button
-              disabled={send.isPending || justSent}
-              onClick={() => send.mutate(session.id, { onSuccess: markSent })}
-              className="px-2"
-            >
-              {justSent ? <Check className="size-3.5" /> : <Send className="size-3.5" />}
-              {justSent ? "Sent" : "Send"}
-            </Button>
-          </span>
-        </Tooltip>
-      )}
+    <Row icon={session.agent} state={state} title={sessionName(session)} detail={detail}>
+      {actions}
       {underway && (
         <IconButton
-          label="Stop waiting for this review"
+          label="Stop waiting for it"
           onClick={() => cancel.mutate(request.id)}
           className="size-7 opacity-0 group-hover:opacity-100"
         >
           <X className="size-3.5" />
         </IconButton>
       )}
-    </li>
+    </Row>
   );
 }
 
-/** A review asked of a new session that hasn't started on it yet. */
+/** A request to a new session that hasn't started on it yet. */
 function WaitingRow({ request }: { request: ReviewRequest }) {
   const cancel = useCancelReviewRequest();
+  const asked = request.kind === "review" ? "Review requested" : `Asked to address ${plural(request.threads.length, "comment")}`;
   return (
-    <li className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-bg-hover">
-      <StatusIcon agent={request.agent} state="busy" />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-[12.5px] font-medium text-fg">New {agentLabel(request.agent)} session</span>
-        <span className="truncate text-[11.5px] text-fg-subtle">Review requested {ago(request.requestedAt)} · waiting to start</span>
-      </span>
+    <Row icon={request.agent} state="busy" title={`New ${agentLabel(request.agent)} session`} detail={`${asked} ${ago(request.requestedAt)} · waiting to start`}>
       <IconButton label="Withdraw the request" onClick={() => cancel.mutate(request.id)} className="size-7 opacity-0 group-hover:opacity-100">
         <X className="size-3.5" />
       </IconButton>
-    </li>
+    </Row>
   );
 }
 
-/** The agent's mark with a dot for its state: green running, amber busy or reviewing, none otherwise. */
-function StatusIcon({ agent, state }: { agent: string; state: "running" | "busy" | "idle" }) {
+/** The agent's mark with a dot for its state: green running, a spinner while busy. */
+function StatusIcon({ agent, state }: { agent: string; state: AgentState }) {
   return (
     <span className="relative grid size-6 shrink-0 place-items-center rounded-md border border-border-subtle bg-bg-raised">
       <AgentIcon name={agent} className="size-3.5" />
