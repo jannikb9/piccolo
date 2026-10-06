@@ -659,12 +659,6 @@ function mockAsk(kind: ReviewRequest["kind"], to: Assignee | null, sent: number[
   return delay(request);
 }
 
-export function mockCancelRequest(id: number): Promise<void> {
-  const index = mockRequests.findIndex((r) => r.id === id);
-  if (index !== -1) mockRequests.splice(index, 1);
-  return delay(undefined);
-}
-
 /** Pasted images by attachment id, as base64. */
 const mockImages = new Map<number, string>();
 

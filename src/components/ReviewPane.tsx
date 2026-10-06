@@ -19,7 +19,7 @@ import { useStore } from "../store";
 import type { ChangedFile, DiffPatch, DiffScope, GeneralThread, Repo, Thread, Worktree } from "../types";
 import { CommitPicker } from "./CommitPicker";
 import { DiffView, type DiffViewHandle } from "./DiffView";
-import { AgentsButton, ImplementButton } from "./SessionList";
+import { AddressButton, AgentsButton, ReviewButton } from "./SessionList";
 import { DiffCount, IconButton, Segmented, Skeleton, Tooltip, useJustDone } from "./ui";
 
 export function ReviewPane({
@@ -186,7 +186,8 @@ function Toolbar({
             ]}
           />
         )}
-        <ImplementButton worktree={worktree} />
+        <ReviewButton worktree={worktree} />
+        <AddressButton worktree={worktree} />
         <AgentsButton worktree={worktree} />
       </div>
     </header>

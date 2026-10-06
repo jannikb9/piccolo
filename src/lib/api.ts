@@ -20,7 +20,6 @@ import {
   mockReorderRepos,
   mockReply,
   mockCopyPrompt,
-  mockCancelRequest,
   mockRequestReview,
   mockSendComments,
   mockSessionActivity,
@@ -192,10 +191,6 @@ export const api = {
   /** Asks the running `session` to review the worktree, or a new Claude or Codex session. */
   requestReview: (path: string, to: Assignee): Promise<ReviewRequest> =>
     isTauri ? invoke("request_review", { path, ...assignee(to) }) : mockRequestReview(path, to),
-
-  /** Withdraws a review request, or removes a finished review from the list. */
-  cancelReviewRequest: (id: number): Promise<void> =>
-    isTauri ? invoke("cancel_review_request", { id }) : mockCancelRequest(id),
 
 
   /** Deletes a message; deleting a thread's first message deletes the thread. */

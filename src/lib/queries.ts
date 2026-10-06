@@ -216,15 +216,6 @@ export function useRequestReview(worktree: Worktree) {
   });
 }
 
-/** Withdraws a review request, or removes a finished review from the list. */
-export function useCancelReviewRequest() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) => api.cancelReviewRequest(id),
-    onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
-  });
-}
-
 /** Where `name` is defined and used, at `rev` (`null`: the working tree). */
 export function useSymbolSearch(worktreePath: string, rev: string | null, name: string, from: string) {
   return useQuery({

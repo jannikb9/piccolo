@@ -379,12 +379,6 @@ pub async fn copy_prompt(path: String, kind: Kind) -> Result<String> {
     .await
 }
 
-/// Withdraws a request, or removes a finished one from the list.
-#[tauri::command]
-pub async fn cancel_review_request(id: i64) -> Result<()> {
-    blocking(move || Store::open()?.cancel_request(id)).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

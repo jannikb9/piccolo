@@ -169,8 +169,9 @@ const start = now();
 try {
   const sidebar = page.locator("aside");
   const diff = page.locator("main");
-  const agents = page.getByRole("button", { name: "Agents on this branch" });
-  const panel = page.locator("[data-radix-popper-content-wrapper]");
+  const header = page.locator("main header");
+  const review = header.getByRole("button", { name: "Review", exact: true });
+  const reviewMenu = header.getByRole("button", { name: "Ask for a review elsewhere" });
 
   pace(1);
   caption("Review your agents' work like a pull request");
@@ -199,14 +200,13 @@ try {
 
   // 3. Claude is on the branch; ask Codex for a review.
   caption("Ask Codex for a review");
-  await look(agents, 2.3, { dx: -260, dy: 150 });
-  await click(agents);
+  await look(reviewMenu, 2.3, { dx: -260, dy: 150 });
+  await click(reviewMenu);
   await sleep(700);
-  await click(panel.getByRole("button", { name: /Codex app/ }));
+  await click(page.getByRole("menuitem", { name: /Codex app/ }));
   await sleep(350);
   await agent("codexStarts");
   await sleep(600);
-  await page.keyboard.press("Escape");
 
   // 4. Codex reviews: comments land on the lines they're about.
   caption("Codex reviews it line by line");
@@ -256,9 +256,9 @@ try {
 
   // 7. Send the review to Claude.
   caption("Send it all to Claude");
-  const implement = page.locator("main header").getByRole("button", { name: /^Implement/ });
-  await look(implement, 2.1, { dx: -240, dy: 150 });
-  await click(implement);
+  const address = header.getByRole("button", { name: /^Address/ });
+  await look(address, 2.1, { dx: -240, dy: 150 });
+  await click(address);
   await sleep(500);
   await agent("claudeWorks");
   await sleep(500);
@@ -286,10 +286,8 @@ try {
 
   // 9. And around again.
   caption("Then go another round");
-  await look(agents, 2.3, { dx: -260, dy: 150, ms: 600 });
-  await click(agents);
-  await sleep(400);
-  await click(panel.getByRole("button", { name: "Review", exact: true }));
+  await look(review, 2.3, { dx: -260, dy: 150, ms: 600 });
+  await click(review);
   await sleep(700);
   camera(WIDE, 700);
   await sleep(900);

@@ -66,7 +66,6 @@ pub fn run() {
             requests::copy_prompt,
             terminals::terminal_setup,
             requests::request_review,
-            requests::cancel_review_request,
             navigate::find_symbol,
             navigate::file_text,
         ])
