@@ -32,10 +32,7 @@ import {
 } from "../mock";
 import type { ImageUpload } from "./images";
 import type {
-  Assignee,
   AgentSession,
-  AvailableAgent,
-  TerminalSetup,
   ChangedFile,
   Commit,
   DiffOptions,
@@ -56,12 +53,6 @@ import type {
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
 /** Backend commands. In a plain browser (UI development) they resolve to placeholder data. */
-/** An assignee as the backend's `request_review` and `send_comments` take it. */
-const assignee = (to: Assignee) =>
-  "session" in to
-    ? { session: to.session, agent: null, launcher: "app" }
-    : { session: null, agent: to.agent, launcher: to.launcher };
-
 export const api = {
   // A copy, as the backend returns fresh data: a worktree added to the mock shows up everywhere.
   listRepos: (): Promise<Repo[]> => (isTauri ? invoke("list_repos") : Promise.resolve(structuredClone(mockRepos))),
@@ -156,19 +147,6 @@ export const api = {
   setThreadDismissed: (id: number, dismissed: boolean): Promise<void> =>
     isTauri ? invoke("set_thread_dismissed", { id, dismissed }) : mockSetDismissed(id, dismissed),
 
-  /** Agents a new session can be started for: those with their desktop app or CLI installed. */
-  availableAgents: (): Promise<AvailableAgent[]> =>
-    isTauri
-      ? invoke("available_agents")
-      : Promise.resolve([
-          { agent: "claude", app: true, cli: true },
-          { agent: "codex", app: true, cli: false },
-        ]),
-
-  /** The terminals found, and the one "Automatic" picks. */
-  terminalSetup: (): Promise<TerminalSetup> =>
-    isTauri ? invoke("terminal_setup") : Promise.resolve({ installed: ["iterm", "kitty", "terminal"], detected: "kitty", kittyTabs: false }),
-
   /** Asks any agent for `kind` of work and returns the prompt, to copy into one. */
   copyPrompt: (path: string, kind: ReviewRequest["kind"]): Promise<string> =>
     isTauri ? invoke("copy_prompt", { path, kind }) : mockCopyPrompt(path, kind),
@@ -181,16 +159,13 @@ export const api = {
   sessionActivity: (path: string): Promise<SessionActivity> =>
     isTauri ? invoke("session_activity", { path }) : mockSessionActivity(path),
 
-  /**
-   * Sends comments to address: to the running `session`, those it hasn't seen; to a new Claude or
-   * Codex session, every open one.
-   */
-  sendComments: (path: string, to: Assignee): Promise<ReviewRequest> =>
-    isTauri ? invoke("send_comments", { path, ...assignee(to) }) : mockSendComments(path, to),
+  /** Sends the comments the running `session` hasn't seen to it, to address. */
+  sendComments: (path: string, session: string): Promise<ReviewRequest> =>
+    isTauri ? invoke("send_comments", { path, session }) : mockSendComments(path, session),
 
-  /** Asks the running `session` to review the worktree, or a new Claude or Codex session. */
-  requestReview: (path: string, to: Assignee): Promise<ReviewRequest> =>
-    isTauri ? invoke("request_review", { path, ...assignee(to) }) : mockRequestReview(path, to),
+  /** Asks the running `session` to review the worktree. */
+  requestReview: (path: string, session: string): Promise<ReviewRequest> =>
+    isTauri ? invoke("request_review", { path, session }) : mockRequestReview(path, session),
 
 
   /** Deletes a message; deleting a thread's first message deletes the thread. */

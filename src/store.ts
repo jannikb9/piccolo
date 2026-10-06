@@ -4,8 +4,7 @@ import { persist } from "zustand/middleware";
 import type { CodeThemeId } from "./lib/codeThemes";
 import type { DraftImage } from "./lib/images";
 import type { SectionId } from "./lib/sections";
-import type { LaunchId } from "./lib/agents";
-import type { DiffLayout, DiffOptions, DiffScope, LineRange, Repo, TerminalId, Worktree } from "./types";
+import type { DiffLayout, DiffOptions, DiffScope, LineRange, Repo, Worktree } from "./types";
 
 type PathSet = Record<string, true>;
 
@@ -40,10 +39,6 @@ type State = {
   hideWhitespace: boolean;
   hideImports: boolean;
   codeTheme: CodeThemeId;
-  /** The terminal agents' CLIs open in (Settings). */
-  cliTerminal: "auto" | TerminalId;
-  /** Ways to start agents the user chose to show or hide in menus; others show by default. */
-  shownOptions: Partial<Record<LaunchId, boolean>>;
   /** worktreeId → set of viewed file paths */
   viewed: Record<string, PathSet>;
   /**
@@ -80,8 +75,6 @@ type State = {
   toggleHideWhitespace: () => void;
   toggleHideImports: () => void;
   setCodeTheme: (theme: CodeThemeId) => void;
-  setCliTerminal: (terminal: "auto" | TerminalId) => void;
-  setOptionShown: (id: LaunchId, shown: boolean) => void;
   toggleViewed: (worktreeId: string, path: string) => void;
   setCollapsed: (worktreeId: string, path: string, collapsed: boolean) => void;
   setActivePath: (path: string | null) => void;
@@ -120,8 +113,6 @@ export const useStore = create<State>()(
       hideWhitespace: false,
       hideImports: false,
       codeTheme: "github",
-      cliTerminal: "auto",
-      shownOptions: {},
       viewed: {},
       collapsed: {},
       activePath: null,
@@ -148,8 +139,6 @@ export const useStore = create<State>()(
       toggleHideWhitespace: () => set((s) => ({ hideWhitespace: !s.hideWhitespace })),
       toggleHideImports: () => set((s) => ({ hideImports: !s.hideImports })),
       setCodeTheme: (codeTheme) => set({ codeTheme }),
-      setCliTerminal: (cliTerminal) => set({ cliTerminal }),
-      setOptionShown: (id, shown) => set((s) => ({ shownOptions: { ...s.shownOptions, [id]: shown } })),
       // Like GitHub: marking a file viewed collapses it, un-marking expands it again.
       toggleViewed: (wt, path) =>
         set((s) => {
@@ -220,18 +209,18 @@ export const useStore = create<State>()(
     }),
     {
       name: "review-ui",
-      // Version 1 dropped the Sessions tab: its sessions moved to the toolbar. Version 2 replaced
-      // where new agents open (`agentLauncher`) with the options shown in menus.
-      version: 2,
+      // Version 1 dropped the Sessions tab: its sessions moved to the toolbar. Version 3 dropped
+      // the settings for starting new agents (`agentLauncher`, then `cliTerminal` and `shownOptions`):
+      // new agents are given a copied prompt.
+      version: 3,
       migrate: (state) => {
-        const { agentLauncher, ...s } = state as { fileTab?: string; agentLauncher?: string };
-        const migrated = { ...s, fileTab: s.fileTab === "sessions" ? "files" : s.fileTab } as State;
-        // Someone who started agents in a terminal keeps their CLIs in the menus, in that terminal.
-        if (agentLauncher && agentLauncher !== "app") {
-          migrated.cliTerminal = agentLauncher as State["cliTerminal"];
-          migrated.shownOptions = { "claude-cli": true, "codex-cli": true, "claude-app": false, "codex-app": false };
-        }
-        return migrated;
+        const { agentLauncher: _, cliTerminal: __, shownOptions: ___, ...s } = state as {
+          fileTab?: string;
+          agentLauncher?: unknown;
+          cliTerminal?: unknown;
+          shownOptions?: unknown;
+        };
+        return { ...s, fileTab: s.fileTab === "sessions" ? "files" : s.fileTab } as State;
       },
       // Viewed state is kept in memory until it can be tied to file contents (milestone 4).
       partialize: (s) => ({
@@ -242,8 +231,6 @@ export const useStore = create<State>()(
         hideWhitespace: s.hideWhitespace,
         hideImports: s.hideImports,
         codeTheme: s.codeTheme,
-        cliTerminal: s.cliTerminal,
-        shownOptions: s.shownOptions,
         fileTab: s.fileTab,
       }),
     },

@@ -2,18 +2,8 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronDown, Copy, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { newSession, useLaunchOptions, COPY_OPTION, type LaunchOption } from "../lib/agents";
-import {
-  useCopyPrompt,
-  useRequestReview,
-  useSendComments,
-  useSessionActivity,
-  useSessions,
-  useTerminalSetup,
-} from "../lib/queries";
-import { TERMINAL_NAMES, terminalPlace } from "../lib/terminals";
+import { useCopyPrompt, useRequestReview, useSendComments, useSessionActivity, useSessions } from "../lib/queries";
 import { agentLabel, ago, cn } from "../lib/utils";
-import { useStore } from "../store";
 import type { AgentSession, ReviewRequest, SessionActivity, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
 import { Tooltip, useJustDone } from "./ui";
@@ -23,9 +13,6 @@ const sessionName = (session: AgentSession) => session.title ?? `${agentLabel(se
 
 /** A request still going: asked, or taken on but not finished. */
 const isUnderway = (request: ReviewRequest) => request.finishedAt === null;
-
-/** A request whose prompt was copied, for whichever agent it's pasted into (`ANY_AGENT` in requests.rs). */
-const isCopied = (request: ReviewRequest) => request.agent === "agent";
 
 const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
 
@@ -46,7 +33,7 @@ function startedBy(threads: number[], activity: SessionActivity) {
 const RECENT_MS = 60 * 60 * 1000;
 
 /**
- * The agents on a worktree: requests to new sessions that haven't started, and sessions still
+ * The agents on a worktree: copied prompts no agent has taken on yet, and sessions still
  * around (running, at work or just done); those that ended are left out. What each is doing comes
  * from its latest request. The author is the session building the branch, which comments go to.
  */
@@ -96,23 +83,6 @@ function stateOf(session: AgentSession, request: ReviewRequest | undefined): Age
 const doing = (request: ReviewRequest) =>
   request.startedAt === null ? "is starting" : request.kind === "review" ? "is reviewing" : "is addressing comments";
 
-/** Where `option` starts a session, briefly, e.g. "in kitty"; nothing for an app. */
-function useWhere(option: LaunchOption) {
-  const terminal = useStore((s) => s.cliTerminal);
-  const setup = useTerminalSetup();
-  if (option.via !== "cli") return null;
-  const name = terminal === "auto" ? setup?.detected : terminal;
-  return name ? `in ${TERMINAL_NAMES[name]}` : "in a terminal";
-}
-
-/** What starting a session with `option` does, for a tooltip. */
-function useOpensIn(option: LaunchOption) {
-  const terminal = useStore((s) => s.cliTerminal);
-  const setup = useTerminalSetup();
-  if (option.via === "app") return `in the ${option.agent === "claude" ? "Claude" : "ChatGPT"} app`;
-  return `in ${terminalPlace(terminal === "auto" ? (setup?.detected ?? null) : terminal, setup)}`;
-}
-
 /**
  * The toolbar's agents, like a pull request's reviewers: one overlapping mark per agent on the
  * branch, which fan out on hover and open the panel listing them. Only shows what's going on;
@@ -153,7 +123,7 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
       ? null
       : underway.length > 1
         ? `${underway.length} agents at work`
-        : `${isCopied(underway[0]) ? "An agent" : agentLabel(underway[0].agent)} ${doing(underway[0])}`;
+        : `${underway[0].sessionId ? agentLabel(underway[0].agent) : "An agent"} ${doing(underway[0])}`;
 
   if (marks.length === 0) return null;
 
@@ -315,16 +285,15 @@ function SessionRow({
   return <Row icon={session.agent} state={state} title={sessionName(session)} detail={detail} />;
 }
 
-/** A request to a new session that hasn't started on it yet. */
+/** A copied prompt no agent has taken on yet. */
 function WaitingRow({ request }: { request: ReviewRequest }) {
   const asked = request.kind === "review" ? "Review requested" : `Asked to address ${plural(request.threads.length, "comment")}`;
-  const copied = isCopied(request);
   return (
     <Row
       icon={request.agent}
       state="busy"
-      title={copied ? "Copied prompt" : `New ${agentLabel(request.agent)} session`}
-      detail={`${asked} ${ago(request.requestedAt)} · ${copied ? "waiting for an agent" : "waiting to start"}`}
+      title="Copied prompt"
+      detail={`${asked} ${ago(request.requestedAt)} · waiting for an agent`}
     />
   );
 }
@@ -404,47 +373,39 @@ function SplitButton({
   );
 }
 
-/** The mark on a split button: the agent it goes to, a clipboard for a copied prompt, then a check. */
-function TargetIcon({ agent, copied }: { agent: string | null | undefined; copied: boolean }) {
+/** The mark on a split button: the session it goes to, a clipboard for a copied prompt, then a check. */
+function TargetIcon({ agent, copied }: { agent: string | undefined; copied: boolean }) {
   if (copied) return <Check className="size-3.5" strokeWidth={2.5} />;
   if (agent) return <AgentIcon name={agent} className="size-3.5" />;
   return <Copy className="size-3.5 text-fg-muted" />;
 }
 
-/** The menu's ways to start a new session, after the sessions on the branch if there are any. */
-function NewSessionItems({ options, after, onSelect }: { options: LaunchOption[]; after: boolean; onSelect: (option: LaunchOption) => void }) {
-  if (options.length === 0) return null;
+/** The menu's item copying the prompt, after the sessions on the branch if there are any. */
+function CopyItem({ after, onSelect }: { after: boolean; onSelect: () => void }) {
   return (
     <>
       {after && <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />}
-      <DropdownMenuPrimitive.Label className={menuLabel}>New session</DropdownMenuPrimitive.Label>
-      {options.map((option) => (
-        <MenuOption key={option.id} option={option} onSelect={() => onSelect(option)} />
-      ))}
+      <DropdownMenuPrimitive.Item onSelect={onSelect} className={menuItem}>
+        <Copy className="size-3.5" />
+        <span className="text-fg">Copy prompt</span>
+        <span className="truncate text-[11px] text-fg-subtle">for any agent</span>
+      </DropdownMenuPrimitive.Item>
     </>
   );
 }
 
 /**
  * "Review": asks for a review of the branch. Another round goes to the session that reviewed it
- * last, while it's around and free; else it starts a new session the first way the menus offer.
- * Its menu asks another session on the branch instead (never the author), or starts a new one.
+ * last, while it's around and free; else it copies a prompt to paste into any agent. Its menu asks
+ * another session on the branch instead (never the author), or copies the prompt.
  */
 export function ReviewButton({ worktree }: { worktree: Worktree }) {
   const { current, author, requestOf } = useAgents(worktree);
-  const shown = useLaunchOptions();
-  const options = shown.length > 0 ? shown : [COPY_OPTION];
-  const terminal = useStore((s) => s.cliTerminal);
   const review = useRequestReview(worktree);
   const copy = useCopyPrompt(worktree);
   const [copied, markCopied] = useJustDone();
   const busy = review.isPending || copy.isPending;
-
-  const start = (option: LaunchOption) => {
-    const to = newSession(option, terminal);
-    if (to) review.mutate(to);
-    else copy.mutate("review", { onSuccess: markCopied });
-  };
+  const copyPrompt = () => copy.mutate("review", { onSuccess: markCopied });
 
   // The author reviewing its own work isn't worth offering, nor a session that's at work.
   const reviewers = current.filter((s) => s.reachable && s.id !== author?.id && stateOf(s, requestOf(s)) !== "busy");
@@ -453,43 +414,34 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
     return request?.kind === "review" ? request.requestedAt : 0;
   };
   const again = reviewers.filter((s) => reviewedAt(s) > 0).sort((a, b) => reviewedAt(b) - reviewedAt(a))[0] ?? null;
-  const primary = again ? null : options[0];
   const others = reviewers.filter((s) => s.id !== again?.id);
-  const fallbacks = options.filter((o) => o !== primary);
-  const primaryOpensIn = useOpensIn(primary ?? COPY_OPTION);
-
-  const tooltip = again
-    ? `Ask ${sessionName(again)} to review the branch again`
-    : primary!.via === "copy"
-      ? "Copy a review prompt, to paste into any agent"
-      : `Start a ${agentLabel(primary!.agent!)} session to review the branch ${primaryOpensIn}`;
 
   return (
     <SplitButton
-      tooltip={tooltip}
+      tooltip={again ? `Ask ${sessionName(again)} to review the branch again` : "Copy a review prompt, to paste into any agent"}
       disabled={busy}
-      onClick={() => (again ? review.mutate({ session: again.id }) : start(primary!))}
+      onClick={() => (again ? review.mutate(again.id) : copyPrompt())}
       menuLabel="Ask for a review elsewhere"
       menu={
-        others.length + fallbacks.length > 0 && (
+        (again || others.length > 0) && (
           <>
             {others.length > 0 && (
               <>
                 <DropdownMenuPrimitive.Label className={menuLabel}>Ask a session</DropdownMenuPrimitive.Label>
                 {others.map((session) => (
-                  <DropdownMenuPrimitive.Item key={session.id} onSelect={() => review.mutate({ session: session.id })} className={menuItem}>
+                  <DropdownMenuPrimitive.Item key={session.id} onSelect={() => review.mutate(session.id)} className={menuItem}>
                     <AgentIcon name={session.agent} className="size-3.5" />
                     <span className="min-w-0 flex-1 truncate text-fg">{sessionName(session)}</span>
                   </DropdownMenuPrimitive.Item>
                 ))}
               </>
             )}
-            <NewSessionItems options={fallbacks} after={others.length > 0} onSelect={start} />
+            <CopyItem after={others.length > 0} onSelect={copyPrompt} />
           </>
         )
       }
     >
-      <TargetIcon agent={again?.agent ?? primary?.agent} copied={copied} />
+      <TargetIcon agent={again?.agent} copied={copied} />
       {/* A narrow toolbar keeps the mark. */}
       <span className="hidden @2xl:inline">{copied ? "Copied" : "Review"}</span>
     </SplitButton>
@@ -498,42 +450,29 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
 
 /**
  * "Address N": sends the comments the author hasn't seen to it, to address. Shown while there
- * are any, from the reviewer or from reviewing agents. Without an author it starts a new session
- * the first way the menus offer. Its menu sends them to another session on the branch instead, or
- * to a new one.
+ * are any, from the reviewer or from reviewing agents. Without an author it copies a prompt for
+ * every open comment, to paste into any agent. Its menu sends them to another session on the
+ * branch instead, or copies the prompt.
  */
 export function AddressButton({ worktree }: { worktree: Worktree }) {
   const { activity, current, author } = useAgents(worktree);
-  const shown = useLaunchOptions();
-  const options = shown.length > 0 ? shown : [COPY_OPTION];
-  const terminal = useStore((s) => s.cliTerminal);
   const send = useSendComments(worktree);
   const copy = useCopyPrompt(worktree);
   const [copied, markCopied] = useJustDone();
   const busy = send.isPending || copy.isPending;
-
-  const start = (option: LaunchOption) => {
-    const to = newSession(option, terminal);
-    if (to) send.mutate(to);
-    else copy.mutate("implement", { onSuccess: markCopied });
-  };
+  const copyPrompt = () => copy.mutate("implement", { onSuccess: markCopied });
   const unseen = (session: AgentSession) => activity.unseen[session.id] ?? [];
 
-  const primary = author ? null : options[0];
   const threads = author ? unseen(author) : activity.open;
-  // A new session that's starting on the comments becomes the author once it takes them on.
+  // An agent given a copied prompt becomes the author once it takes the comments on.
   const starting = activity.requests.some((r) => r.kind === "implement" && isUnderway(r) && !r.sessionId);
   const others = current.filter((s) => s.reachable && s.id !== author?.id);
-  const fallbacks = options.filter((o) => o !== primary);
-  const primaryOpensIn = useOpensIn(primary ?? COPY_OPTION);
 
   if ((threads.length === 0 || (!author && starting)) && !copied) return null;
 
   const tooltip = author
     ? `Send ${plural(threads.length, "comment")} to ${sessionName(author)}`
-    : primary!.via === "copy"
-      ? `Copy a prompt for ${plural(threads.length, "comment")}, to paste into any agent`
-      : `Start a ${agentLabel(primary!.agent!)} session on ${plural(threads.length, "comment")} ${primaryOpensIn}`;
+    : `Copy a prompt for ${plural(threads.length, "comment")}, to paste into any agent`;
 
   return (
     <SplitButton
@@ -544,10 +483,10 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
         </span>
       }
       disabled={busy}
-      onClick={() => (author ? send.mutate({ session: author.id }) : start(primary!))}
+      onClick={() => (author ? send.mutate(author.id) : copyPrompt())}
       menuLabel="Send the comments elsewhere"
       menu={
-        others.length + fallbacks.length > 0 && (
+        (author || others.length > 0) && (
           <>
             {others.length > 0 && (
               <>
@@ -558,7 +497,7 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
                     <DropdownMenuPrimitive.Item
                       key={session.id}
                       disabled={count === 0}
-                      onSelect={() => send.mutate({ session: session.id })}
+                      onSelect={() => send.mutate(session.id)}
                       className={menuItem}
                     >
                       <AgentIcon name={session.agent} className="size-3.5" />
@@ -569,12 +508,12 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
                 })}
               </>
             )}
-            <NewSessionItems options={fallbacks} after={others.length > 0} onSelect={start} />
+            <CopyItem after={others.length > 0} onSelect={copyPrompt} />
           </>
         )
       }
     >
-      <TargetIcon agent={author?.agent ?? primary?.agent} copied={copied} />
+      <TargetIcon agent={author?.agent} copied={copied} />
       {/* A narrow toolbar keeps the mark and the count. */}
       <span className="hidden @3xl:inline">{copied ? "Copied" : "Address"}</span>
       {!copied && (
@@ -583,16 +522,5 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
         </span>
       )}
     </SplitButton>
-  );
-}
-
-function MenuOption({ option, onSelect }: { option: LaunchOption; onSelect: () => void }) {
-  const where = useWhere(option);
-  return (
-    <DropdownMenuPrimitive.Item onSelect={onSelect} className={menuItem}>
-      {option.agent ? <AgentIcon name={option.agent} className="size-3.5" /> : <Copy className="size-3.5" />}
-      <span className="text-fg">{option.label}</span>
-      {where && <span className="truncate text-[11px] text-fg-subtle">{where}</span>}
-    </DropdownMenuPrimitive.Item>
   );
 }

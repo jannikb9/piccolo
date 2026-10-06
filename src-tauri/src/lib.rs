@@ -8,7 +8,6 @@ mod programs;
 mod repos;
 mod requests;
 mod sessions;
-mod terminals;
 mod watch;
 
 use repos::Repos;
@@ -59,12 +58,10 @@ pub fn run() {
             comments::set_thread_dismissed,
             comments::delete_comment,
             comments::attachment_data,
-            sessions::available_agents,
             sessions::list_sessions,
             sessions::session_activity,
             requests::send_comments,
             requests::copy_prompt,
-            terminals::terminal_setup,
             requests::request_review,
             navigate::find_symbol,
             navigate::file_text,

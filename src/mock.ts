@@ -2,7 +2,6 @@
 import { hashString } from "./lib/diff";
 import type { ImageUpload } from "./lib/images";
 import type {
-  Assignee,
   AgentSession,
   Attachment,
   ChangedFile,
@@ -620,12 +619,11 @@ export function mockSessionActivity(worktreePath: string): Promise<SessionActivi
   });
 }
 
-export function mockSendComments(worktreePath: string, to: Assignee): Promise<ReviewRequest> {
-  const session = "session" in to ? to.session : null;
+export function mockSendComments(worktreePath: string, session: string): Promise<ReviewRequest> {
   const sent = unseenBy(worktreePath, session);
   if (sent.length === 0) return Promise.reject("There are no comments to send");
-  if (session) for (const id of sent) (seen[session] ??= {})[id] = Date.now();
-  return mockAsk("implement", to, sent);
+  for (const id of sent) (seen[session] ??= {})[id] = Date.now();
+  return mockAsk("implement", session, sent);
 }
 
 export function mockCopyPrompt(worktreePath: string, kind: ReviewRequest["kind"]): Promise<string> {
@@ -636,17 +634,17 @@ export function mockCopyPrompt(worktreePath: string, kind: ReviewRequest["kind"]
   );
 }
 
-export function mockRequestReview(_worktreePath: string, to: Assignee): Promise<ReviewRequest> {
-  return mockAsk("review", to, []);
+export function mockRequestReview(_worktreePath: string, session: string): Promise<ReviewRequest> {
+  return mockAsk("review", session, []);
 }
 
 /** `to` is `null` for a copied prompt, which any agent can take. */
-function mockAsk(kind: ReviewRequest["kind"], to: Assignee | null, sent: number[]): Promise<ReviewRequest> {
-  const session = to && "session" in to ? mockSessionList.find((s) => s.id === to.session) : undefined;
+function mockAsk(kind: ReviewRequest["kind"], to: string | null, sent: number[]): Promise<ReviewRequest> {
+  const session = mockSessionList.find((s) => s.id === to);
   const request: ReviewRequest = {
     id: Math.max(0, ...mockRequests.map((r) => r.id)) + 1,
     kind,
-    agent: session?.agent ?? (to && "agent" in to ? to.agent : "agent"),
+    agent: session?.agent ?? "agent",
     sessionId: session?.id ?? null,
     head: "f00ba12",
     threads: sent,

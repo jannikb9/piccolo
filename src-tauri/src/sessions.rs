@@ -20,7 +20,6 @@ use crate::comments::{blocking, now_ms, sql, Store, Target};
 use crate::git::{self, Result};
 use crate::programs;
 use crate::requests::{self, Request};
-use crate::terminals::{self, Launcher};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -294,71 +293,6 @@ fn match_sessions(
     matched
 }
 
-/// An agent a new session can be opened for, in its desktop app.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Agent {
-    Claude,
-    Codex,
-}
-
-impl Agent {
-    pub fn name(self) -> &'static str {
-        match self {
-            Agent::Claude => "claude",
-            Agent::Codex => "codex",
-        }
-    }
-
-    /// The desktop app its sessions open in: Claude's, or the ChatGPT app, which runs Codex.
-    fn app(self) -> &'static str {
-        match self {
-            Agent::Claude => "Claude",
-            Agent::Codex => "ChatGPT",
-        }
-    }
-
-    /// Whether its app is installed, wherever Launch Services knows it from.
-    fn has_app(self) -> bool {
-        terminals::app_installed(self.app())
-    }
-
-    /// Its CLI, as a command for the user's shell: its name when it's on the PATH, else the copy
-    /// an app ships (the ChatGPT app has Codex's).
-    fn cli(self) -> Option<String> {
-        let name = self.name();
-        if programs::find(name).is_some() {
-            return Some(name.to_string());
-        }
-        match self {
-            Agent::Claude => None,
-            Agent::Codex => codex_binary().map(|p| shell_quote(&p.to_string_lossy())),
-        }
-    }
-}
-
-/// `agent`'s CLI started with `prompt`, as a command line for the user's shell.
-fn command_line(agent: Agent, prompt: &str) -> String {
-    format!("{} {}", agent.cli().unwrap_or_else(|| agent.name().to_string()), shell_quote(prompt))
-}
-
-/// Starts a new session of `agent` in `worktree` with `prompt`, where `launcher` says: its desktop
-/// app, or its CLI in a terminal. Either falls back to the other when the agent doesn't have it.
-pub(crate) fn start_session(agent: Agent, worktree: &str, prompt: &str, launcher: Launcher) -> Result<()> {
-    let terminal = match launcher {
-        Launcher::App => None,
-        Launcher::Auto => Some(None),
-        Launcher::In(terminal) => Some(Some(terminal)),
-    };
-    let (has_app, has_cli) = (agent.has_app(), agent.cli().is_some());
-    match terminal {
-        Some(terminal) if has_cli => terminals::open(terminal, worktree, &command_line(agent, prompt)).map(|_| ()),
-        None if has_cli && !has_app => terminals::open(None, worktree, &command_line(agent, prompt)).map(|_| ()),
-        _ if has_app => open_new_session(agent, worktree, prompt),
-        _ => Err(format!("Neither the {} app nor the {} CLI is installed", agent.app(), agent.name())),
-    }
-}
-
 /// `value` as one shell word.
 pub(crate) fn shell_quote(value: &str) -> String {
     if !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || "/._-~+=:@".contains(c)) {
@@ -366,39 +300,6 @@ pub(crate) fn shell_quote(value: &str) -> String {
     } else {
         format!("'{}'", value.replace('\'', "'\\''"))
     }
-}
-
-/// Opens a new session of `agent` in its desktop app, in `worktree`, with `text` as its prompt,
-/// through the apps' own links (undocumented): Claude's `claude://code/new?folder=&q=`, Codex's
-/// `codex://threads/new?path=&prompt=` (in the ChatGPT app).
-pub(crate) fn open_new_session(agent: Agent, worktree: &str, text: &str) -> Result<()> {
-    let url = match agent {
-        Agent::Claude => format!("claude://code/new?folder={}&q={}", percent_encode(worktree), percent_encode(text)),
-        Agent::Codex => format!("codex://threads/new?path={}&prompt={}", percent_encode(worktree), percent_encode(text)),
-    };
-    let app = match agent {
-        Agent::Claude => "Claude",
-        Agent::Codex => "ChatGPT (for Codex)",
-    };
-    let status = std::process::Command::new("open")
-        .arg(&url)
-        .status()
-        .map_err(|e| format!("Couldn't open {app}: {e}"))?;
-    if !status.success() {
-        return Err(format!("Couldn't open a new session: is the {app} app installed?"));
-    }
-    Ok(())
-}
-
-/// `value` with everything but unreserved URL characters percent-encoded.
-fn percent_encode(value: &str) -> String {
-    value
-        .bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
 }
 
 /// Hands `text` to `session`: as one stream-json `user` frame to a Claude Code session's inbox, or
@@ -567,7 +468,7 @@ pub(crate) fn sessions_of(store: &Store, path: &str) -> Result<Vec<Session>> {
 pub struct Activity {
     /// Open threads each session hasn't seen, by session id.
     pub unseen: HashMap<String, Vec<i64>>,
-    /// All open threads, which a new session would be given.
+    /// All open threads, which a copied prompt hands over.
     pub open: Vec<i64>,
     /// Who started each open thread: an agent's name, or `None` for the reviewer.
     pub started_by: HashMap<i64, Option<String>>,
@@ -579,29 +480,6 @@ pub struct Activity {
 
 // ---------------------------------------------------------------------------------------------
 // Tauri commands
-
-/// An agent a new session can be started for, and how.
-#[derive(Debug, Serialize)]
-pub struct Available {
-    agent: Agent,
-    /// Its desktop app is installed.
-    app: bool,
-    /// Its CLI is installed.
-    cli: bool,
-}
-
-/// Agents a new session can be started for: those with their app or CLI installed.
-#[tauri::command]
-pub async fn available_agents() -> Result<Vec<Available>> {
-    blocking(|| {
-        Ok([Agent::Claude, Agent::Codex]
-            .into_iter()
-            .map(|agent| Available { agent, app: agent.has_app(), cli: agent.cli().is_some() })
-            .filter(|a| a.app || a.cli)
-            .collect())
-    })
-    .await
-}
 
 /// Sessions working on each of the worktrees at `paths` (worktrees without one are left out).
 #[tauri::command]
@@ -636,7 +514,7 @@ mod tests {
     use crate::comments::tests::{additions, fixture};
     use crate::comments::{By, NewThread};
     use crate::git::{DiffRange, Scope};
-    use crate::requests::{Asked, Kind};
+    use crate::requests::Kind;
     use std::io::{BufRead, BufReader};
     use std::os::unix::net::UnixListener;
 
@@ -742,7 +620,7 @@ mod tests {
         let new = NewThread { by: By::REVIEWER, path: "a.txt", old_path: None, range: additions(3, 3), body: "x", images: &[] };
         let id = store.add_thread(&target, &wt, &range, new).unwrap();
         let session = found.iter().find(|s| s.id == thread).unwrap();
-        let send = |store: &Store, session| store.ask(&target, Kind::Implement, Asked::Session(session), None);
+        let send = |store: &Store, session| store.ask(&target, Kind::Implement, session, None);
         assert_eq!(send(&store, session).unwrap().threads, [id]);
         let queued = std::fs::read_to_string(&log).unwrap();
         assert!(queued.starts_with(&format!("queue\n--thread\n{thread}\n--message\n")), "{queued}");
@@ -844,14 +722,13 @@ mod tests {
 
         // What it hasn't seen, as a request to address them; then nothing's left to send.
         let session = &sessions[0];
-        let send = |store: &Store| store.ask(&target, Kind::Implement, Asked::Session(session), None);
+        let send = |store: &Store| store.ask(&target, Kind::Implement, session, None);
         let request = send(&store).unwrap();
         assert_eq!((request.kind, request.threads.clone(), request.session_id.as_deref()), (Kind::Implement, vec![first, second], Some("s1")));
         let text = received();
         assert!(text.contains(&format!("review comments from Piccolo to address: #{first}, #{second}")), "{text}");
         assert!(text.contains(&format!("piccolo -C {} guide --request {}", target.worktree, request.id)), "{text}");
         assert!(send(&store).is_err());
-        assert_eq!(percent_encode("a b/é&q=1"), "a%20b%2F%C3%A9%26q%3D1");
 
         // Nothing is counted as seen when the session can't be reached.
         std::thread::sleep(std::time::Duration::from_millis(2));

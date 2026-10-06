@@ -1,7 +1,8 @@
 //! What the reviewer asks agents to do: review the branch, or address comments on it (implement
-//! them). A request names the agent, and the session once one takes it on: a new session is opened
-//! with a prompt to run `piccolo guide --request <id>`, which claims the request for the session it
-//! runs in and prints the steps for its kind, and the agent says it's finished with `piccolo done`.
+//! them). A request names the agent, and the session once one takes it on: a running session is
+//! sent a prompt, or the reviewer copies one to paste into any agent, to run `piccolo guide
+//! --request <id>`, which claims the request for the session it runs in and prints the steps for
+//! its kind, and the agent says it's finished with `piccolo done`.
 //! In between, its comments and replies come in one by one like anyone's. An agent can do either
 //! unasked, too: `done` then records what it did.
 //!
@@ -10,8 +11,7 @@
 
 use crate::comments::{blocking, now_ms, sql, Store, Target};
 use crate::git::{self, Result};
-use crate::sessions::{self, shell_quote, Agent, Caller, Session};
-use crate::terminals::Launcher;
+use crate::sessions::{self, shell_quote, Caller, Session};
 use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
 use std::path::Path;
@@ -109,35 +109,17 @@ pub fn list(store: &Store, target: &Target) -> Result<Vec<Request>> {
     Ok(requests)
 }
 
-/// Who's asked: a session working on the worktree, or a new session of an agent, started where
-/// the launcher says.
-#[derive(Clone, Copy)]
-pub enum Asked<'a> {
-    Session(&'a Session),
-    New(Agent, Launcher),
-}
-
 impl Store {
-    /// Asks `to` for `kind` of work on `target`'s branch, at commit `head`, and hands it the prompt.
-    /// Comments to address are those the session hasn't seen (every open one, for a new session),
-    /// and count as seen once sent. Nothing is recorded when the prompt can't be handed over.
-    pub fn ask(&self, target: &Target, kind: Kind, to: Asked, head: Option<&str>) -> Result<Request> {
-        let (agent, session) = match to {
-            Asked::Session(session) => (session.agent.as_str(), Some(session.id.as_str())),
-            Asked::New(agent, _) => (agent.name(), None),
-        };
-        let (request, text) = self.prepare(target, kind, agent, session, head)?;
-        let handed = match to {
-            Asked::Session(session) => sessions::deliver(session, &text),
-            Asked::New(agent, launcher) => sessions::start_session(agent, &target.worktree, &text, launcher),
-        };
-        if let Err(e) = handed {
+    /// Asks `session` for `kind` of work on `target`'s branch, at commit `head`, and hands it the
+    /// prompt. Comments to address are those the session hasn't seen, and count as seen once sent.
+    /// Nothing is recorded when the prompt can't be handed over.
+    pub fn ask(&self, target: &Target, kind: Kind, session: &Session, head: Option<&str>) -> Result<Request> {
+        let (request, text) = self.prepare(target, kind, &session.agent, Some(&session.id), head)?;
+        if let Err(e) = sessions::deliver(session, &text) {
             self.cancel_request(request.id)?;
             return Err(e);
         }
-        if let Some(session) = session {
-            self.mark_seen(session, &request.threads)?;
-        }
+        self.mark_seen(&session.id, &request.threads)?;
         Ok(request)
     }
 
@@ -335,37 +317,29 @@ fn head_of(path: &str) -> Option<String> {
     git::git(Path::new(path), &["rev-parse", "HEAD"]).ok().map(|h| h.trim().to_string())
 }
 
-/// Asks for `kind` of work on the worktree at `path`: from the session `session` working on it, or
-/// from a new Claude or Codex session, started where `launcher` says.
-async fn ask(path: String, kind: Kind, agent: Option<Agent>, session: Option<String>, launcher: Launcher) -> Result<Request> {
+/// Asks the session `session` working on the worktree at `path` for `kind` of work.
+async fn ask(path: String, kind: Kind, session: String) -> Result<Request> {
     blocking(move || {
         let store = Store::open()?;
         let target = Target::of(Path::new(&path))?;
-        let head = head_of(&path);
-        match (session, agent) {
-            (Some(session), _) => {
-                let sessions = sessions::sessions_of(&store, &path)?;
-                let session = sessions.iter().find(|s| s.id == session).ok_or("That session isn't running any more")?;
-                store.ask(&target, kind, Asked::Session(session), head.as_deref())
-            }
-            (None, Some(agent)) => store.ask(&target, kind, Asked::New(agent, launcher), head.as_deref()),
-            (None, None) => Err("Say which agent to ask".into()),
-        }
+        let sessions = sessions::sessions_of(&store, &path)?;
+        let session = sessions.iter().find(|s| s.id == session).ok_or("That session isn't running any more")?;
+        store.ask(&target, kind, session, head_of(&path).as_deref())
     })
     .await
 }
 
-/// Asks for a review of the worktree at `path`.
+/// Asks the session `session` for a review of the worktree at `path`.
 #[tauri::command]
-pub async fn request_review(path: String, agent: Option<Agent>, session: Option<String>, launcher: Launcher) -> Result<Request> {
-    ask(path, Kind::Review, agent, session, launcher).await
+pub async fn request_review(path: String, session: String) -> Result<Request> {
+    ask(path, Kind::Review, session).await
 }
 
-/// Sends the comments on the worktree at `path` to an agent to address: those a session hasn't
-/// seen, or every open one for a new session.
+/// Sends the comments on the worktree at `path` that the session `session` hasn't seen to it, to
+/// address.
 #[tauri::command]
-pub async fn send_comments(path: String, agent: Option<Agent>, session: Option<String>, launcher: Launcher) -> Result<Request> {
-    ask(path, Kind::Implement, agent, session, launcher).await
+pub async fn send_comments(path: String, session: String) -> Result<Request> {
+    ask(path, Kind::Implement, session).await
 }
 
 /// Asks any agent for `kind` of work on the worktree at `path`, and returns the prompt, for the
