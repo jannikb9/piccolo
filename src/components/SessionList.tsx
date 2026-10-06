@@ -1,9 +1,9 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
-import { Check, ChevronDown, Copy, LoaderCircle } from "lucide-react";
+import { Check, ChevronDown, Copy, Eye, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useCopyPrompt, useRequestReview, useSendComments, useSessionActivity, useSessions } from "../lib/queries";
-import { agentLabel, ago, cn, modelLabel } from "../lib/utils";
+import { agentLabel, cn, modelLabel } from "../lib/utils";
 import type { AgentSession, ReviewRequest, SessionActivity, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
 import { Tooltip, useJustDone } from "./ui";
@@ -33,22 +33,22 @@ function startedBy(threads: number[], activity: SessionActivity) {
 const RECENT_MS = 60 * 60 * 1000;
 
 /**
- * The agents on a worktree: copied prompts no agent has taken on yet, and sessions still
- * around (running, at work or just done); those that ended are left out. What each is doing comes
- * from its latest request. The author is the session building the branch, which comments go to.
+ * The agents on a worktree: sessions still around (running, at work or just done); those that
+ * ended are left out. What each is doing comes from its latest request. The author is the session
+ * building the branch, which comments go to. A copied prompt shows up as a session once an agent
+ * takes it on.
  */
 function useAgents(worktree: Worktree) {
   const sessions = useSessions(worktree);
   const activity = useSessionActivity(worktree);
   // A session's latest request; requests come newest first.
   const requestOf = (session: AgentSession) => activity.requests.find((r) => r.sessionId === session.id);
-  const waiting = activity.requests.filter((r) => isUnderway(r) && !r.sessionId);
   const isCurrent = (session: AgentSession) => {
     const request = requestOf(session);
     return session.running !== false || (!!request && (isUnderway(request) || request.finishedAt! > Date.now() - RECENT_MS));
   };
   const current = sessions.filter(isCurrent);
-  return { activity, requestOf, waiting, current, author: authorOf(current, requestOf) };
+  return { activity, requestOf, current, author: authorOf(current, requestOf) };
 }
 
 /**
@@ -85,7 +85,7 @@ function stateOf(session: AgentSession, request: ReviewRequest | undefined): Age
  * work. Only shows what's going on; asking for reviews and sending comments are the buttons beside it.
  */
 export function AgentsButton({ worktree }: { worktree: Worktree }) {
-  const { current, waiting, requestOf } = useAgents(worktree);
+  const { current, requestOf } = useAgents(worktree);
   const [open, setOpen] = useState(false);
   // Opened by a click, it stays until dismissed; opened by hovering, until the pointer leaves.
   const [pinned, setPinned] = useState(false);
@@ -109,7 +109,6 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
     const was = agents.get(agent);
     if (was !== "busy" && (state !== "idle" || !was)) agents.set(agent, state);
   };
-  for (const request of waiting) mark(request.agent, "busy");
   for (const session of current) mark(session.agent, stateOf(session, requestOf(session)));
   const marks = [...agents];
 
@@ -198,14 +197,11 @@ function StateBadge({ state }: { state: AgentState }) {
 
 /** The agents on a worktree and what each is doing. */
 function AgentsPanel({ worktree }: { worktree: Worktree }) {
-  const { activity, requestOf, waiting, current, author } = useAgents(worktree);
+  const { activity, requestOf, current, author } = useAgents(worktree);
   return (
     <section>
       <h3 className="flex h-6 items-center pl-2 text-[11px] font-medium text-fg-faint">On this branch</h3>
       <ul className="flex flex-col">
-        {waiting.map((request) => (
-          <WaitingRow key={request.id} request={request} />
-        ))}
         {current.map((session) => {
           const request = requestOf(session);
           return (
@@ -272,19 +268,6 @@ function SessionRow({
   return <Row icon={session.agent} state={state} title={sessionName(session)} detail={detail} />;
 }
 
-/** A copied prompt no agent has taken on yet. */
-function WaitingRow({ request }: { request: ReviewRequest }) {
-  const asked = request.kind === "review" ? "Review requested" : `Asked to address ${plural(request.threads.length, "comment")}`;
-  return (
-    <Row
-      icon={request.agent}
-      state="busy"
-      title="Copied prompt"
-      detail={`${asked} ${ago(request.requestedAt)} · waiting for an agent`}
-    />
-  );
-}
-
 /** The agent's mark with a dot for its state: green running, a spinner while busy. */
 function StatusIcon({ agent, state }: { agent: string; state: AgentState }) {
   return (
@@ -305,7 +288,7 @@ const menuLabel = "px-2 pt-1.5 pb-0.5 text-[11px] font-medium text-fg-faint";
 
 /**
  * A toolbar button that does its likeliest thing on a click, with a chevron for the menu of the
- * others, when there are any.
+ * others, when there are any. Without a likeliest thing (`onClick` is `null`), a click opens the menu.
  */
 function SplitButton({
   tooltip,
@@ -317,21 +300,28 @@ function SplitButton({
 }: {
   tooltip: ReactNode;
   disabled: boolean;
-  onClick: () => void;
+  onClick: (() => void) | null;
   children: ReactNode;
   /** The chevron's accessible name. */
   menuLabel: string;
   /** The menu's items; no chevron without them. */
   menu: ReactNode | null;
 }) {
+  const [open, setOpen] = useState(false);
+  const mainRef = useRef<HTMLButtonElement>(null);
   return (
     <div className="flex h-7 shrink-0 items-stretch rounded-md border border-border bg-bg-raised text-[12px] font-medium text-fg">
       <Tooltip label={tooltip}>
         {/* Not `disabled`, which would keep the tooltip saying why from showing. */}
         <button
+          ref={mainRef}
           type="button"
           aria-disabled={disabled}
-          onClick={() => !disabled && onClick()}
+          onClick={() => {
+            if (disabled) return;
+            if (onClick) onClick();
+            else setOpen((o) => !o);
+          }}
           className={cn(
             "flex items-center gap-1.5 px-2 hover:bg-bg-hover aria-disabled:opacity-50 aria-disabled:hover:bg-transparent",
             menu ? "rounded-l-md" : "rounded-md",
@@ -341,7 +331,7 @@ function SplitButton({
         </button>
       </Tooltip>
       {menu && (
-        <DropdownMenuPrimitive.Root modal={false}>
+        <DropdownMenuPrimitive.Root modal={false} open={open} onOpenChange={setOpen}>
           <DropdownMenuPrimitive.Trigger
             aria-label={chevronLabel}
             disabled={disabled}
@@ -353,6 +343,8 @@ function SplitButton({
             <DropdownMenuPrimitive.Content
               align="end"
               sideOffset={4}
+              // A click on the button toggles the menu; it mustn't also count as dismissing it.
+              onInteractOutside={(e) => mainRef.current?.contains(e.target as Node) && e.preventDefault()}
               className="z-50 w-64 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
             >
               {menu}
@@ -364,11 +356,11 @@ function SplitButton({
   );
 }
 
-/** The mark on a split button: the session it goes to, a clipboard for a copied prompt, then a check. */
-function TargetIcon({ agent, copied }: { agent: string | undefined; copied: boolean }) {
+/** The mark on a split button: the session it goes to, else `fallback` (a clipboard), then a check once copied. */
+function TargetIcon({ agent, copied, fallback }: { agent: string | undefined; copied: boolean; fallback?: ReactNode }) {
   if (copied) return <Check className="size-3.5" strokeWidth={2.5} />;
   if (agent) return <AgentIcon name={agent} className="size-3.5" />;
-  return <Copy className="size-3.5 text-fg-muted" />;
+  return fallback ?? <Copy className="size-3.5 text-fg-muted" />;
 }
 
 /** A session's model in a menu, beside its name. */
@@ -393,8 +385,9 @@ function CopyItem({ after, onSelect }: { after: boolean; onSelect: () => void })
 
 /**
  * "Review": asks for a review of the branch. Another round goes to the session that reviewed it
- * last, while it's around and free; else it copies a prompt to paste into any agent. Its menu asks
- * another session on the branch instead (never the author), or copies the prompt.
+ * last, while it's around and free; otherwise a click opens the menu. The menu asks another session
+ * on the branch instead (never the author), or copies a prompt to paste into any agent; that agent
+ * shows up here once it starts on the review.
  */
 export function ReviewButton({ worktree }: { worktree: Worktree }) {
   const { current, author, requestOf } = useAgents(worktree);
@@ -415,31 +408,29 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
 
   return (
     <SplitButton
-      tooltip={again ? `Ask ${sessionName(again)} to review the branch again` : "Copy a review prompt, to paste into any agent"}
+      tooltip={again ? `Ask ${sessionName(again)} to review the branch again` : "Ask for a review of the branch"}
       disabled={busy}
-      onClick={() => (again ? review.mutate(again.id) : copyPrompt())}
+      onClick={again ? () => review.mutate(again.id) : null}
       menuLabel="Ask for a review elsewhere"
       menu={
-        (again || others.length > 0) && (
-          <>
-            {others.length > 0 && (
-              <>
-                <DropdownMenuPrimitive.Label className={menuLabel}>Ask a session</DropdownMenuPrimitive.Label>
-                {others.map((session) => (
-                  <DropdownMenuPrimitive.Item key={session.id} onSelect={() => review.mutate(session.id)} className={menuItem}>
-                    <AgentIcon name={session.agent} className="size-3.5" />
-                    <span className="min-w-0 flex-1 truncate text-fg">{sessionName(session)}</span>
-                    <ModelName session={session} />
-                  </DropdownMenuPrimitive.Item>
-                ))}
-              </>
-            )}
-            <CopyItem after={others.length > 0} onSelect={copyPrompt} />
-          </>
-        )
+        <>
+          {others.length > 0 && (
+            <>
+              <DropdownMenuPrimitive.Label className={menuLabel}>Ask a session</DropdownMenuPrimitive.Label>
+              {others.map((session) => (
+                <DropdownMenuPrimitive.Item key={session.id} onSelect={() => review.mutate(session.id)} className={menuItem}>
+                  <AgentIcon name={session.agent} className="size-3.5" />
+                  <span className="min-w-0 flex-1 truncate text-fg">{sessionName(session)}</span>
+                  <ModelName session={session} />
+                </DropdownMenuPrimitive.Item>
+              ))}
+            </>
+          )}
+          <CopyItem after={others.length > 0} onSelect={copyPrompt} />
+        </>
       }
     >
-      <TargetIcon agent={again?.agent} copied={copied} />
+      <TargetIcon agent={again?.agent} copied={copied} fallback={<Eye className="size-3.5 text-fg-muted" />} />
       {/* A narrow toolbar keeps the mark. */}
       <span className="hidden @2xl:inline">{copied ? "Copied" : "Review"}</span>
     </SplitButton>
