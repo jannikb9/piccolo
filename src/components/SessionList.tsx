@@ -1,24 +1,29 @@
+import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
-import { LoaderCircle, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Check, Copy, LoaderCircle, Plus, X } from "lucide-react";
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   useAvailableAgents,
   useCancelReviewRequest,
+  useCopyAgentCommand,
   useRequestReview,
   useSendComments,
   useSessionActivity,
   useSessions,
+  useTerminalSetup,
 } from "../lib/queries";
+import { opensIn } from "../lib/terminals";
 import { agentLabel, ago, cn } from "../lib/utils";
+import { useStore } from "../store";
 import type { AgentKind, AgentSession, ReviewRequest, SessionActivity, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
-import { Button, IconButton, Tooltip } from "./ui";
+import { Button, IconButton, Tooltip, useJustDone } from "./ui";
 
-/** Where a new session of each agent opens. */
-const APPS: Record<AgentKind, string> = {
-  claude: "Opens in the Claude app",
-  codex: "Opens in the ChatGPT app",
-};
+/**
+ * Keeps the hover popover open: a menu opened from it lies outside it, so leaving the popover for
+ * the menu mustn't close it.
+ */
+const PinPanel = createContext<() => void>(() => {});
 
 /** A session as the app names it: its title, else its agent. */
 const sessionName = (session: AgentSession) => session.title ?? `${agentLabel(session.agent)} session`;
@@ -200,9 +205,11 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
             if (pinned) contentRef.current?.focus();
           }}
           onCloseAutoFocus={(e) => e.preventDefault()}
-          className="z-40 max-h-[min(560px,calc(100vh-80px))] w-[400px] outline-none max-w-[calc(100vw-32px)] overflow-y-auto rounded-lg border border-border bg-bg-raised p-2 shadow-xl shadow-black/30"
+          className="z-40 max-h-[min(560px,calc(100vh-80px))] w-[440px] outline-none max-w-[calc(100vw-32px)] overflow-y-auto rounded-lg border border-border bg-bg-raised p-2 shadow-xl shadow-black/30"
         >
-          <AgentPanel worktree={worktree} />
+          <PinPanel.Provider value={() => setPinned(true)}>
+            <AgentPanel worktree={worktree} />
+          </PinPanel.Provider>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
@@ -225,6 +232,8 @@ type Ask = { session: string } | { agent: AgentKind };
 export function AgentPanel({ worktree }: { worktree: Worktree }) {
   const { activity, requestOf, waiting, current } = useAgents(worktree);
   const available = useAvailableAgents();
+  const launcher = useStore((s) => s.agentLauncher);
+  const setup = useTerminalSetup();
   const review = useRequestReview(worktree);
   const implement = useSendComments(worktree);
   const pending = review.isPending || implement.isPending;
@@ -267,19 +276,60 @@ export function AgentPanel({ worktree }: { worktree: Worktree }) {
         </Section>
       )}
       <Section title="Add agent">
-        {available.map((agent) => (
-          <Row key={agent} icon={agent} title={agentLabel(agent)} detail={APPS[agent]}>
-            {actions({ agent }, unseenBy(activity, null), "")}
+        {available.map((option) => (
+          <Row key={option.agent} icon={option.agent} title={agentLabel(option.agent)} detail={opensIn(option, launcher, setup)}>
+            {actions({ agent: option.agent }, unseenBy(activity, null), "")}
+            <CopyCommand worktree={worktree} agent={option.agent} canImplement={activity.open.length > 0} />
           </Row>
         ))}
         {available.length === 0 && (
           <p className="px-2 py-3 text-[12px] leading-5 text-fg-subtle">
-            Install the Claude or ChatGPT app to start agents from Piccolo. Agents that run{" "}
+            Install Claude Code or Codex (their app or CLI) to start agents from Piccolo. Agents that run{" "}
             <code className="font-mono">piccolo</code> on this branch show up here too.
           </p>
         )}
       </Section>
     </div>
+  );
+}
+
+/**
+ * Copies the command that starts a new session of `agent` on a review or on the comments, for a
+ * terminal Piccolo doesn't open by itself. Copying asks for the work, like the buttons do.
+ */
+function CopyCommand({ worktree, agent, canImplement }: { worktree: Worktree; agent: AgentKind; canImplement: boolean }) {
+  const copy = useCopyAgentCommand(worktree);
+  const pin = useContext(PinPanel);
+  const [copied, markCopied] = useJustDone();
+  const item =
+    "flex h-7 cursor-default items-center rounded px-2 outline-none data-[disabled]:opacity-50 data-[highlighted]:bg-bg-hover data-[highlighted]:text-fg";
+  const select = (kind: ReviewRequest["kind"]) => copy.mutate({ kind, agent }, { onSuccess: markCopied });
+  return (
+    <DropdownMenuPrimitive.Root modal={false} onOpenChange={(open) => open && pin()}>
+      <DropdownMenuPrimitive.Trigger asChild>
+        <IconButton
+          label={copied ? "Copied: paste it in a terminal" : "Copy the command, to run it yourself"}
+          disabled={copy.isPending}
+          className="size-6"
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        </IconButton>
+      </DropdownMenuPrimitive.Trigger>
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          align="end"
+          sideOffset={4}
+          className="z-50 min-w-48 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
+        >
+          <DropdownMenuPrimitive.Item className={item} onSelect={() => select("review")}>
+            Copy review command
+          </DropdownMenuPrimitive.Item>
+          <DropdownMenuPrimitive.Item className={item} disabled={!canImplement} onSelect={() => select("implement")}>
+            Copy implement command
+          </DropdownMenuPrimitive.Item>
+        </DropdownMenuPrimitive.Content>
+      </DropdownMenuPrimitive.Portal>
+    </DropdownMenuPrimitive.Root>
   );
 }
 

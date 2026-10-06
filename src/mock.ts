@@ -604,6 +604,14 @@ export function mockSendComments(worktreePath: string, to: { session: string } |
   return mockAsk("implement", to, sent);
 }
 
+export function mockAgentCommand(worktreePath: string, kind: ReviewRequest["kind"], agent: AgentKind): Promise<string> {
+  const sent = kind === "implement" ? unseenBy(worktreePath, null) : [];
+  if (kind === "implement" && sent.length === 0) return Promise.reject("There are no comments to send");
+  return mockAsk(kind, { agent }, sent).then(
+    (r) => `cd ${worktreePath} && ${agent} 'Run \`piccolo -C ${worktreePath} guide --request ${r.id}\` and follow the steps it prints.'`,
+  );
+}
+
 export function mockRequestReview(_worktreePath: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> {
   return mockAsk("review", to, []);
 }

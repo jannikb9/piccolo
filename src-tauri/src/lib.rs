@@ -8,6 +8,7 @@ mod programs;
 mod repos;
 mod requests;
 mod sessions;
+mod terminals;
 mod watch;
 
 use repos::Repos;
@@ -62,6 +63,8 @@ pub fn run() {
             sessions::list_sessions,
             sessions::session_activity,
             requests::send_comments,
+            requests::agent_command,
+            terminals::terminal_setup,
             requests::request_review,
             requests::cancel_review_request,
             navigate::find_symbol,

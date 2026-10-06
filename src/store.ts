@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 import type { CodeThemeId } from "./lib/codeThemes";
 import type { DraftImage } from "./lib/images";
 import type { SectionId } from "./lib/sections";
-import type { DiffLayout, DiffOptions, DiffScope, LineRange, Repo, Worktree } from "./types";
+import type { DiffLayout, DiffOptions, DiffScope, Launcher, LineRange, Repo, Worktree } from "./types";
 
 type PathSet = Record<string, true>;
 
@@ -39,6 +39,8 @@ type State = {
   hideWhitespace: boolean;
   hideImports: boolean;
   codeTheme: CodeThemeId;
+  /** Where new agent sessions start (Settings). */
+  agentLauncher: Launcher;
   /** worktreeId → set of viewed file paths */
   viewed: Record<string, PathSet>;
   /**
@@ -75,6 +77,7 @@ type State = {
   toggleHideWhitespace: () => void;
   toggleHideImports: () => void;
   setCodeTheme: (theme: CodeThemeId) => void;
+  setAgentLauncher: (launcher: Launcher) => void;
   toggleViewed: (worktreeId: string, path: string) => void;
   setCollapsed: (worktreeId: string, path: string, collapsed: boolean) => void;
   setActivePath: (path: string | null) => void;
@@ -113,6 +116,7 @@ export const useStore = create<State>()(
       hideWhitespace: false,
       hideImports: false,
       codeTheme: "github",
+      agentLauncher: "app",
       viewed: {},
       collapsed: {},
       activePath: null,
@@ -139,6 +143,7 @@ export const useStore = create<State>()(
       toggleHideWhitespace: () => set((s) => ({ hideWhitespace: !s.hideWhitespace })),
       toggleHideImports: () => set((s) => ({ hideImports: !s.hideImports })),
       setCodeTheme: (codeTheme) => set({ codeTheme }),
+      setAgentLauncher: (agentLauncher) => set({ agentLauncher }),
       // Like GitHub: marking a file viewed collapses it, un-marking expands it again.
       toggleViewed: (wt, path) =>
         set((s) => {
@@ -224,6 +229,7 @@ export const useStore = create<State>()(
         hideWhitespace: s.hideWhitespace,
         hideImports: s.hideImports,
         codeTheme: s.codeTheme,
+        agentLauncher: s.agentLauncher,
         fileTab: s.fileTab,
       }),
     },

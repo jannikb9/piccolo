@@ -154,6 +154,24 @@ export type GeneralThread = Omit<Thread, "path" | "oldPath" | "range" | "positio
 /** An agent comments can be sent to in a new session. */
 export type AgentKind = "claude" | "codex";
 
+/** An agent a new session can be started for: with its desktop app, its CLI, or both installed. */
+export type AvailableAgent = { agent: AgentKind; app: boolean; cli: boolean };
+
+/** A terminal Piccolo can open agents' CLIs in (src-tauri/src/terminals.rs); `terminal` is macOS's Terminal. */
+export type TerminalId = "tmux" | "iterm" | "kitty" | "wezterm" | "terminal";
+
+/** Where new agent sessions start: the agent's app, the terminal Piccolo picks, or a chosen one. */
+export type Launcher = "app" | "auto" | TerminalId;
+
+export type TerminalSetup = {
+  /** Terminals found on this Mac. */
+  installed: TerminalId[];
+  /** The one "Automatic" picks right now: tmux while attached, else the frontmost terminal app. */
+  detected: TerminalId | null;
+  /** kitty opens agents in tabs (its remote control is on), not new windows. */
+  kittyTabs: boolean;
+};
+
 /**
  * An agent session working on a worktree: a running Claude Code session in it (from Claude Code's
  * session registry), or any session that ran `piccolo` on it (src-tauri/src/sessions.rs).

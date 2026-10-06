@@ -39,10 +39,14 @@ pub fn is_executable(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
+/// The user's login shell.
+pub fn login_shell() -> String {
+    std::env::var("SHELL").ok().filter(|s| s.starts_with('/')).unwrap_or_else(|| "/bin/zsh".into())
+}
+
 /// The PATH the user's login shell sets up, interactive so that `.zshrc` and the like are read.
 fn login_shell_path() -> Option<Vec<PathBuf>> {
-    let shell = std::env::var("SHELL").ok().filter(|s| s.starts_with('/')).unwrap_or_else(|| "/bin/zsh".into());
-    let mut child = Command::new(shell)
+    let mut child = Command::new(login_shell())
         .args(["-l", "-i", "-c", &format!("printf '{MARKER}%s{MARKER}' \"$PATH\"")])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

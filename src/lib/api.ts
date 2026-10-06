@@ -19,6 +19,7 @@ import {
   mockRemoteBranches,
   mockReorderRepos,
   mockReply,
+  mockAgentCommand,
   mockCancelRequest,
   mockRequestReview,
   mockSendComments,
@@ -34,6 +35,9 @@ import type { ImageUpload } from "./images";
 import type {
   AgentKind,
   AgentSession,
+  AvailableAgent,
+  Launcher,
+  TerminalSetup,
   ChangedFile,
   Commit,
   DiffOptions,
@@ -147,8 +151,22 @@ export const api = {
   setThreadDismissed: (id: number, dismissed: boolean): Promise<void> =>
     isTauri ? invoke("set_thread_dismissed", { id, dismissed }) : mockSetDismissed(id, dismissed),
 
-  /** Agents a new session can be opened for: those whose desktop app is installed. */
-  availableAgents: (): Promise<AgentKind[]> => (isTauri ? invoke("available_agents") : Promise.resolve(["claude", "codex"])),
+  /** Agents a new session can be started for: those with their desktop app or CLI installed. */
+  availableAgents: (): Promise<AvailableAgent[]> =>
+    isTauri
+      ? invoke("available_agents")
+      : Promise.resolve([
+          { agent: "claude", app: true, cli: true },
+          { agent: "codex", app: true, cli: false },
+        ]),
+
+  /** The terminals found, and the one "Automatic" picks. */
+  terminalSetup: (): Promise<TerminalSetup> =>
+    isTauri ? invoke("terminal_setup") : Promise.resolve({ installed: ["iterm", "kitty", "terminal"], detected: "kitty", kittyTabs: false }),
+
+  /** Asks a new session of `agent` for `kind` of work and returns the command that starts it, to copy. */
+  agentCommand: (path: string, kind: ReviewRequest["kind"], agent: AgentKind): Promise<string> =>
+    isTauri ? invoke("agent_command", { path, kind, agent }) : mockAgentCommand(path, kind, agent),
 
   /** Agent sessions working on each worktree (by path); worktrees without one are left out. */
   listSessions: (paths: string[]): Promise<Record<string, AgentSession[]>> =>
@@ -162,15 +180,15 @@ export const api = {
    * Sends comments to address: to the running `session`, those it hasn't seen; to a new Claude or
    * Codex session in its app, every open one.
    */
-  sendComments: (path: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> =>
+  sendComments: (path: string, to: { session: string } | { agent: AgentKind }, launcher: Launcher): Promise<ReviewRequest> =>
     isTauri
-      ? invoke("send_comments", { path, session: "session" in to ? to.session : null, agent: "agent" in to ? to.agent : null })
+      ? invoke("send_comments", { path, session: "session" in to ? to.session : null, agent: "agent" in to ? to.agent : null, launcher })
       : mockSendComments(path, to),
 
   /** Asks the running `session` to review the worktree, or a new Claude or Codex session in its app. */
-  requestReview: (path: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> =>
+  requestReview: (path: string, to: { session: string } | { agent: AgentKind }, launcher: Launcher): Promise<ReviewRequest> =>
     isTauri
-      ? invoke("request_review", { path, session: "session" in to ? to.session : null, agent: "agent" in to ? to.agent : null })
+      ? invoke("request_review", { path, session: "session" in to ? to.session : null, agent: "agent" in to ? to.agent : null, launcher })
       : mockRequestReview(path, to),
 
   /** Withdraws a review request, or removes a finished review from the list. */

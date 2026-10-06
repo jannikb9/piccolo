@@ -20,6 +20,7 @@ use crate::comments::{blocking, now_ms, sql, Store, Target};
 use crate::git::{self, Result};
 use crate::programs;
 use crate::requests::{self, Request};
+use crate::terminals::{self, Launcher};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -153,7 +154,7 @@ fn codex_titles(index: &Path) -> HashMap<String, String> {
 }
 
 /// The Codex CLI: on the user's PATH, else the copy the ChatGPT app ships and runs for its own chats.
-fn codex_binary() -> Option<PathBuf> {
+pub(crate) fn codex_binary() -> Option<PathBuf> {
     programs::find("codex").or_else(|| {
         let bundled = PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex");
         programs::is_executable(&bundled).then_some(bundled)
@@ -318,13 +319,44 @@ impl Agent {
     }
 
     /// Whether its app is installed, wherever Launch Services knows it from.
-    fn is_installed(self) -> bool {
-        Command::new("open")
-            .args(["-Ra", self.app()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+    fn has_app(self) -> bool {
+        terminals::app_installed(self.app())
+    }
+
+    /// Its CLI, as a command for the user's shell: its name when it's on the PATH, else the copy
+    /// an app ships (the ChatGPT app has Codex's).
+    fn cli(self) -> Option<String> {
+        let name = self.name();
+        if programs::find(name).is_some() {
+            return Some(name.to_string());
+        }
+        match self {
+            Agent::Claude => None,
+            Agent::Codex => codex_binary().map(|p| shell_quote(&p.to_string_lossy())),
+        }
+    }
+}
+
+/// `agent`'s CLI started with `prompt`, as a command line for the user's shell (its plain name
+/// when it isn't installed, so a copied command still reads right).
+pub(crate) fn command_line(agent: Agent, prompt: &str) -> String {
+    format!("{} {}", agent.cli().unwrap_or_else(|| agent.name().to_string()), shell_quote(prompt))
+}
+
+/// Starts a new session of `agent` in `worktree` with `prompt`, where `launcher` says: its desktop
+/// app, or its CLI in a terminal. Either falls back to the other when the agent doesn't have it.
+pub(crate) fn start_session(agent: Agent, worktree: &str, prompt: &str, launcher: Launcher) -> Result<()> {
+    let terminal = match launcher {
+        Launcher::App => None,
+        Launcher::Auto => Some(None),
+        Launcher::In(terminal) => Some(Some(terminal)),
+    };
+    let (has_app, has_cli) = (agent.has_app(), agent.cli().is_some());
+    match terminal {
+        Some(terminal) if has_cli => terminals::open(terminal, worktree, &command_line(agent, prompt)).map(|_| ()),
+        None if has_cli && !has_app => terminals::open(None, worktree, &command_line(agent, prompt)).map(|_| ()),
+        _ if has_app => open_new_session(agent, worktree, prompt),
+        _ => Err(format!("Neither the {} app nor the {} CLI is installed", agent.app(), agent.name())),
     }
 }
 
@@ -549,10 +581,27 @@ pub struct Activity {
 // ---------------------------------------------------------------------------------------------
 // Tauri commands
 
-/// Agents a new session can be opened for: those whose app is installed.
+/// An agent a new session can be started for, and how.
+#[derive(Debug, Serialize)]
+pub struct Available {
+    agent: Agent,
+    /// Its desktop app is installed.
+    app: bool,
+    /// Its CLI is installed.
+    cli: bool,
+}
+
+/// Agents a new session can be started for: those with their app or CLI installed.
 #[tauri::command]
-pub async fn available_agents() -> Result<Vec<Agent>> {
-    blocking(|| Ok([Agent::Claude, Agent::Codex].into_iter().filter(|a| a.is_installed()).collect())).await
+pub async fn available_agents() -> Result<Vec<Available>> {
+    blocking(|| {
+        Ok([Agent::Claude, Agent::Codex]
+            .into_iter()
+            .map(|agent| Available { agent, app: agent.has_app(), cli: agent.cli().is_some() })
+            .filter(|a| a.app || a.cli)
+            .collect())
+    })
+    .await
 }
 
 /// Sessions working on each of the worktrees at `paths` (worktrees without one are left out).

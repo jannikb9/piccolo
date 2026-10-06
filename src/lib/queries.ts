@@ -3,7 +3,7 @@ import { useEffect, useMemo } from "react";
 import { useStore } from "../store";
 import type { DraftImage } from "./images";
 import { toUpload } from "./images";
-import type { AgentKind, AgentSession, SessionActivity, Commit, DiffOptions, DiffScope, GeneralThread, LineRange, RemoteBranch, Repo, ScopeMode, Thread, Worktree } from "../types";
+import type { AgentKind, AgentSession, AvailableAgent, ReviewRequest, SessionActivity, Commit, DiffOptions, DiffScope, GeneralThread, LineRange, RemoteBranch, Repo, ScopeMode, Thread, Worktree } from "../types";
 import {
   api,
   confirmAction,
@@ -156,11 +156,31 @@ export function useSessions(worktree: Worktree): AgentSession[] {
   return useAllSessions().data?.[worktree.path] ?? NO_SESSIONS;
 }
 
-const NO_AGENTS: AgentKind[] = [];
+const NO_AGENTS: AvailableAgent[] = [];
 
-/** Agents a new session can be opened for; installing an app shows up when the window regains focus. */
-export function useAvailableAgents(): AgentKind[] {
+/** Agents a new session can be started for; installing one shows up when the window regains focus. */
+export function useAvailableAgents(): AvailableAgent[] {
   return useQuery({ queryKey: ["available-agents"], queryFn: api.availableAgents, staleTime: 60_000 }).data ?? NO_AGENTS;
+}
+
+/** The terminals found, and the one "Automatic" picks, which changes as the user switches apps. */
+export function useTerminalSetup() {
+  return useQuery({ queryKey: ["terminal-setup"], queryFn: api.terminalSetup }).data;
+}
+
+/** Asks a new session for work and copies the command that starts it. */
+export function useCopyAgentCommand(worktree: Worktree) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ kind, agent }: { kind: ReviewRequest["kind"]; agent: AgentKind }) => {
+      const command = api.agentCommand(worktree.path, kind, agent);
+      // WebKit only lets a click write to the clipboard, so the text is handed over as a promise.
+      const text = command.then((c) => new Blob([c], { type: "text/plain" }));
+      return navigator.clipboard.write([new ClipboardItem({ "text/plain": text })]).then(() => command);
+    },
+    onError: (error) => showError("Couldn't copy the command", String(error)),
+    onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
+  });
 }
 
 const NO_ACTIVITY: SessionActivity = { unseen: {}, open: [], startedBy: {}, written: {}, requests: [] };
@@ -180,7 +200,7 @@ export function useSessionActivity(worktree: Worktree): SessionActivity {
 export function useSendComments(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (to: { session: string } | { agent: AgentKind }) => api.sendComments(worktree.path, to),
+    mutationFn: (to: { session: string } | { agent: AgentKind }) => api.sendComments(worktree.path, to, useStore.getState().agentLauncher),
     onError: (error) => showError("Couldn't send the comments", String(error)),
     onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
   });
@@ -190,7 +210,7 @@ export function useSendComments(worktree: Worktree) {
 export function useRequestReview(worktree: Worktree) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (to: { session: string } | { agent: AgentKind }) => api.requestReview(worktree.path, to),
+    mutationFn: (to: { session: string } | { agent: AgentKind }) => api.requestReview(worktree.path, to, useStore.getState().agentLauncher),
     onError: (error) => showError("Couldn't request a review", String(error)),
     onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
   });

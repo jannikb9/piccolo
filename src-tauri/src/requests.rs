@@ -11,6 +11,7 @@
 use crate::comments::{blocking, now_ms, sql, Store, Target};
 use crate::git::{self, Result};
 use crate::sessions::{self, shell_quote, Agent, Caller, Session};
+use crate::terminals::Launcher;
 use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
 use std::path::Path;
@@ -36,7 +37,7 @@ pub(crate) const SCHEMA: &str = "
 const ON_BRANCH: &str = "repo = ?1 AND (branch = ?2 OR (?2 IS NULL AND branch IS NULL AND worktree = ?3))";
 
 /// What an agent is asked to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     /// Review the branch, commenting on it.
@@ -105,11 +106,12 @@ pub fn list(store: &Store, target: &Target) -> Result<Vec<Request>> {
     Ok(requests)
 }
 
-/// Who's asked: a session working on the worktree, or a new session of an agent in its app.
+/// Who's asked: a session working on the worktree, or a new session of an agent, started where
+/// the launcher says.
 #[derive(Clone, Copy)]
 pub enum Asked<'a> {
     Session(&'a Session),
-    New(Agent),
+    New(Agent, Launcher),
 }
 
 impl Store {
@@ -119,8 +121,26 @@ impl Store {
     pub fn ask(&self, target: &Target, kind: Kind, to: Asked, head: Option<&str>) -> Result<Request> {
         let (agent, session) = match to {
             Asked::Session(session) => (session.agent.as_str(), Some(session.id.as_str())),
-            Asked::New(agent) => (agent.name(), None),
+            Asked::New(agent, _) => (agent.name(), None),
         };
+        let (request, text) = self.prepare(target, kind, agent, session, head)?;
+        let handed = match to {
+            Asked::Session(session) => sessions::deliver(session, &text),
+            Asked::New(agent, launcher) => sessions::start_session(agent, &target.worktree, &text, launcher),
+        };
+        if let Err(e) = handed {
+            self.cancel_request(request.id)?;
+            return Err(e);
+        }
+        if let Some(session) = session {
+            self.mark_seen(session, &request.threads)?;
+        }
+        Ok(request)
+    }
+
+    /// Records a request to `agent` (in `session`, when it's running) for `kind` of work, and
+    /// returns it with the prompt that hands it over.
+    fn prepare(&self, target: &Target, kind: Kind, agent: &str, session: Option<&str>, head: Option<&str>) -> Result<(Request, String)> {
         let threads = match kind {
             Kind::Review => Vec::new(),
             Kind::Implement => self.unseen(target, session)?,
@@ -131,18 +151,14 @@ impl Store {
         let request = self.add_request(target, kind, agent, session, head, &threads)?;
         let again = kind == Kind::Review && self.previous_review(target, agent, session, request.id)?.is_some();
         let text = prompt(&request, &target.worktree, again);
-        let handed = match to {
-            Asked::Session(session) => sessions::deliver(session, &text),
-            Asked::New(agent) => sessions::open_new_session(agent, &target.worktree, &text),
-        };
-        if let Err(e) = handed {
-            self.cancel_request(request.id)?;
-            return Err(e);
-        }
-        if let Some(session) = session {
-            self.mark_seen(session, &threads)?;
-        }
-        Ok(request)
+        Ok((request, text))
+    }
+
+    /// Records a request to a new session of `agent` for `kind` of work, and returns the command
+    /// that starts its CLI on it in the worktree, for the user to run where they like.
+    pub fn command_for(&self, target: &Target, kind: Kind, agent: Agent, head: Option<&str>) -> Result<String> {
+        let (_, text) = self.prepare(target, kind, agent.name(), None, head)?;
+        Ok(format!("cd {} && {}", shell_quote(&target.worktree), sessions::command_line(agent, &text)))
     }
 
     /// Records a request to `agent` for `kind` of work on `target`'s branch, at commit `head`;
@@ -310,20 +326,25 @@ fn prompt(request: &Request, worktree: &str, again: bool) -> String {
 // ---------------------------------------------------------------------------------------------
 // Tauri commands
 
+/// The commit the worktree at `path` is at.
+fn head_of(path: &str) -> Option<String> {
+    git::git(Path::new(path), &["rev-parse", "HEAD"]).ok().map(|h| h.trim().to_string())
+}
+
 /// Asks for `kind` of work on the worktree at `path`: from the session `session` working on it, or
-/// from a new Claude or Codex session in its desktop app.
-async fn ask(path: String, kind: Kind, agent: Option<Agent>, session: Option<String>) -> Result<Request> {
+/// from a new Claude or Codex session, started where `launcher` says.
+async fn ask(path: String, kind: Kind, agent: Option<Agent>, session: Option<String>, launcher: Launcher) -> Result<Request> {
     blocking(move || {
         let store = Store::open()?;
         let target = Target::of(Path::new(&path))?;
-        let head = git::git(Path::new(&path), &["rev-parse", "HEAD"]).ok().map(|h| h.trim().to_string());
+        let head = head_of(&path);
         match (session, agent) {
             (Some(session), _) => {
                 let sessions = sessions::sessions_of(&store, &path)?;
                 let session = sessions.iter().find(|s| s.id == session).ok_or("That session isn't running any more")?;
                 store.ask(&target, kind, Asked::Session(session), head.as_deref())
             }
-            (None, Some(agent)) => store.ask(&target, kind, Asked::New(agent), head.as_deref()),
+            (None, Some(agent)) => store.ask(&target, kind, Asked::New(agent, launcher), head.as_deref()),
             (None, None) => Err("Say which agent to ask".into()),
         }
     })
@@ -332,15 +353,26 @@ async fn ask(path: String, kind: Kind, agent: Option<Agent>, session: Option<Str
 
 /// Asks for a review of the worktree at `path`.
 #[tauri::command]
-pub async fn request_review(path: String, agent: Option<Agent>, session: Option<String>) -> Result<Request> {
-    ask(path, Kind::Review, agent, session).await
+pub async fn request_review(path: String, agent: Option<Agent>, session: Option<String>, launcher: Launcher) -> Result<Request> {
+    ask(path, Kind::Review, agent, session, launcher).await
 }
 
 /// Sends the comments on the worktree at `path` to an agent to address: those a session hasn't
 /// seen, or every open one for a new session.
 #[tauri::command]
-pub async fn send_comments(path: String, agent: Option<Agent>, session: Option<String>) -> Result<Request> {
-    ask(path, Kind::Implement, agent, session).await
+pub async fn send_comments(path: String, agent: Option<Agent>, session: Option<String>, launcher: Launcher) -> Result<Request> {
+    ask(path, Kind::Implement, agent, session, launcher).await
+}
+
+/// Asks a new session of `agent` for `kind` of work on the worktree at `path`, and returns the
+/// command that starts it, for the user to run in a terminal of their choice.
+#[tauri::command]
+pub async fn agent_command(path: String, kind: Kind, agent: Agent) -> Result<String> {
+    blocking(move || {
+        let store = Store::open()?;
+        store.command_for(&Target::of(Path::new(&path))?, kind, agent, head_of(&path).as_deref())
+    })
+    .await
 }
 
 /// Withdraws a request, or removes a finished one from the list.
