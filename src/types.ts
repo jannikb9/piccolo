@@ -163,6 +163,9 @@ export type TerminalId = "tmux" | "iterm" | "kitty" | "wezterm" | "terminal";
 /** Where new agent sessions start: the agent's app, the terminal Piccolo picks, or a chosen one. */
 export type Launcher = "app" | "auto" | TerminalId;
 
+/** Who's asked for work: a session on the branch, or a new session of an agent, started where `launcher` says. */
+export type Assignee = { session: string } | { agent: AgentKind; launcher: Launcher };
+
 export type TerminalSetup = {
   /** Terminals found on this Mac. */
   installed: TerminalId[];

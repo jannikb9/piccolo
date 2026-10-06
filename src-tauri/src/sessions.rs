@@ -337,9 +337,8 @@ impl Agent {
     }
 }
 
-/// `agent`'s CLI started with `prompt`, as a command line for the user's shell (its plain name
-/// when it isn't installed, so a copied command still reads right).
-pub(crate) fn command_line(agent: Agent, prompt: &str) -> String {
+/// `agent`'s CLI started with `prompt`, as a command line for the user's shell.
+fn command_line(agent: Agent, prompt: &str) -> String {
     format!("{} {}", agent.cli().unwrap_or_else(|| agent.name().to_string()), shell_quote(prompt))
 }
 

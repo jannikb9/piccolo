@@ -2,7 +2,7 @@
 import { hashString } from "./lib/diff";
 import type { ImageUpload } from "./lib/images";
 import type {
-  AgentKind,
+  Assignee,
   AgentSession,
   Attachment,
   ChangedFile,
@@ -596,7 +596,7 @@ export function mockSessionActivity(worktreePath: string): Promise<SessionActivi
   });
 }
 
-export function mockSendComments(worktreePath: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> {
+export function mockSendComments(worktreePath: string, to: Assignee): Promise<ReviewRequest> {
   const session = "session" in to ? to.session : null;
   const sent = unseenBy(worktreePath, session);
   if (sent.length === 0) return Promise.reject("There are no comments to send");
@@ -604,24 +604,25 @@ export function mockSendComments(worktreePath: string, to: { session: string } |
   return mockAsk("implement", to, sent);
 }
 
-export function mockAgentCommand(worktreePath: string, kind: ReviewRequest["kind"], agent: AgentKind): Promise<string> {
+export function mockCopyPrompt(worktreePath: string, kind: ReviewRequest["kind"]): Promise<string> {
   const sent = kind === "implement" ? unseenBy(worktreePath, null) : [];
   if (kind === "implement" && sent.length === 0) return Promise.reject("There are no comments to send");
-  return mockAsk(kind, { agent }, sent).then(
-    (r) => `cd ${worktreePath} && ${agent} 'Run \`piccolo -C ${worktreePath} guide --request ${r.id}\` and follow the steps it prints.'`,
+  return mockAsk(kind, null, sent).then(
+    (r) => `Piccolo asks you to review the changes in the worktree ${worktreePath}. Run \`piccolo -C ${worktreePath} guide --request ${r.id}\` and follow the steps it prints.`,
   );
 }
 
-export function mockRequestReview(_worktreePath: string, to: { session: string } | { agent: AgentKind }): Promise<ReviewRequest> {
+export function mockRequestReview(_worktreePath: string, to: Assignee): Promise<ReviewRequest> {
   return mockAsk("review", to, []);
 }
 
-function mockAsk(kind: ReviewRequest["kind"], to: { session: string } | { agent: AgentKind }, sent: number[]): Promise<ReviewRequest> {
-  const session = "session" in to ? mockSessionList.find((s) => s.id === to.session) : undefined;
+/** `to` is `null` for a copied prompt, which any agent can take. */
+function mockAsk(kind: ReviewRequest["kind"], to: Assignee | null, sent: number[]): Promise<ReviewRequest> {
+  const session = to && "session" in to ? mockSessionList.find((s) => s.id === to.session) : undefined;
   const request: ReviewRequest = {
     id: Math.max(0, ...mockRequests.map((r) => r.id)) + 1,
     kind,
-    agent: session?.agent ?? ("agent" in to ? to.agent : "claude"),
+    agent: session?.agent ?? (to && "agent" in to ? to.agent : "agent"),
     sessionId: session?.id ?? null,
     head: "f00ba12",
     threads: sent,

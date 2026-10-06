@@ -63,7 +63,7 @@ pub fn run() {
             sessions::list_sessions,
             sessions::session_activity,
             requests::send_comments,
-            requests::agent_command,
+            requests::copy_prompt,
             terminals::terminal_setup,
             requests::request_review,
             requests::cancel_review_request,

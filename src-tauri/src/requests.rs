@@ -33,6 +33,9 @@ pub(crate) const SCHEMA: &str = "
     );
     CREATE INDEX IF NOT EXISTS review_requests_by_branch ON review_requests (repo, branch);";
 
+/// Who's asked when the prompt is copied: the agent it's pasted into, named once it takes it on.
+pub const ANY_AGENT: &str = "agent";
+
 /// Rows on `target`'s branch, with `?1` its repository, `?2` its branch and `?3` its worktree.
 const ON_BRANCH: &str = "repo = ?1 AND (branch = ?2 OR (?2 IS NULL AND branch IS NULL AND worktree = ?3))";
 
@@ -154,11 +157,10 @@ impl Store {
         Ok((request, text))
     }
 
-    /// Records a request to a new session of `agent` for `kind` of work, and returns the command
-    /// that starts its CLI on it in the worktree, for the user to run where they like.
-    pub fn command_for(&self, target: &Target, kind: Kind, agent: Agent, head: Option<&str>) -> Result<String> {
-        let (_, text) = self.prepare(target, kind, agent.name(), None, head)?;
-        Ok(format!("cd {} && {}", shell_quote(&target.worktree), sessions::command_line(agent, &text)))
+    /// Records a request for `kind` of work for whichever agent is given its prompt, and returns
+    /// the prompt, for the user to paste into any agent. The agent that takes it on claims it.
+    pub fn prompt_for(&self, target: &Target, kind: Kind, head: Option<&str>) -> Result<String> {
+        Ok(self.prepare(target, kind, ANY_AGENT, None, head)?.1)
     }
 
     /// Records a request to `agent` for `kind` of work on `target`'s branch, at commit `head`;
@@ -186,7 +188,8 @@ impl Store {
         request.ok_or_else(|| format!("No request #{id}"))
     }
 
-    /// Takes on request `id` for `target`'s branch, from `caller`'s session when known.
+    /// Takes on request `id` for `target`'s branch, from `caller`'s session when known, which names
+    /// the agent of a request whose prompt was copied.
     pub fn start_request(&self, target: &Target, id: i64, caller: Option<&Caller>) -> Result<Request> {
         let on_branch: bool = sql(self.conn.query_row(
             &format!("SELECT COUNT(*) > 0 FROM review_requests WHERE id = ?4 AND {ON_BRANCH}"),
@@ -197,9 +200,10 @@ impl Store {
             return Err(format!("request #{id} isn't for {}", target.label()));
         }
         sql(self.conn.execute(
-            "UPDATE review_requests SET started_at = COALESCE(started_at, ?2), session_id = COALESCE(session_id, ?3)
+            "UPDATE review_requests SET started_at = COALESCE(started_at, ?2), session_id = COALESCE(session_id, ?3),
+                agent = CASE WHEN agent = ?5 AND ?4 IS NOT NULL THEN ?4 ELSE agent END
              WHERE id = ?1",
-            params![id, now_ms(), caller.map(|c| c.id.as_str())],
+            params![id, now_ms(), caller.map(|c| c.id.as_str()), caller.map(|c| c.agent.as_str()), ANY_AGENT],
         ))?;
         self.request(id)
     }
@@ -364,13 +368,13 @@ pub async fn send_comments(path: String, agent: Option<Agent>, session: Option<S
     ask(path, Kind::Implement, agent, session, launcher).await
 }
 
-/// Asks a new session of `agent` for `kind` of work on the worktree at `path`, and returns the
-/// command that starts it, for the user to run in a terminal of their choice.
+/// Asks any agent for `kind` of work on the worktree at `path`, and returns the prompt, for the
+/// user to paste into the agent of their choice.
 #[tauri::command]
-pub async fn agent_command(path: String, kind: Kind, agent: Agent) -> Result<String> {
+pub async fn copy_prompt(path: String, kind: Kind) -> Result<String> {
     blocking(move || {
         let store = Store::open()?;
-        store.command_for(&Target::of(Path::new(&path))?, kind, agent, head_of(&path).as_deref())
+        store.prompt_for(&Target::of(Path::new(&path))?, kind, head_of(&path).as_deref())
     })
     .await
 }
@@ -460,6 +464,14 @@ mod tests {
         let finished = store.finish_request(&target, Kind::Implement, "claude", Some("claude-1"), None).unwrap();
         assert_eq!((finished.id, finished.kind), (implement.id, Kind::Implement));
         assert!(store.previous_review(&target, "claude", Some("claude-1"), i64::MAX).unwrap().unwrap().id != implement.id);
+
+        // A copied prompt is for any agent: the one that takes it on is named.
+        let text = store.prompt_for(&target, Kind::Review, None).unwrap();
+        let copied = list(&store, &target).unwrap().remove(0);
+        assert!(text.contains(&format!("guide --request {}", copied.id)), "{text}");
+        assert_eq!(copied.agent, ANY_AGENT);
+        let gemini = Caller { id: "gemini-1".into(), agent: "gemini".into() };
+        assert_eq!(store.start_request(&target, copied.id, Some(&gemini)).unwrap().agent, "gemini");
 
         std::fs::remove_dir_all(&root).unwrap();
     }

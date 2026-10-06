@@ -19,7 +19,7 @@ import {
   mockRemoteBranches,
   mockReorderRepos,
   mockReply,
-  mockAgentCommand,
+  mockCopyPrompt,
   mockCancelRequest,
   mockRequestReview,
   mockSendComments,
@@ -33,10 +33,9 @@ import {
 } from "../mock";
 import type { ImageUpload } from "./images";
 import type {
-  AgentKind,
+  Assignee,
   AgentSession,
   AvailableAgent,
-  Launcher,
   TerminalSetup,
   ChangedFile,
   Commit,
@@ -58,6 +57,12 @@ import type {
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
 /** Backend commands. In a plain browser (UI development) they resolve to placeholder data. */
+/** An assignee as the backend's `request_review` and `send_comments` take it. */
+const assignee = (to: Assignee) =>
+  "session" in to
+    ? { session: to.session, agent: null, launcher: "app" }
+    : { session: null, agent: to.agent, launcher: to.launcher };
+
 export const api = {
   listRepos: (): Promise<Repo[]> => (isTauri ? invoke("list_repos") : Promise.resolve(mockRepos)),
 
@@ -164,9 +169,9 @@ export const api = {
   terminalSetup: (): Promise<TerminalSetup> =>
     isTauri ? invoke("terminal_setup") : Promise.resolve({ installed: ["iterm", "kitty", "terminal"], detected: "kitty", kittyTabs: false }),
 
-  /** Asks a new session of `agent` for `kind` of work and returns the command that starts it, to copy. */
-  agentCommand: (path: string, kind: ReviewRequest["kind"], agent: AgentKind): Promise<string> =>
-    isTauri ? invoke("agent_command", { path, kind, agent }) : mockAgentCommand(path, kind, agent),
+  /** Asks any agent for `kind` of work and returns the prompt, to copy into one. */
+  copyPrompt: (path: string, kind: ReviewRequest["kind"]): Promise<string> =>
+    isTauri ? invoke("copy_prompt", { path, kind }) : mockCopyPrompt(path, kind),
 
   /** Agent sessions working on each worktree (by path); worktrees without one are left out. */
   listSessions: (paths: string[]): Promise<Record<string, AgentSession[]>> =>
@@ -178,18 +183,14 @@ export const api = {
 
   /**
    * Sends comments to address: to the running `session`, those it hasn't seen; to a new Claude or
-   * Codex session in its app, every open one.
+   * Codex session, every open one.
    */
-  sendComments: (path: string, to: { session: string } | { agent: AgentKind }, launcher: Launcher): Promise<ReviewRequest> =>
-    isTauri
-      ? invoke("send_comments", { path, session: "session" in to ? to.session : null, agent: "agent" in to ? to.agent : null, launcher })
-      : mockSendComments(path, to),
+  sendComments: (path: string, to: Assignee): Promise<ReviewRequest> =>
+    isTauri ? invoke("send_comments", { path, ...assignee(to) }) : mockSendComments(path, to),
 
-  /** Asks the running `session` to review the worktree, or a new Claude or Codex session in its app. */
-  requestReview: (path: string, to: { session: string } | { agent: AgentKind }, launcher: Launcher): Promise<ReviewRequest> =>
-    isTauri
-      ? invoke("request_review", { path, session: "session" in to ? to.session : null, agent: "agent" in to ? to.agent : null, launcher })
-      : mockRequestReview(path, to),
+  /** Asks the running `session` to review the worktree, or a new Claude or Codex session. */
+  requestReview: (path: string, to: Assignee): Promise<ReviewRequest> =>
+    isTauri ? invoke("request_review", { path, ...assignee(to) }) : mockRequestReview(path, to),
 
   /** Withdraws a review request, or removes a finished review from the list. */
   cancelReviewRequest: (id: number): Promise<void> =>
@@ -246,12 +247,19 @@ export function onSessionsChanged(callback: () => void): () => void {
   return () => void unlisten.then((fn) => fn());
 }
 
-/** Fires when "Settings…" is chosen from the app menu (⌘,). */
+/** Fires when Settings is chosen in the app menu (⌘,), or opened from inside the app (`openSettings`). */
 export function onOpenSettings(callback: () => void): () => void {
-  if (!isTauri) return () => {};
-  const unlisten = listen("open-settings", () => callback());
-  return () => void unlisten.then((fn) => fn());
+  const onEvent = () => callback();
+  window.addEventListener("open-settings", onEvent);
+  const unlisten = isTauri ? listen("open-settings", onEvent) : null;
+  return () => {
+    window.removeEventListener("open-settings", onEvent);
+    void unlisten?.then((fn) => fn());
+  };
 }
+
+/** Opens Settings, e.g. from a link in a menu. */
+export const openSettings = () => window.dispatchEvent(new Event("open-settings"));
 
 /** Fires when View > Toggle Sidebar is chosen (⌃⌘S). */
 export function onToggleSidebar(callback: () => void): () => void {
