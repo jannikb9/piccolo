@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# The demo video (`pnpm demo`); the README shows docs/demo.gif made from it.
+docs/demo.mp4

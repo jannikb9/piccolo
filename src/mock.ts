@@ -62,7 +62,8 @@ export const mockRepos: Repo[] = [
   },
 ];
 
-type MockFile = ChangedFile & { committed: boolean };
+/** `patch` replaces the synthetic one, for files with real contents (see src/demo). */
+export type MockFile = ChangedFile & { committed: boolean; patch?: string };
 type FileInit = Omit<ChangedFile, "binary" | "generated"> & { binary?: boolean; generated?: boolean };
 
 const committed = (f: FileInit): MockFile => ({ binary: false, generated: false, ...f, committed: true });
@@ -250,6 +251,7 @@ const allLines = (contents: string, sign: string) =>
     .map((l) => sign + l);
 
 function filePatch(f: MockFile): string {
+  if (f.patch) return f.patch;
   const oldPath = f.oldPath ?? f.path;
   const header = `diff --git a/${oldPath} b/${f.path}\n`;
   if (f.binary) return `${header}index 1111111..2222222 100644\nBinary files a/${oldPath} and b/${f.path} differ\n`;
@@ -544,6 +546,26 @@ const sessionOfAgent: Record<string, string> = { claude: "mock-1", codex: "mock-
 /** session → thread → when it last saw it. */
 const seen: Record<string, Record<number, number>> = { "mock-1": { 1: minutesAgo(6) } };
 
+/**
+ * The placeholder data, for the demo (src/demo) to replace with its story and change as agents
+ * act in it. `sessionsWorktree` is the worktree the sessions and requests belong to.
+ */
+export const mockState = {
+  repos: mockRepos,
+  files,
+  aheadBehind,
+  merged,
+  commitLog,
+  threads,
+  sessions: mockSessionList,
+  requests: mockRequests,
+  sessionOfAgent,
+  seen,
+  sessionsWorktree: mockWorktree,
+  /** The next id for a thread or message. */
+  nextId: () => nextId++,
+};
+
 const unseenBy = (worktreePath: string, session: string | null) =>
   (threads[worktreePath] ?? [])
     .filter((t) => !t.resolved)
@@ -569,6 +591,7 @@ function mockWritten(worktreePath: string): Record<string, number> {
 }
 
 export function mockSessions(paths: string[]): Promise<Record<string, AgentSession[]>> {
+  const mockWorktree = mockState.sessionsWorktree;
   if (!paths.includes(mockWorktree) || localStorage.getItem("mock-sessions") === "0") return delay({});
   return delay({ [mockWorktree]: structuredClone(onlyAuthor() ? mockSessionList.slice(0, 1) : mockSessionList) });
 }
@@ -576,6 +599,7 @@ export function mockSessions(paths: string[]): Promise<Record<string, AgentSessi
 const onlyAuthor = () => localStorage.getItem("mock-sessions") === "author";
 
 export function mockSessionActivity(worktreePath: string): Promise<SessionActivity> {
+  const mockWorktree = mockState.sessionsWorktree;
   const none = worktreePath !== mockWorktree || localStorage.getItem("mock-sessions") === "0";
   const sessions = none ? [] : onlyAuthor() ? mockSessionList.slice(0, 1) : mockSessionList;
   return delay({

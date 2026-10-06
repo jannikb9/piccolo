@@ -14,6 +14,9 @@ if (isTauri) {
   document.documentElement.dataset.tauri = "";
 }
 
+// `?demo` in a plain browser plays the story recorded for the README (src/demo, scripts/demo).
+if (!isTauri && new URLSearchParams(location.search).has("demo")) await import("./demo");
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

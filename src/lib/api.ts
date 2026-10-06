@@ -64,7 +64,8 @@ const assignee = (to: Assignee) =>
     : { session: null, agent: to.agent, launcher: to.launcher };
 
 export const api = {
-  listRepos: (): Promise<Repo[]> => (isTauri ? invoke("list_repos") : Promise.resolve(mockRepos)),
+  // A copy, as the backend returns fresh data: a worktree added to the mock shows up everywhere.
+  listRepos: (): Promise<Repo[]> => (isTauri ? invoke("list_repos") : Promise.resolve(structuredClone(mockRepos))),
 
   /** Resolves to the repository root, which is also the id of its main worktree. */
   addRepo: (path: string): Promise<string> => invoke("add_repo", { path }),

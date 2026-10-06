@@ -1,8 +1,16 @@
-# Piccolo
+<p align="center">
+  <img src="src-tauri/icons/128x128@2x.png" width="96" alt="">
+</p>
 
-A macOS app for reviewing changes in git worktrees and branches, PR-style.
+<h1 align="center">Piccolo</h1>
 
-## Installation
+<p align="center">Review your coding agents' work like a pull request. A Mac app.</p>
+
+<p align="center">
+  <img src="docs/demo.gif" width="880" alt="Claude builds a feature in its own worktree, Codex reviews it line by line, you keep the good comments and add your own, and Claude fixes the code and replies">
+</p>
+
+## Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.sh | sh
@@ -10,9 +18,5 @@ curl -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.
 
 Run it again to update.
 
-Recommended, but optional: install [worktrunk](https://worktrunk.dev) and Piccolo creates worktrees
-with it.
-
-```bash
-brew install worktrunk
-```
+Optional: with [worktrunk](https://worktrunk.dev) installed (`brew install worktrunk`), Piccolo creates
+worktrees with it.
