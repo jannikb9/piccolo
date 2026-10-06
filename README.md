@@ -6,9 +6,7 @@
 
 <p align="center">Review your coding agents' work like a pull request. A Mac app.</p>
 
-<p align="center">
-  <img src="docs/demo.gif" width="880" alt="Claude builds a feature in its own worktree, Codex reviews it line by line, you keep the good comments and add your own, and Claude fixes the code and replies">
-</p>
+https://github.com/user-attachments/assets/26c47801-505c-480b-9109-44295d7cd286
 
 ## Install
 

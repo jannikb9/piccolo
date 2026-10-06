@@ -23,5 +23,5 @@ dist-ssr
 *.sln
 *.sw?
 
-# The demo video (`pnpm demo`); the README shows docs/demo.gif made from it.
+# The demo video (`pnpm demo`); the README plays a copy uploaded to GitHub.
 docs/demo.mp4
