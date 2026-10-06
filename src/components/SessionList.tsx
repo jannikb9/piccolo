@@ -79,14 +79,10 @@ function stateOf(session: AgentSession, request: ReviewRequest | undefined): Age
   return session.running ? "running" : "idle";
 }
 
-/** What an agent is doing about a request, e.g. "is reviewing". */
-const doing = (request: ReviewRequest) =>
-  request.startedAt === null ? "is starting" : request.kind === "review" ? "is reviewing" : "is addressing comments";
-
 /**
  * The toolbar's agents, like a pull request's reviewers: one overlapping mark per agent on the
- * branch, which fan out on hover and open the panel listing them. Only shows what's going on;
- * asking for reviews and sending comments are the buttons beside it.
+ * branch, which fan out on hover and open the panel listing them; a spinner on a mark shows it's at
+ * work. Only shows what's going on; asking for reviews and sending comments are the buttons beside it.
  */
 export function AgentsButton({ worktree }: { worktree: Worktree }) {
   const { current, waiting, requestOf } = useAgents(worktree);
@@ -116,14 +112,6 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
   for (const request of waiting) mark(request.agent, "busy");
   for (const session of current) mark(session.agent, stateOf(session, requestOf(session)));
   const marks = [...agents];
-
-  const underway = [...waiting, ...current.map(requestOf).filter((r): r is ReviewRequest => !!r && isUnderway(r))];
-  const label =
-    underway.length === 0
-      ? null
-      : underway.length > 1
-        ? `${underway.length} agents at work`
-        : `${underway[0].sessionId ? agentLabel(underway[0].agent) : "An agent"} ${doing(underway[0])}`;
 
   if (marks.length === 0) return null;
 
@@ -158,10 +146,8 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
               setPinned(true);
             }
           }}
-          className="group/agents flex h-7 shrink-0 items-center gap-2 rounded-md px-1 text-[12px] text-fg-muted hover:text-fg data-[state=open]:text-fg"
+          className="group/agents flex h-7 shrink-0 items-center rounded-md px-1"
         >
-          {/* In a narrow toolbar the branch name needs the room; the spinner still shows the work. */}
-          {label && <span className="hidden whitespace-nowrap @5xl:inline">{label}</span>}
           <span className="flex justify-end" style={{ width }}>
             {marks.map(([agent, state], i) => (
               <span
@@ -341,11 +327,15 @@ function SplitButton({
   return (
     <div className="flex h-7 shrink-0 items-stretch rounded-md border border-border bg-bg-raised text-[12px] font-medium text-fg">
       <Tooltip label={tooltip}>
+        {/* Not `disabled`, which would keep the tooltip saying why from showing. */}
         <button
           type="button"
-          disabled={disabled}
-          onClick={onClick}
-          className={cn("flex items-center gap-1.5 px-2 hover:bg-bg-hover disabled:opacity-50", menu ? "rounded-l-md" : "rounded-md")}
+          aria-disabled={disabled}
+          onClick={() => !disabled && onClick()}
+          className={cn(
+            "flex items-center gap-1.5 px-2 hover:bg-bg-hover aria-disabled:opacity-50 aria-disabled:hover:bg-transparent",
+            menu ? "rounded-l-md" : "rounded-md",
+          )}
         >
           {children}
         </button>
@@ -457,10 +447,10 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
 }
 
 /**
- * "Address N": sends the comments the author hasn't seen to it, to address. Shown while there
- * are any, from the reviewer or from reviewing agents. Without an author it copies a prompt for
- * every open comment, to paste into any agent. Its menu sends them to another session on the
- * branch instead, or copies the prompt.
+ * "Address N": sends the comments the author hasn't seen to it, to address, from the reviewer or
+ * from reviewing agents; disabled, saying why, while there are none. Without an author it copies a
+ * prompt for every open comment, to paste into any agent. Its menu sends them to another session on
+ * the branch instead, or copies the prompt.
  */
 export function AddressButton({ worktree }: { worktree: Worktree }) {
   const { activity, current, author } = useAgents(worktree);
@@ -476,21 +466,28 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
   const starting = activity.requests.some((r) => r.kind === "implement" && isUnderway(r) && !r.sessionId);
   const others = current.filter((s) => s.reachable && s.id !== author?.id);
 
-  if ((threads.length === 0 || (!author && starting)) && !copied) return null;
+  const waiting = !author && starting;
+  const empty = threads.length === 0 || waiting;
 
-  const tooltip = author
-    ? `Send ${plural(threads.length, "comment")} to ${sessionName(author)}`
-    : `Copy a prompt for ${plural(threads.length, "comment")}, to paste into any agent`;
+  const tooltip = waiting
+    ? "Waiting for an agent to take the copied comments on"
+    : activity.open.length === 0
+      ? "No comments to address"
+      : author && threads.length === 0
+        ? `${sessionName(author)} has seen every comment`
+        : author
+          ? `Send ${plural(threads.length, "comment")} to ${sessionName(author)}`
+          : `Copy a prompt for ${plural(threads.length, "comment")}, to paste into any agent`;
 
   return (
     <SplitButton
       tooltip={
         <span className="flex flex-col gap-0.5">
           <span>{tooltip}</span>
-          {threads.length > 0 && <span className="text-fg-subtle">{startedBy(threads, activity)}</span>}
+          {!empty && <span className="text-fg-subtle">{startedBy(threads, activity)}</span>}
         </span>
       }
-      disabled={busy}
+      disabled={busy || empty}
       onClick={() => (author ? send.mutate(author.id) : copyPrompt())}
       menuLabel="Send the comments elsewhere"
       menu={
@@ -525,7 +522,7 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
       <TargetIcon agent={author?.agent} copied={copied} />
       {/* A narrow toolbar keeps the mark and the count. */}
       <span className="hidden @3xl:inline">{copied ? "Copied" : "Address"}</span>
-      {!copied && (
+      {!copied && !empty && (
         <span className="tabular grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10.5px] font-semibold text-accent-fg">
           {threads.length}
         </span>
