@@ -61,7 +61,7 @@ function toLineRange(selection: SelectedLineRange): LineRange {
 /** Changes whenever an annotation would render differently, to bump the item's version. */
 function annotationSignature(annotations: DiffLineAnnotation<Note>[]): string {
   const thread = (t: Thread) =>
-    `${t.id}.${t.updatedAt}.${t.resolved ? 1 : 0}.${t.messages.map((m) => m.id).join(",")}`;
+    `${t.id}.${t.updatedAt}.${t.resolved ? 1 : 0}.${t.messages.map((m) => `${m.id}:${m.editedAt ?? 0}:${m.thumbsUp ? 1 : 0}`).join(",")}`;
   return annotations
     .map(({ side, lineNumber, metadata: note }) => {
       const detail =
