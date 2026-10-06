@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Records the README demo: `pnpm demo` → docs/demo.mp4, and docs/demo.gif from it for the README.
+// Records the README demo: `pnpm demo` → docs/demo.mp4.
 //
 // The browser build's demo mode (src/demo) stands in for the agents; this script plays the
 // reviewer with a real mouse and keyboard, captures the page at 2x, then frames the capture with
@@ -14,17 +14,12 @@ import { createServer } from "vite";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const OUT_FILE = path.join(ROOT, "docs/demo.mp4");
-const GIF_FILE = path.join(ROOT, "docs/demo.gif");
-/** The README's width on GitHub, and a frame rate that keeps the GIF near 10 MB. */
-const GIF = { width: 880, fps: 12 };
 /** The page, in CSS pixels; it's captured at twice that. Wide enough for the toolbar's labels. */
 const VIEW = { width: 1680, height: 1050 };
 const SCALE = 2;
 /** The video. Same aspect ratio as the page. */
 const OUT = { width: 1920, height: 1200, fps: 30 };
 const WIDE = { x: 0, y: 0, w: VIEW.width, h: VIEW.height };
-/** At the end the video fades back to its first frame, so it loops. */
-const LOOP_FADE = 0.4;
 
 const now = () => Date.now() / 1000;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -129,6 +124,17 @@ async function click(target, options) {
   await sleep(60);
 }
 
+/** A click the viewer should notice: at normal speed, after a beat of hovering. */
+async function press(target) {
+  const rate = paces.at(-1)?.rate ?? 1;
+  pace(1);
+  await moveTo(target);
+  await sleep(300);
+  await click(target);
+  await sleep(350);
+  pace(rate);
+}
+
 async function type(text) {
   for (const char of text) {
     await page.keyboard.type(char);
@@ -152,6 +158,8 @@ async function scrollDiff(dy, ms = 700) {
 
 /** Scrolls the diff until `target` sits `y` pixels from the top of the page. */
 async function scrollTo(target, y, ms) {
+  // The diff only renders what's near the screen: scroll down until the target exists.
+  for (let i = 0; i < 20 && (await target.count()) === 0; i++) await scrollDiff(500, 150);
   const b = await box(target);
   await scrollDiff(b.y - y, ms);
 }
@@ -167,130 +175,86 @@ const card = (text) => page.locator("div.group", { hasText: text }).first();
 
 const start = now();
 try {
-  const sidebar = page.locator("aside");
   const diff = page.locator("main");
   const header = page.locator("main header");
+  const agents = header.getByRole("button", { name: "Agents on this branch" });
   const review = header.getByRole("button", { name: "Review", exact: true });
-  const reviewMenu = header.getByRole("button", { name: "Ask for a review elsewhere" });
 
   pace(1);
   caption("Review your agents' work like a pull request");
-  await sleep(1600);
-  pace(1.75);
+  await sleep(1300);
+  pace(1.6);
 
-  // 1. Claude builds a feature in a worktree of its own.
-  caption("Claude builds a feature in its own worktree");
-  await look(sidebar, 2.2, { dy: -280, dx: 60 });
-  await sleep(500);
-  await agent("claudeStarts");
+  // 1. Claude has added knight moves in a worktree of its own, and is still connected to it.
+  caption("Claude adds knight moves to a chess engine");
+  await moveTo({ x: 1100, y: 620 });
+  await look(diff, 1.45, { dy: -20 });
   await sleep(700);
-  await agent("claudeCommits");
-  await sleep(600);
+  caption("Claude and Codex are connected to it");
+  await look(agents, 2.8, { dx: -220, dy: 110 });
+  await moveTo(agents);
+  await sleep(1100);
 
-  // 2. The reviewer opens it.
-  caption("Open it to review the changes");
-  await click(page.locator("aside button", { hasText: "feat/login-rate-limit" }));
-  camera(WIDE);
-  await moveTo({ x: 1100, y: 600 });
-  await look(diff, 1.4, { dy: -40 });
-  await sleep(500);
-  await scrollDiff(420, 700);
-  await sleep(200);
-  await scrollDiff(-420, 450);
-
-  // 3. Claude is on the branch; ask Codex for a review.
+  // 2. Ask Codex for a review: it reviewed before, so Review goes straight to it.
   caption("Ask Codex for a review");
-  await look(reviewMenu, 2.3, { dx: -260, dy: 150 });
-  await click(reviewMenu);
-  await sleep(700);
-  await click(page.getByRole("menuitem", { name: /Codex app/ }));
-  await sleep(350);
+  await press(review);
   await agent("codexStarts");
   await sleep(600);
 
-  // 4. Codex reviews: comments land on the lines they're about.
-  caption("Codex reviews it line by line");
-  await moveTo({ x: 1150, y: 640 }, { ms: 300 });
-  await look(diff, 1.3, { dy: 30 });
-  await agent("codexComments", "nit");
-  await sleep(450);
-  // Down to the route, where the next comments land, then back up for the summary.
-  await scrollTo(fileHeader("src/routes/login.ts"), 300, 450);
-  await agent("codexComments", "retry");
-  await sleep(450);
-  await agent("codexComments", "bug");
+  // 3. Codex's comments land on the lines they're about.
+  caption("Codex comments on the lines");
+  await moveTo({ x: 1150, y: 700 }, { ms: 300 });
+  await look(diff, 1.45, { dy: -20 });
+  await agent("codexComments", "board");
   await sleep(700);
-  await scrollDiff(-2000, 450);
+  await agent("codexComments", "own");
+  await sleep(500);
   await agent("codexFinishes");
-  await sleep(600);
+  const offBoard = card("aren't skipped");
+  await look(offBoard, 2, { dy: 40 });
+  pace(1.2);
+  await sleep(1500);
+  pace(1.6);
 
-  // 5. The reviewer curates the review.
-  caption("Delete what you don't need, upvote good catches");
-  const nit = card("windowStart");
-  await scrollTo(nit, 340, 400);
-  await look(nit, 2, { ms: 600 });
-  await moveTo(nit, { offset: { x: 0.6, y: 0.45 } });
-  await click(nit.getByRole("button", { name: "Delete thread" }));
-  await sleep(200);
-  await click(nit.getByRole("button", { name: "Delete thread" }));
-  await sleep(350);
-  const retry = card("Retry-After");
-  await scrollTo(retry, 300, 450);
-  await look(retry, 1.8, { dy: 120 });
-  await click(retry.getByRole("button", { name: "Thumbs up" }));
-  await sleep(150);
-  await click(card("successful logins count too").getByRole("button", { name: "Thumbs up" }));
-  await sleep(450);
-
-  // 6. The reviewer adds a comment of their own.
+  // 4. The reviewer adds a comment of their own.
   caption("Add your own comments");
-  const testLine = fileDiff("test/rate-limit.test.ts").locator('[data-column-number="7"]').first();
-  await scrollTo(testLine, 420, 450);
-  await look(testLine, 1.9, { dx: 360, dy: 70 });
-  await moveTo(testLine);
-  await click(fileDiff("test/rate-limit.test.ts").locator("[data-utility-button]"));
-  await type("Also test that a successful login resets the count.");
+  const lastLine = fileDiff("test/knight.test.ts").locator('[data-column-number="8"]').first();
+  await scrollTo(lastLine, 430, 600);
+  await look(lastLine, 2, { dx: 380, dy: 80 });
+  await moveTo(lastLine);
+  await click(fileDiff("test/knight.test.ts").locator("[data-utility-button]"));
+  await type("Add a test for a knight in the corner.");
   await sleep(250);
-  await click(page.getByRole("button", { name: "Comment", exact: true }));
-  await sleep(400);
+  await press(page.getByRole("button", { name: "Comment", exact: true }));
 
-  // 7. Send the review to Claude.
-  caption("Send it all to Claude");
+  // 5. Send the comments back to Claude.
+  caption("Send them to Claude");
   const address = header.getByRole("button", { name: /^Address/ });
-  await look(address, 2.1, { dx: -240, dy: 150 });
-  await click(address);
-  await sleep(500);
+  await look(address, 2.8, { dx: -200, dy: 110 });
+  await press(address);
   await agent("claudeWorks");
-  await sleep(500);
+  await sleep(700);
 
-  // 8. Claude fixes the code and answers each comment.
-  caption("Claude fixes the code and replies");
-  await moveTo({ x: 1150, y: 640 }, { ms: 300 });
+  // 6. Claude makes the changes and answers each comment, the reviewer's last.
+  caption("Claude makes the changes and replies");
+  // Out of the way of the replies, beside the diff.
+  await moveTo({ x: 1590, y: 820 }, { ms: 300 });
   camera(WIDE, 600);
   await agent("claudeFixes");
-  await scrollTo(fileHeader("src/routes/login.ts"), 130, 500);
-  await look(diff, 1.35, { dy: 40 });
-  await agent("claudeReplies", "retry");
-  await sleep(350);
-  await agent("claudeReplies", "bug");
-  await sleep(350);
+  await scrollDiff(-2000, 400);
+  await look(diff, 1.45, { dy: -20 });
+  await agent("claudeReplies", "board");
+  await sleep(500);
+  await agent("claudeReplies", "own");
+  await sleep(500);
+  const newTest = fileDiff("test/knight.test.ts").locator('[data-column-number="10"]').first();
+  await scrollTo(newTest, 300, 700);
+  await look(newTest, 1.8, { dx: 380, dy: 160 });
+  await sleep(300);
   await agent("claudeReplies", "reviewer");
   await agent("claudeDone");
-  const answer = card("Good catch");
-  await scrollTo(answer, 520, 450);
-  await look(answer, 1.9, { dy: -60, ms: 600 });
-  await sleep(300);
   pace(1);
-  await sleep(1300);
-  pace(1.75);
-
-  // 9. And around again.
-  caption("Then go another round");
-  await look(review, 2.3, { dx: -260, dy: 150, ms: 600 });
-  await click(review);
-  await sleep(700);
-  camera(WIDE, 700);
-  await sleep(900);
+  await sleep(2800);
 } catch (error) {
   // Shows where the story got stuck.
   await page.screenshot({ path: path.join(os.tmpdir(), "piccolo-demo-error.png") });
@@ -374,11 +338,9 @@ function sceneAt(t) {
 const times = [];
 for (let t = start; t < end; t += (paces.findLast((p) => p.t <= t)?.rate ?? 1) / OUT.fps) times.push(t);
 const total = times.length;
-await canvasPage.evaluate((scene) => window.keepAsFirst(scene), sceneAt(start));
 for (let i = 0; i < total; i++) {
   const t = times[i];
-  const fade = clamp((i - (total - LOOP_FADE * OUT.fps)) / (LOOP_FADE * OUT.fps), 0, 1);
-  const jpeg = await canvasPage.evaluate(([scene, fade]) => window.render(scene, fade), [sceneAt(t), fade]);
+  const jpeg = await canvasPage.evaluate((scene) => window.render(scene), sceneAt(t));
   if (!ffmpeg.stdin.write(Buffer.from(jpeg, "base64"))) await new Promise((resolve) => ffmpeg.stdin.once("drain", resolve));
   if (i % OUT.fps === 0) process.stdout.write(`\rFraming ${Math.round((i / total) * 100)}%`);
 }
@@ -388,13 +350,6 @@ await compositor.close();
 fs.rmSync(frameDir, { recursive: true, force: true });
 console.log(`\rWrote ${path.relative(ROOT, OUT_FILE)}: ${(total / OUT.fps).toFixed(1)}s, ${(fs.statSync(OUT_FILE).size / 1e6).toFixed(1)} MB`);
 
-// The GIF plays by itself in the README, where GitHub shows videos only once uploaded by hand.
-const palette = "split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle";
-await new Promise((resolve, reject) =>
-  spawn("ffmpeg", ["-y", "-loglevel", "error", "-i", OUT_FILE, "-vf", `fps=${GIF.fps},scale=${GIF.width}:-1:flags=lanczos,${palette}`, GIF_FILE], { stdio: "inherit" })
-    .on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited with ${code}`)))),
-);
-console.log(`Wrote ${path.relative(ROOT, GIF_FILE)}: ${(fs.statSync(GIF_FILE).size / 1e6).toFixed(1)} MB`);
 
 /** The page that draws each video frame: a crop of a captured frame, then the caption. */
 function compositorPage() {
@@ -403,10 +358,6 @@ function compositorPage() {
 <canvas width="${OUT.width}" height="${OUT.height}"></canvas>
 <script>
   const canvas = document.querySelector("canvas");
-  const ctx = canvas.getContext("2d");
-  const first = document.createElement("canvas");
-  first.width = canvas.width;
-  first.height = canvas.height;
   let loaded = { src: null, img: null };
   async function image(src) {
     if (loaded.src !== src) {
@@ -442,14 +393,8 @@ function compositorPage() {
     c.fillText(caption.text, target.width / 2, y + height / 2 + 1);
     c.restore();
   }
-  window.keepAsFirst = (scene) => draw(first, scene);
-  window.render = async (scene, fade) => {
+  window.render = async (scene) => {
     await draw(canvas, scene);
-    if (fade > 0) {
-      ctx.globalAlpha = fade;
-      ctx.drawImage(first, 0, 0);
-      ctx.globalAlpha = 1;
-    }
     return canvas.toDataURL("image/jpeg", 0.96).slice("data:image/jpeg;base64,".length);
   };
 </script>`;

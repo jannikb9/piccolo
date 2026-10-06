@@ -1,255 +1,152 @@
-// What happens in the README demo: Claude adds rate limiting to a login route, Codex reviews it,
-// the reviewer curates the review and adds a comment, and Claude answers with a fix. Kept small
-// and plain so someone seeing it for the first time can follow the code and the comments.
+// What happens in the README demo: Claude is adding knight moves to a chess engine, Codex reviews
+// them, the reviewer adds a comment of their own, and Claude makes the changes and replies. Kept
+// small and plain so someone seeing it for the first time can follow the code and the comments.
 
-export const REPO = "~/code/storefront";
-export const WORKTREE = `${REPO}/storefront.login-rate-limit`;
-export const BRANCH = "feat/login-rate-limit";
-/** Other worktrees, one of them open when the demo starts. */
-export const CART_WORKTREE = `${REPO}/storefront.cart-rounding`;
-export const SEARCH_WORKTREE = `${REPO}/storefront.search-filters`;
+export const REPO = "~/code/chess";
+export const WORKTREE = `${REPO}/chess.knight-moves`;
+export const BRANCH = "feat/knight-moves";
+/** Another worktree, for a sidebar that looks lived in. */
+export const OTHER_WORKTREE = `${REPO}/chess.flip-board`;
 
-export const SESSION_TITLE = "Add rate limiting to login";
-export const REVIEW_TITLE = "Review login rate limiting";
+export const SESSION_TITLE = "Add knight moves";
+export const REVIEW_TITLE = "Code review";
 
 const lines = (...l: string[]) => l.join("\n") + "\n";
 
-/** Each file on `main`, after Claude's first pass (`v1`), and after it addressed the review (`v2`). */
+/** Each file on `main`, as Claude first wrote it (`v1`), and after it addressed the review (`v2`). */
 export const FILES: { path: string; main: string; v1: string; v2: string }[] = [
   {
-    path: "src/auth/rate-limit.ts",
+    path: "src/moves/knight.ts",
     main: "",
     v1: lines(
-      "const MAX_ATTEMPTS = 5;",
-      "const WINDOW_MS = 15 * 60 * 1000;",
+      'import type { Board, Square } from "../board";',
       "",
-      "type Entry = { count: number; since: number };",
-      "const attempts = new Map<string, Entry>();",
+      "/** Every jump a knight makes: two squares one way, one to the side. */",
+      "const JUMPS = [",
+      "  [1, 2], [2, 1], [2, -1], [1, -2],",
+      "  [-1, -2], [-2, -1], [-2, 1], [-1, 2],",
+      "];",
       "",
-      "/** Whether this email tried to log in too often in the last 15 minutes. */",
-      "export function isRateLimited(email: string): boolean {",
-      "  const entry = attempts.get(email);",
-      "  if (!entry) return false;",
-      "  if (Date.now() - entry.since > WINDOW_MS) {",
-      "    attempts.delete(email);",
-      "    return false;",
+      "/** The squares the knight on `from` can move to. */",
+      "export function knightMoves(board: Board, from: Square): Square[] {",
+      "  const [file, rank] = board.coordinates(from);",
+      "  const moves: Square[] = [];",
+      "  for (const [df, dr] of JUMPS) {",
+      "    const to = board.square(file + df, rank + dr);",
+      "    moves.push(to);",
       "  }",
-      "  return entry.count >= MAX_ATTEMPTS;",
-      "}",
-      "",
-      "export function recordAttempt(email: string): void {",
-      "  const entry = attempts.get(email) ?? { count: 0, since: Date.now() };",
-      "  entry.count += 1;",
-      "  attempts.set(email, entry);",
+      "  return moves;",
       "}",
     ),
     v2: lines(
-      "const MAX_ATTEMPTS = 5;",
-      "const WINDOW_MS = 15 * 60 * 1000;",
+      'import type { Board, Square } from "../board";',
       "",
-      "type Entry = { count: number; since: number };",
-      "const attempts = new Map<string, Entry>();",
+      "/** Every jump a knight makes: two squares one way, one to the side. */",
+      "const JUMPS = [",
+      "  [1, 2], [2, 1], [2, -1], [1, -2],",
+      "  [-1, -2], [-2, -1], [-2, 1], [-1, 2],",
+      "];",
       "",
-      "/** Whether this email failed to log in too often in the last 15 minutes. */",
-      "export function isRateLimited(email: string): boolean {",
-      "  const entry = attempts.get(email);",
-      "  if (!entry) return false;",
-      "  if (Date.now() - entry.since > WINDOW_MS) {",
-      "    attempts.delete(email);",
-      "    return false;",
+      "/** The squares the knight on `from` can move to. */",
+      "export function knightMoves(board: Board, from: Square): Square[] {",
+      "  const [file, rank] = board.coordinates(from);",
+      "  const color = board.pieceAt(from)?.color;",
+      "  const moves: Square[] = [];",
+      "  for (const [df, dr] of JUMPS) {",
+      "    const to = board.square(file + df, rank + dr);",
+      "    // Off the board, or one of our own pieces is there.",
+      "    if (!to || board.pieceAt(to)?.color === color) continue;",
+      "    moves.push(to);",
       "  }",
-      "  return entry.count >= MAX_ATTEMPTS;",
-      "}",
-      "",
-      "export function recordFailure(email: string): void {",
-      "  const entry = attempts.get(email) ?? { count: 0, since: Date.now() };",
-      "  entry.count += 1;",
-      "  attempts.set(email, entry);",
-      "}",
-      "",
-      "export function clearAttempts(email: string): void {",
-      "  attempts.delete(email);",
-      "}",
-      "",
-      "/** Seconds until this email may try again. */",
-      "export function retryAfter(email: string): number {",
-      "  const entry = attempts.get(email);",
-      "  return entry ? Math.ceil((entry.since + WINDOW_MS - Date.now()) / 1000) : 0;",
+      "  return moves;",
       "}",
     ),
   },
   {
-    path: "src/routes/login.ts",
-    main: lines(
-      'import { Router } from "express";',
-      'import { verifyPassword } from "../auth/password";',
-      'import { createSession } from "../auth/session";',
-      "",
-      "export const login = Router();",
-      "",
-      'login.post("/login", async (req, res) => {',
-      "  const { email, password } = req.body;",
-      "",
-      "  const user = await verifyPassword(email, password);",
-      '  if (!user) return res.status(401).json({ error: "Wrong email or password" });',
-      "",
-      "  res.json({ token: createSession(user) });",
-      "});",
-    ),
-    v1: lines(
-      'import { Router } from "express";',
-      'import { verifyPassword } from "../auth/password";',
-      'import { isRateLimited, recordAttempt } from "../auth/rate-limit";',
-      'import { createSession } from "../auth/session";',
-      "",
-      "export const login = Router();",
-      "",
-      'login.post("/login", async (req, res) => {',
-      "  const { email, password } = req.body;",
-      "  if (isRateLimited(email)) {",
-      '    return res.status(429).json({ error: "Too many attempts, try again later" });',
-      "  }",
-      "",
-      "  recordAttempt(email);",
-      "  const user = await verifyPassword(email, password);",
-      '  if (!user) return res.status(401).json({ error: "Wrong email or password" });',
-      "",
-      "  res.json({ token: createSession(user) });",
-      "});",
-    ),
-    v2: lines(
-      'import { Router } from "express";',
-      'import { verifyPassword } from "../auth/password";',
-      'import { clearAttempts, isRateLimited, recordFailure, retryAfter } from "../auth/rate-limit";',
-      'import { createSession } from "../auth/session";',
-      "",
-      "export const login = Router();",
-      "",
-      'login.post("/login", async (req, res) => {',
-      "  const { email, password } = req.body;",
-      "  if (isRateLimited(email)) {",
-      '    res.set("Retry-After", String(retryAfter(email)));',
-      '    return res.status(429).json({ error: "Too many attempts, try again later" });',
-      "  }",
-      "",
-      "  const user = await verifyPassword(email, password);",
-      "  if (!user) {",
-      "    recordFailure(email);",
-      '    return res.status(401).json({ error: "Wrong email or password" });',
-      "  }",
-      "",
-      "  clearAttempts(email);",
-      "  res.json({ token: createSession(user) });",
-      "});",
-    ),
-  },
-  {
-    path: "test/rate-limit.test.ts",
+    path: "test/knight.test.ts",
     main: "",
     v1: lines(
       'import { expect, test } from "vitest";',
-      'import { isRateLimited, recordAttempt } from "../src/auth/rate-limit";',
+      'import { Board } from "../src/board";',
+      'import { knightMoves } from "../src/moves/knight";',
       "",
-      'test("blocks an email after five attempts", () => {',
-      '  for (let i = 0; i < 5; i++) recordAttempt("ann@example.com");',
-      '  expect(isRateLimited("ann@example.com")).toBe(true);',
+      'test("a knight in the middle has eight moves", () => {',
+      '  const board = Board.withPieces({ d4: "white knight" });',
+      '  expect(knightMoves(board, "d4")).toHaveLength(8);',
       "});",
     ),
     v2: lines(
       'import { expect, test } from "vitest";',
-      'import { clearAttempts, isRateLimited, recordFailure } from "../src/auth/rate-limit";',
+      'import { Board } from "../src/board";',
+      'import { knightMoves } from "../src/moves/knight";',
       "",
-      'test("blocks an email after five failed logins", () => {',
-      '  for (let i = 0; i < 5; i++) recordFailure("ann@example.com");',
-      '  expect(isRateLimited("ann@example.com")).toBe(true);',
+      'test("a knight in the middle has eight moves", () => {',
+      '  const board = Board.withPieces({ d4: "white knight" });',
+      '  expect(knightMoves(board, "d4")).toHaveLength(8);',
       "});",
       "",
-      'test("a successful login resets the count", () => {',
-      '  for (let i = 0; i < 4; i++) recordFailure("bob@example.com");',
-      '  clearAttempts("bob@example.com");',
-      '  recordFailure("bob@example.com");',
-      '  expect(isRateLimited("bob@example.com")).toBe(false);',
+      'test("a knight in the corner has two moves", () => {',
+      '  const board = Board.withPieces({ a1: "white knight" });',
+      '  expect(knightMoves(board, "a1")).toEqual(["b3", "c2"]);',
       "});",
     ),
   },
 ];
 
-/** What the other worktrees change. */
-export const CART_FILE = {
-  path: "src/cart/total.ts",
-  main: lines(
-    'import type { Cart } from "./types";',
-    "",
-    "export function cartTotal(cart: Cart): number {",
-    "  return cart.items.reduce((sum, item) => sum + item.price * item.quantity, 0);",
-    "}",
-  ),
-  v1: lines(
-    'import type { Cart } from "./types";',
-    "",
-    "/** The total in cents, so rounding never drifts. */",
-    "export function cartTotal(cart: Cart): number {",
-    "  const cents = cart.items.reduce((sum, item) => sum + Math.round(item.price * 100) * item.quantity, 0);",
-    "  return cents / 100;",
-    "}",
-  ),
-};
-export const SEARCH_FILE = {
-  path: "src/search/filters.ts",
+/** What the other worktree changes. */
+export const OTHER_FILE = {
+  path: "src/ui/flip.ts",
   main: "",
-  v1: lines("export type Filters = { category?: string; maxPrice?: number };", "", "export const NO_FILTERS: Filters = {};"),
+  v1: lines(
+    'import type { Square } from "../board";',
+    "",
+    "/** The square seen from the other side of the board, for playing black. */",
+    "export function flip(square: Square): Square {",
+    "  return `${\"hgfedcba\"[\"abcdefgh\".indexOf(square[0])]}${9 - Number(square[1])}`;",
+    "}",
+  ),
 };
 
 /**
- * A comment on lines of a file, where it sits in v1 and after Claude's fix (v2). `key` names it
- * for the recorder.
+ * A comment on lines of a file, where it sits in v1 and after Claude's changes (v2). `key` names
+ * it for the recorder.
  */
 export type StoryComment = { key: string; path: string; v1: [number, number]; v2: [number, number]; body: string };
 
 /** Codex's review, in the order it writes it. */
 export const CODEX_COMMENTS: StoryComment[] = [
   {
-    key: "nit",
-    path: "src/auth/rate-limit.ts",
-    v1: [4, 4],
-    v2: [4, 4],
-    body: "Nit: `windowStart` would read better than `since`.",
-  },
-  {
-    key: "retry",
-    path: "src/routes/login.ts",
-    v1: [10, 12],
-    v2: [10, 13],
-    body: "Send a `Retry-After` header with the 429, so clients know when to retry.",
-  },
-  {
-    key: "bug",
-    path: "src/routes/login.ts",
+    key: "board",
+    path: "src/moves/knight.ts",
     v1: [14, 14],
-    v2: [16, 21],
-    body: "**Bug:** successful logins count too, so five logins in 15 minutes lock you out. Count only failures.",
+    v2: [15, 17],
+    body: "**Bug:** jumps that leave the board aren't skipped. From a corner, six of the eight land off the board.",
+  },
+  {
+    key: "own",
+    path: "src/moves/knight.ts",
+    v1: [15, 15],
+    v2: [18, 18],
+    body: "This also lands on squares with our own pieces. A knight can only move to an empty square or take an opponent's piece.",
   },
 ];
 
-export const CODEX_SUMMARY =
-  "Looks good overall. One bug: successful logins count toward the limit.";
-
-/** What the reviewer types, on the test, and where it sits after the fix. */
+/** What the reviewer types, on the test, and where it sits after Claude's changes. */
 export const REVIEWER_COMMENT = {
-  path: "test/rate-limit.test.ts",
-  line: 7,
-  v2: [9, 14] as [number, number],
-  body: "Also test that a successful login resets the count.",
+  path: "test/knight.test.ts",
+  line: 8,
+  v2: [10, 13] as [number, number],
+  body: "Add a test for a knight in the corner.",
 };
 
-/** Claude's answers after the fix, by the comment they answer (`reviewer` for the reviewer's). */
+/** Claude's answers, by the comment they answer (`reviewer` for the reviewer's). */
 export const CLAUDE_REPLIES: Record<string, string> = {
-  bug: "Good catch. Only failures count now, and a successful login clears them.",
-  retry: "Added `Retry-After` with the seconds left in the window.",
-  reviewer: "Added “a successful login resets the count”.",
+  board: "Good catch. Jumps that leave the board are skipped now, so a knight in the corner only gets its two real moves.",
+  own: "Fixed: squares with our own pieces are skipped, so the knight can still take the opponent's pieces but never its own.",
+  reviewer: "Added `a knight in the corner has two moves`: from a1 the knight can only reach b3 and c2.",
 };
 
 export const COMMITS = {
-  v1: "Rate-limit login attempts per email",
-  v2: "Count only failed logins and send Retry-After",
+  v1: "Generate knight moves",
+  v2: "Skip squares off the board or with our own pieces",
 };
