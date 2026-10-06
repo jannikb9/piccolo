@@ -99,6 +99,7 @@ mockState.sessions.push(
     startedAt: minutesAgo(25),
     lastSeen: minutesAgo(2),
     reachable: true,
+    model: "claude-opus-5-5",
   },
   {
     id: "codex",
@@ -111,6 +112,7 @@ mockState.sessions.push(
     startedAt: minutesAgo(20),
     lastSeen: minutesAgo(12),
     reachable: true,
+    model: "gpt-6-astra",
   },
 );
 mockState.requests.push({

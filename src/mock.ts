@@ -508,6 +508,7 @@ const mockSessionList: AgentSession[] = [
     startedAt: minutesAgo(52),
     lastSeen: minutesAgo(6),
     reachable: true,
+    model: "claude-opus-5-5",
   },
   {
     id: "mock-codex",
@@ -520,6 +521,7 @@ const mockSessionList: AgentSession[] = [
     startedAt: null,
     lastSeen: minutesAgo(3),
     reachable: true,
+    model: "gpt-6-astra",
   },
   {
     id: "mock-old",
@@ -532,6 +534,7 @@ const mockSessionList: AgentSession[] = [
     startedAt: null,
     lastSeen: minutesAgo(130),
     reachable: false,
+    model: "claude-sonnet-5-5",
   },
 ];
 

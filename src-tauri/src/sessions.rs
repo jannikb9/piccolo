@@ -53,6 +53,9 @@ pub struct Session {
     /// Whether Piccolo can send it messages: a running Claude Code session has an inbox, and a
     /// Codex thread a queue when the Codex CLI is found.
     pub reachable: bool,
+    /// The model it last answered with, as its API names it (e.g. `claude-opus-5-5`), when its
+    /// transcript says.
+    pub model: Option<String>,
     #[serde(skip)]
     inbox: Option<Inbox>,
 }
@@ -122,20 +125,28 @@ impl Caller {
     }
 }
 
-/// Where Claude Code registers its sessions; `CLAUDE_CONFIG_DIR` moves it, as it does for Claude Code.
-pub fn registry_dir() -> PathBuf {
-    let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+/// Claude Code's folder; `CLAUDE_CONFIG_DIR` moves it, as it does for Claude Code.
+fn claude_dir() -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude"));
-    config.join("sessions")
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude"))
 }
 
-/// Codex's list of thread titles; `CODEX_HOME` moves it, as it does for Codex.
-fn codex_index() -> PathBuf {
+/// Where Claude Code registers its sessions.
+pub fn registry_dir() -> PathBuf {
+    claude_dir().join("sessions")
+}
+
+/// Codex's folder; `CODEX_HOME` moves it, as it does for Codex.
+fn codex_dir() -> PathBuf {
     std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".codex"))
-        .join("session_index.jsonl")
+}
+
+/// Codex's list of thread titles.
+fn codex_index() -> PathBuf {
+    codex_dir().join("session_index.jsonl")
 }
 
 /// Titles of Codex threads by id, from `index` (one JSON object per line; a later line renames).
@@ -254,6 +265,7 @@ fn match_sessions(
                     started_at: l.entry.started_at,
                     last_seen: trace.map(|t| t.seen_at),
                     reachable: true,
+                    model: None,
                     inbox: Some(Inbox::Socket(l.socket.clone())),
                 })
             })
@@ -278,6 +290,7 @@ fn match_sessions(
                     started_at: None,
                     last_seen: Some(trace.seen_at),
                     reachable: inbox.is_some(),
+                    model: None,
                     inbox,
                 })
             })
@@ -291,6 +304,77 @@ fn match_sessions(
         matched.insert(path.clone(), sessions);
     }
     matched
+}
+
+/// A Claude Code session's transcript: `<id>.jsonl` in the folder of the project it runs in, under
+/// `projects` in `claude`.
+fn claude_transcript(claude: &Path, id: &str) -> Option<PathBuf> {
+    let name = format!("{id}.jsonl");
+    std::fs::read_dir(claude.join("projects")).ok()?.flatten().map(|d| d.path().join(&name)).find(|p| p.is_file())
+}
+
+/// A Codex thread's transcript: `rollout-<time>-<id>.jsonl`, in a folder per day under `sessions`
+/// in `codex`. The latest days are looked at first.
+fn codex_transcript(codex: &Path, id: &str) -> Option<PathBuf> {
+    let suffix = format!("-{id}.jsonl");
+    let newest_first = |dir: &Path| {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|d| d.path()).collect();
+        entries.sort_unstable_by(|a, b| b.cmp(a));
+        entries
+    };
+    for year in newest_first(&codex.join("sessions")) {
+        for month in newest_first(&year) {
+            for day in newest_first(&month) {
+                let found = newest_first(&day).into_iter().find(|f| f.file_name().is_some_and(|n| n.to_string_lossy().ends_with(&suffix)));
+                if found.is_some() {
+                    return found;
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The last line of the JSON Lines file at `path` that `pick` takes something from. Transcripts run
+/// to megabytes, so they're read from the end, a growing piece at a time.
+fn last_in_transcript(path: &Path, pick: impl Fn(&serde_json::Value) -> Option<String>) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let mut size: u64 = 64 * 1024;
+    loop {
+        let start = len.saturating_sub(size);
+        file.seek(SeekFrom::Start(start)).ok()?;
+        let mut bytes = Vec::new();
+        (&mut file).take(len - start).read_to_end(&mut bytes).ok()?;
+        let text = String::from_utf8_lossy(&bytes);
+        // The first line is cut short unless the piece starts the file.
+        let whole = if start > 0 { text.split_once('\n').map_or("", |(_, rest)| rest) } else { &text };
+        let found = whole
+            .rsplit('\n')
+            .filter(|l| l.contains("\"model\""))
+            .find_map(|l| serde_json::from_str(l).ok().and_then(|v| pick(&v)));
+        if found.is_some() || start == 0 || size >= 16 * 1024 * 1024 {
+            return found;
+        }
+        size *= 4;
+    }
+}
+
+/// The model a session last answered with, from its transcript: Claude Code records it on each
+/// reply, Codex at the start of each turn. Other agents' transcripts aren't known.
+fn model_of(agent: &str, id: &str, claude: &Path, codex: &Path) -> Option<String> {
+    let text = |v: &serde_json::Value| v.as_str().map(str::to_string).filter(|m| !m.is_empty());
+    match agent {
+        "claude" => last_in_transcript(&claude_transcript(claude, id)?, |line| {
+            // Messages Claude Code makes up itself, e.g. for an interrupted turn, say `<synthetic>`.
+            (line["type"] == "assistant").then(|| text(&line["message"]["model"])).flatten().filter(|m| !m.starts_with('<'))
+        }),
+        "codex" if is_thread_id(id) => {
+            last_in_transcript(&codex_transcript(codex, id)?, |line| (line["type"] == "turn_context").then(|| text(&line["payload"]["model"])).flatten())
+        }
+        _ => None,
+    }
 }
 
 /// `value` as one shell word.
@@ -448,7 +532,13 @@ impl Store {
 /// The sessions working on each of `worktrees`, from the registry and the traces in `store`.
 fn sessions_by_worktree(store: &Store, worktrees: &[String]) -> Result<HashMap<String, Vec<Session>>> {
     let codex = codex_binary();
-    Ok(match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?, &codex_titles(&codex_index()), codex.as_deref()))
+    let mut matched =
+        match_sessions(&live_sessions(&registry_dir()), worktrees, &store.traces()?, &codex_titles(&codex_index()), codex.as_deref());
+    let (claude, codex) = (claude_dir(), codex_dir());
+    for session in matched.values_mut().flatten() {
+        session.model = model_of(&session.agent, &session.id, &claude, &codex);
+    }
+    Ok(matched)
 }
 
 /// The sessions working on the worktree at `path`.
@@ -643,6 +733,41 @@ mod tests {
         let index = dir.join("session_index.jsonl");
         std::fs::write(&index, "{\"id\":\"a\",\"thread_name\":\"First\"}\nnot json\n{\"id\":\"a\",\"thread_name\":\"Renamed\"}\n{\"id\":\"b\",\"thread_name\":\" \"}\n").unwrap();
         assert_eq!(codex_titles(&index), HashMap::from([("a".to_string(), "Renamed".to_string())]));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reads_the_model_from_transcripts() {
+        let dir = std::env::temp_dir().join(format!("piccolo-models-{}", std::process::id()));
+        let (claude, codex) = (dir.join("claude"), dir.join("codex"));
+        let project = claude.join("projects/-Users-me-repo");
+        std::fs::create_dir_all(&project).unwrap();
+        // The latest real reply counts: not a made-up one, nor a tool's output that mentions a model.
+        let filler = format!("{{\"type\":\"user\",\"message\":{{\"content\":\"{}\"}}}}\n", "x".repeat(100_000));
+        let lines = [
+            r#"{"type":"assistant","message":{"model":"claude-sonnet-5-5","content":[]}}"#.to_string(),
+            filler,
+            r#"{"type":"assistant","message":{"model":"claude-opus-5-5","content":[]}}"#.into(),
+            r#"{"type":"assistant","message":{"model":"<synthetic>","content":[]}}"#.into(),
+            r#"{"type":"user","message":{"content":"{\"model\":\"gpt-6\"}"}}"#.into(),
+        ];
+        std::fs::write(project.join("s1.jsonl"), lines.join("\n")).unwrap();
+        assert_eq!(model_of("claude", "s1", &claude, &codex).as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(model_of("claude", "s2", &claude, &codex), None);
+
+        let thread = "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b";
+        let day = codex.join("sessions/2026/10/06");
+        std::fs::create_dir_all(&day).unwrap();
+        let rollout = [
+            r#"{"type":"session_meta","payload":{"model_provider":"openai"}}"#,
+            r#"{"type":"turn_context","payload":{"model":"gpt-6"}}"#,
+            r#"{"type":"turn_context","payload":{"model":"gpt-6-astra"}}"#,
+            r#"{"type":"event_msg","payload":{"type":"agent_message"}}"#,
+        ];
+        std::fs::write(day.join(format!("rollout-2026-10-06T00-34-05-{thread}.jsonl")), rollout.join("\n")).unwrap();
+        assert_eq!(model_of("codex", thread, &claude, &codex).as_deref(), Some("gpt-6-astra"));
+        assert_eq!(model_of("gemini", thread, &claude, &codex), None);
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

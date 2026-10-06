@@ -22,7 +22,27 @@ export function ago(ms: number, now = Date.now()): string {
 }
 
 /** An agent as it signs (`codex`, `claude`), as shown: "Codex". */
-export const agentLabel = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
+export const agentLabel = (name: string) => capitalize(name);
+
+const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
+
+/**
+ * A model as its API names it, as people call it: "claude-opus-5-5" is "Opus 5.5",
+ * "claude-3-5-sonnet-20241022" "Sonnet 3.5", "gpt-6-astra" "GPT-6 Astra". Others stay as they are.
+ */
+export function modelLabel(model: string) {
+  // Cloud providers wrap Claude's ids: "us.anthropic.claude-…-v1:0", "claude-…@20250805".
+  const claude = /claude-(.+)$/.exec(model.replace(/[@:].*$/, "").replace(/-v\d+$/, ""));
+  if (claude) {
+    const parts = claude[1].split("-").filter((p) => !/^\d{8}$/.test(p));
+    const family = parts.find((p) => /^[a-z]+$/.test(p));
+    const version = parts.filter((p) => /^\d+$/.test(p)).join(".");
+    if (family) return version ? `${capitalize(family)} ${version}` : capitalize(family);
+  }
+  const gpt = /^gpt-([^-]+)(.*)$/.exec(model);
+  if (gpt) return [`GPT-${gpt[1]}`, ...gpt[2].split("-").filter(Boolean).map(capitalize)].join(" ");
+  return model;
+}
 
 /** A string that identifies a scope, e.g. for React keys. */
 export const scopeKey = (scope: DiffScope) => (typeof scope === "string" ? scope : `commit:${scope.commit}`);

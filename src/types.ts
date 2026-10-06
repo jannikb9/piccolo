@@ -173,6 +173,8 @@ export type AgentSession = {
   lastSeen: number | null;
   /** Piccolo can send it messages: a running Claude Code session, or a Codex thread (queued with the Codex CLI). */
   reachable: boolean;
+  /** The model it last answered with, as its API names it (e.g. `claude-opus-5-5`), when its transcript says. */
+  model: string | null;
 };
 
 /**

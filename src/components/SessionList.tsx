@@ -3,7 +3,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronDown, Copy, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useCopyPrompt, useRequestReview, useSendComments, useSessionActivity, useSessions } from "../lib/queries";
-import { agentLabel, ago, cn } from "../lib/utils";
+import { agentLabel, ago, cn, modelLabel } from "../lib/utils";
 import type { AgentSession, ReviewRequest, SessionActivity, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
 import { Tooltip, useJustDone } from "./ui";
@@ -268,7 +268,7 @@ function SessionRow({
   written: number;
 }) {
   const underway = !!request && isUnderway(request);
-  const detail = underway
+  const doing = underway
     ? request.startedAt === null
       ? request.kind === "review"
         ? "Asked to review"
@@ -281,6 +281,7 @@ function SessionRow({
       : author
         ? `Author · ${plural(written, "comment")}`
         : plural(written, "comment");
+  const detail = session.model ? `${modelLabel(session.model)} · ${doing}` : doing;
 
   return <Row icon={session.agent} state={state} title={sessionName(session)} detail={detail} />;
 }
@@ -380,6 +381,12 @@ function TargetIcon({ agent, copied }: { agent: string | undefined; copied: bool
   return <Copy className="size-3.5 text-fg-muted" />;
 }
 
+/** A session's model in a menu, beside its name. */
+function ModelName({ session }: { session: AgentSession }) {
+  if (!session.model) return null;
+  return <span className="shrink-0 text-[11px] text-fg-subtle">{modelLabel(session.model)}</span>;
+}
+
 /** The menu's item copying the prompt, after the sessions on the branch if there are any. */
 function CopyItem({ after, onSelect }: { after: boolean; onSelect: () => void }) {
   return (
@@ -432,6 +439,7 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
                   <DropdownMenuPrimitive.Item key={session.id} onSelect={() => review.mutate(session.id)} className={menuItem}>
                     <AgentIcon name={session.agent} className="size-3.5" />
                     <span className="min-w-0 flex-1 truncate text-fg">{sessionName(session)}</span>
+                    <ModelName session={session} />
                   </DropdownMenuPrimitive.Item>
                 ))}
               </>
@@ -502,6 +510,7 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
                     >
                       <AgentIcon name={session.agent} className="size-3.5" />
                       <span className="min-w-0 flex-1 truncate text-fg">{sessionName(session)}</span>
+                      <ModelName session={session} />
                       <span className="tabular text-[11px] text-fg-subtle">{count === 0 ? "Seen all" : count}</span>
                     </DropdownMenuPrimitive.Item>
                   );
