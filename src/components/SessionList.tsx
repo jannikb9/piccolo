@@ -438,7 +438,7 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
 }
 
 /**
- * "Address N": sends the comments the author hasn't seen to it, to address, from the reviewer or
+ * "Request changes N": sends the comments the author hasn't seen to it, to address, from the reviewer or
  * from reviewing agents; disabled, saying why, while there are none. Without an author it copies a
  * prompt for every open comment, to paste into any agent. Its menu sends them to another session on
  * the branch instead, or copies the prompt.
@@ -512,7 +512,7 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
     >
       <TargetIcon agent={author?.agent} copied={copied} />
       {/* A narrow toolbar keeps the mark and the count. */}
-      <span className="hidden @3xl:inline">{copied ? "Copied" : "Address"}</span>
+      <span className="hidden @3xl:inline">{copied ? "Copied" : "Request changes"}</span>
       {!copied && !empty && (
         <span className="tabular grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10.5px] font-semibold text-accent-fg">
           {threads.length}
