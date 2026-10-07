@@ -1,12 +1,14 @@
 // The README demo (`?demo` in a plain browser). Replaces the placeholder data with the story in
-// story.ts, frames the app like a macOS window, draws a pointer, and exposes `window.demo`: what
-// the agents do, for scripts/demo/record.mjs to call while it plays the reviewer.
+// story.ts, frames the app like a macOS window, draws a pointer and a terminal running Codex, and
+// exposes `window.demo`: what the agents do, for scripts/demo/record.mjs to call while it plays
+// the reviewer.
 import { structuredPatch } from "diff";
 import { queryClient } from "../lib/queries";
 import { mockState, type MockFile } from "../mock";
 import { useStore } from "../store";
 import type { CommentMessage, ExcerptRow, LineRange, Repo, ReviewRequest, Thread, Worktree } from "../types";
 import "./demo.css";
+import { codexSteps, openTerminal } from "./terminal";
 import {
   BRANCH,
   CLAUDE_REPLIES,
@@ -19,6 +21,7 @@ import {
   REVIEW_TITLE,
   REVIEWER_COMMENT,
   SESSION_TITLE,
+  UNCHANGED_FILES,
   WORKTREE,
 } from "./story";
 
@@ -85,47 +88,20 @@ mockState.aheadBehind[OTHER_WORKTREE] = [1, 0];
 mockState.sessionsWorktree = WORKTREE;
 mockState.sessionOfAgent.claude = "claude";
 mockState.sessionOfAgent.codex = "codex";
-// Claude has written knight moves and waits in its session. Codex is connected too: it reviewed
-// an earlier draft, so Review asks it again with one click.
-mockState.sessions.push(
-  {
-    id: "claude",
-    agent: "claude",
-    title: SESSION_TITLE,
-    status: "idle",
-    running: true,
-    cwd: WORKTREE,
-    inWorktree: true,
-    startedAt: minutesAgo(25),
-    lastSeen: minutesAgo(2),
-    reachable: true,
-    model: "claude-opus-5-5",
-  },
-  {
-    id: "codex",
-    agent: "codex",
-    title: REVIEW_TITLE,
-    status: null,
-    running: null,
-    cwd: null,
-    inWorktree: false,
-    startedAt: minutesAgo(20),
-    lastSeen: minutesAgo(12),
-    reachable: true,
-    model: "gpt-6-astra",
-  },
-);
-mockState.requests.push({
-  id: 1,
-  kind: "review",
-  agent: "codex",
-  sessionId: "codex",
-  head: "1c0ffee",
-  threads: [],
-  requestedAt: minutesAgo(20),
-  startedAt: minutesAgo(19),
-  finishedAt: minutesAgo(12),
-  comments: 0,
+// Claude has written knight moves and waits in its session. Codex joins once it's given the
+// copied prompt.
+mockState.sessions.push({
+  id: "claude",
+  agent: "claude",
+  title: SESSION_TITLE,
+  status: "idle",
+  running: true,
+  cwd: WORKTREE,
+  inWorktree: true,
+  startedAt: minutesAgo(25),
+  lastSeen: minutesAgo(2),
+  reachable: true,
+  model: "claude-opus-5-5",
 });
 
 // The reviewer's view as the demo starts: knight moves open, one diff column.
@@ -168,6 +144,10 @@ const latest = (kind: ReviewRequest["kind"]) => mockState.requests.find((r) => r
 
 function setVersion(version: "v1" | "v2") {
   mockState.files[WORKTREE] = FILES.map((f) => patchFile(f.path, f.main, f[version]));
+  mockState.texts[WORKTREE] = {
+    base: UNCHANGED_FILES,
+    head: { ...UNCHANGED_FILES, ...Object.fromEntries(FILES.map((f) => [f.path, f[version]])) },
+  };
   mockState.commitLog[WORKTREE] =
     version === "v1" ? [[COMMITS.v1, "Claude", 2]] : [[COMMITS.v2, "Claude", 0], [COMMITS.v1, "Claude", 2]];
   mockState.aheadBehind[WORKTREE] = [version === "v1" ? 1 : 2, 0];
@@ -184,9 +164,29 @@ const act =
   };
 
 const demo = {
-  /** Codex takes on the review it was asked for. */
-  codexStarts: act(() => {
-    latest("review").startedAt = Date.now();
+  /** The reviewer switches to the terminal where Codex runs. */
+  openTerminal,
+
+  /** Codex prints the next `count` steps of its work in the terminal. */
+  codexSteps,
+
+  /** Codex takes on the review prompt pasted into it, and so shows up as on the branch. */
+  codexJoins: act(() => {
+    mockState.sessions.push({
+      id: "codex",
+      agent: "codex",
+      title: REVIEW_TITLE,
+      status: null,
+      running: null,
+      cwd: REPO,
+      inWorktree: false,
+      startedAt: minutesAgo(9),
+      lastSeen: Date.now(),
+      reachable: true,
+      model: "gpt-6-astra",
+    });
+    const request = latest("review");
+    Object.assign(request, { agent: "codex", sessionId: "codex", startedAt: Date.now() });
   }),
 
   /** Codex comments on lines; `key` is one of story.ts's CODEX_COMMENTS. */
@@ -229,14 +229,14 @@ const demo = {
       if (thread.path === null) continue;
       const key = [...codexThreads].find(([, id]) => id === thread.id)?.[0];
       const comment = CODEX_COMMENTS.find((c) => c.key === key);
-      const lines = comment ? comment.v2 : thread.path === REVIEWER_COMMENT.path ? REVIEWER_COMMENT.v2 : null;
+      const lines = comment ? comment.v2 : thread.messages[0]?.author === "reviewer" ? REVIEWER_COMMENT.v2 : null;
       if (lines) thread.position = lineRange(lines);
     }
   }),
 
   /** Claude answers a comment: a key of CLAUDE_REPLIES. */
   claudeReplies: act((key: string) => {
-    const id = key === "reviewer" ? threads().find((t) => t.path === REVIEWER_COMMENT.path)?.id : codexThreads.get(key);
+    const id = key === "reviewer" ? threads().find((t) => t.messages[0]?.author === "reviewer")?.id : codexThreads.get(key);
     const thread = threads().find((t) => t.id === id);
     if (!thread) return;
     thread.messages.push(message("claude", CLAUDE_REPLIES[key]));
@@ -260,6 +260,15 @@ window.demo = demo;
 
 // The window's traffic lights, which the desktop app gets from macOS.
 document.documentElement.dataset.demo = "";
+
+// Narrow panels, so the diff's toolbar keeps its labels on the recording's small page. Set before
+// the app reads its saved layout; 64 is the window's margins in demo.css.
+{
+  const width = window.innerWidth - 64;
+  const [sidebar, files] = [200, 220];
+  const layout = { sidebar: (sidebar / width) * 100, files: (files / width) * 100, diff: ((width - sidebar - files) / width) * 100 };
+  localStorage.setItem("react-resizable-panels:main-layout", JSON.stringify(layout));
+}
 const lights = document.createElement("div");
 lights.className = "demo-traffic-lights";
 lights.innerHTML = "<span></span><span></span><span></span>";
@@ -286,4 +295,25 @@ window.addEventListener("mousedown", (e) => {
   document.body.append(ring);
 }, options);
 window.addEventListener("mouseup", () => pointer.classList.remove("pressed"), options);
-window.addEventListener("keydown", () => pointer.classList.add("hidden"), options);
+
+// An outline around what the reviewer is about to use, for the recorder to point things out
+// without moving the camera.
+declare global {
+  interface Window {
+    demoHighlight: (box: { x: number; y: number; width: number; height: number }, ms: number) => void;
+  }
+}
+window.demoHighlight = ({ x, y, width, height }, ms) => {
+  const outline = document.createElement("div");
+  outline.className = "demo-highlight";
+  Object.assign(outline.style, { left: `${x - 5}px`, top: `${y - 5}px`, width: `${width + 10}px`, height: `${height + 10}px` });
+  document.body.append(outline);
+  setTimeout(() => {
+    outline.classList.add("out");
+    outline.addEventListener("animationend", () => outline.remove());
+  }, ms);
+};
+window.addEventListener("keydown", (e) => {
+  // ⌘ alone is held for ⌘-click, not typed.
+  if (!["Meta", "Shift", "Alt", "Control"].includes(e.key)) pointer.classList.add("hidden");
+}, options);

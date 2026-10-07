@@ -322,6 +322,8 @@ const unchangedFiles: Record<string, string> = {
 };
 
 function mockFiles(worktreePath: string, rev: string | null): Record<string, string> {
+  const own = mockState.texts[worktreePath];
+  if (own) return own[rev === "base" ? "base" : "head"];
   const out: Record<string, string> = { ...unchangedFiles };
   const old = rev === "base";
   for (const f of files[worktreePath] ?? []) {
@@ -334,7 +336,10 @@ function mockFiles(worktreePath: string, rev: string | null): Record<string, str
 export function mockFindSymbol(worktreePath: string, rev: string | null, name: string, from: string): Promise<SymbolSearch> {
   const ext = from.split(".").pop();
   const word = new RegExp(`(?<![\\w$])${name.replace(/[$]/g, "\\$")}(?![\\w$])`);
-  const definition = new RegExp(`\\b(?:function|const|let|class|interface|type)\\s+${name}\\b|^\\s*${name}\\??:`);
+  // Keywords, members like `name: T`, and methods like `name(a: T): U {`.
+  const definition = new RegExp(
+    `\\b(?:function|const|let|class|interface|type)\\s+${name}\\b|^\\s*${name}\\??:|^\\s*(?:(?:static|async|private|public)\\s+)*${name}\\s*\\([^()]*\\)\\s*(?::[^={}]+)?\\{\\s*$`,
+  );
   const hits: SymbolHit[] = [];
   for (const [path, contents] of Object.entries(mockFiles(worktreePath, rev)).sort(([a], [b]) => a.localeCompare(b))) {
     if (path.split(".").pop()?.replace("tsx", "ts") !== ext?.replace("tsx", "ts")) continue;
@@ -568,6 +573,8 @@ export const mockState = {
   sessionOfAgent,
   seen,
   sessionsWorktree: mockWorktree,
+  /** Whole files by worktree, on the base branch and at its head, for code navigation; otherwise placeholders. */
+  texts: {} as Record<string, { base: Record<string, string>; head: Record<string, string> }>,
   /** The next id for a thread or message. */
   nextId: () => nextId++,
 };

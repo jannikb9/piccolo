@@ -1,6 +1,8 @@
-// What happens in the README demo: Claude is adding knight moves to a chess engine, Codex reviews
-// them, the reviewer adds a comment of their own, and Claude makes the changes and replies. Kept
-// small and plain so someone seeing it for the first time can follow the code and the comments.
+// What happens in the README demo: Claude is adding knight moves to a chess engine. The reviewer
+// ⌘-clicks into the board's code, then copies a review prompt into Codex, which joins and comments.
+// The reviewer agrees with one comment, adds one of their own, and Claude makes the changes and
+// replies. Kept small and plain so someone seeing it for the first time can follow the code and the
+// comments.
 
 export const REPO = "~/code/chess";
 export const WORKTREE = `${REPO}/chess.knight-moves`;
@@ -9,7 +11,7 @@ export const BRANCH = "feat/knight-moves";
 export const OTHER_WORKTREE = `${REPO}/chess.flip-board`;
 
 export const SESSION_TITLE = "Add knight moves";
-export const REVIEW_TITLE = "Code review";
+export const REVIEW_TITLE = "Review knight moves";
 
 const lines = (...l: string[]) => l.join("\n") + "\n";
 
@@ -33,7 +35,7 @@ export const FILES: { path: string; main: string; v1: string; v2: string }[] = [
       "  const moves: Square[] = [];",
       "  for (const [df, dr] of JUMPS) {",
       "    const to = board.square(file + df, rank + dr);",
-      "    moves.push(to);",
+      "    if (to) moves.push(to);",
       "  }",
       "  return moves;",
       "}",
@@ -42,7 +44,7 @@ export const FILES: { path: string; main: string; v1: string; v2: string }[] = [
       'import type { Board, Square } from "../board";',
       "",
       "/** Every jump a knight makes: two squares one way, one to the side. */",
-      "const JUMPS = [",
+      "const KNIGHT_JUMPS = [",
       "  [1, 2], [2, 1], [2, -1], [1, -2],",
       "  [-1, -2], [-2, -1], [-2, 1], [-1, 2],",
       "];",
@@ -52,7 +54,7 @@ export const FILES: { path: string; main: string; v1: string; v2: string }[] = [
       "  const [file, rank] = board.coordinates(from);",
       "  const color = board.pieceAt(from)?.color;",
       "  const moves: Square[] = [];",
-      "  for (const [df, dr] of JUMPS) {",
+      "  for (const [df, dr] of KNIGHT_JUMPS) {",
       "    const to = board.square(file + df, rank + dr);",
       "    // Off the board, or one of our own pieces is there.",
       "    if (!to || board.pieceAt(to)?.color === color) continue;",
@@ -85,13 +87,54 @@ export const FILES: { path: string; main: string; v1: string; v2: string }[] = [
       '  expect(knightMoves(board, "d4")).toHaveLength(8);',
       "});",
       "",
-      'test("a knight in the corner has two moves", () => {',
-      '  const board = Board.withPieces({ a1: "white knight" });',
-      '  expect(knightMoves(board, "a1")).toEqual(["b3", "c2"]);',
+      'test("a knight next to its own pawn can\'t take it", () => {',
+      '  const board = Board.withPieces({ d4: "white knight", e6: "white pawn" });',
+      '  expect(knightMoves(board, "d4")).not.toContain("e6");',
       "});",
     ),
   },
 ];
+
+/** Files the branch doesn't change, which ⌘-click can open. */
+export const UNCHANGED_FILES: Record<string, string> = {
+  "src/board.ts": lines(
+    '/** A name like "e4", from "a1" to "h8". */',
+    "export type Square = string;",
+    "",
+    'export type Piece = { color: "white" | "black"; kind: string };',
+    "",
+    "/** The pieces on a chessboard, and where they are. */",
+    "export class Board {",
+    "  private pieces = new Map<Square, Piece>();",
+    "",
+    '  /** A board with only these pieces, like `{ d4: "white knight" }`. */',
+    "  static withPieces(pieces: Record<Square, string>): Board {",
+    "    const board = new Board();",
+    "    for (const [at, name] of Object.entries(pieces)) {",
+    '      const [color, kind] = name.split(" ") as [Piece["color"], string];',
+    "      board.pieces.set(at, { color, kind });",
+    "    }",
+    "    return board;",
+    "  }",
+    "",
+    "  /** The file (a–h) and rank (1–8) of `at`, both as numbers from 1 to 8. */",
+    "  coordinates(at: Square): [number, number] {",
+    "    return [at.charCodeAt(0) - 96, Number(at[1])];",
+    "  }",
+    "",
+    '  /** `file` and `rank` as a name like "e4", or `null` when that\'s off the board. */',
+    "  square(file: number, rank: number): Square | null {",
+    "    if (file < 1 || file > 8 || rank < 1 || rank > 8) return null;",
+    "    return String.fromCharCode(96 + file) + rank;",
+    "  }",
+    "",
+    "  /** The piece on `at`, if there is one. */",
+    "  pieceAt(at: Square): Piece | undefined {",
+    "    return this.pieces.get(at);",
+    "  }",
+    "}",
+  ),
+};
 
 /** What the other worktree changes. */
 export const OTHER_FILE = {
@@ -107,6 +150,9 @@ export const OTHER_FILE = {
   ),
 };
 
+/** The name the reviewer ⌘-clicks, on this line of the diff, to see where it's defined. */
+export const LOOKUP = { path: "src/moves/knight.ts", line: 14, name: "square" };
+
 /**
  * A comment on lines of a file, where it sits in v1 and after Claude's changes (v2). `key` names
  * it for the recorder.
@@ -116,37 +162,45 @@ export type StoryComment = { key: string; path: string; v1: [number, number]; v2
 /** Codex's review, in the order it writes it. */
 export const CODEX_COMMENTS: StoryComment[] = [
   {
-    key: "board",
-    path: "src/moves/knight.ts",
-    v1: [14, 14],
-    v2: [15, 17],
-    body: "**Bug:** jumps that leave the board aren't skipped. From a corner, six of the eight land off the board.",
-  },
-  {
     key: "own",
     path: "src/moves/knight.ts",
     v1: [15, 15],
-    v2: [18, 18],
-    body: "This also lands on squares with our own pieces. A knight can only move to an empty square or take an opponent's piece.",
+    v2: [16, 18],
+    body: "**Bug:** this also lands on squares with our own pieces. A knight can only move to an empty square or take an opponent's piece.",
+  },
+  {
+    key: "test",
+    path: "test/knight.test.ts",
+    v1: [5, 8],
+    v2: [5, 8],
+    body: "The test has the knight alone on the board, so it can't catch the bug above. Put one of its own pieces where it could jump.",
   },
 ];
 
-/** What the reviewer types, on the test, and where it sits after Claude's changes. */
+/** What the reviewer types, and where it sits after Claude's changes. */
 export const REVIEWER_COMMENT = {
-  path: "test/knight.test.ts",
-  line: 8,
-  v2: [10, 13] as [number, number],
-  body: "Add a test for a knight in the corner.",
+  path: "src/moves/knight.ts",
+  line: 4,
+  v2: [4, 4] as [number, number],
+  body: "Let's call this `KNIGHT_JUMPS`, so it reads well next to the other pieces' moves.",
 };
 
 /** Claude's answers, by the comment they answer (`reviewer` for the reviewer's). */
 export const CLAUDE_REPLIES: Record<string, string> = {
-  board: "Good catch. Jumps that leave the board are skipped now, so a knight in the corner only gets its two real moves.",
-  own: "Fixed: squares with our own pieces are skipped, so the knight can still take the opponent's pieces but never its own.",
-  reviewer: "Added `a knight in the corner has two moves`: from a1 the knight can only reach b3 and c2.",
+  own: "Fixed: squares with our own pieces are skipped now, so the knight can still take the opponent's pieces but never its own.",
+  test: "Added `a knight next to its own pawn can't take it`, which fails without the fix.",
+  reviewer: "Renamed it to `KNIGHT_JUMPS`.",
 };
 
 export const COMMITS = {
   v1: "Generate knight moves",
-  v2: "Skip squares off the board or with our own pieces",
+  v2: "Keep knights off their own pieces",
 };
+
+/** What Codex prints in the terminal as it works on the pasted prompt, one step at a time. */
+export const CODEX_STEPS: { title: string; detail: string; output: string }[] = [
+  { title: "Ran", detail: `piccolo -C ${WORKTREE} guide --request 1`, output: "# Reviewing feat/knight-moves  … +18 lines" },
+  { title: "Explored", detail: "", output: "Read knight.ts, knight.test.ts, board.ts" },
+  { title: "Ran", detail: "piccolo comment --as codex src/moves/knight.ts:15 …", output: "Commented on src/moves/knight.ts:15 (#1)." },
+  { title: "Ran", detail: "piccolo comment --as codex test/knight.test.ts:5-8 …", output: "Commented on test/knight.test.ts:5-8 (#2)." },
+];

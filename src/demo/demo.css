@@ -7,9 +7,16 @@ html[data-demo] body {
     linear-gradient(160deg, #0b1020, #10151f 55%, #0a0d14);
 }
 
+/* The window's margins, with room for the captions below. */
+html[data-demo] {
+  --demo-top: 24px;
+  --demo-side: 32px;
+  --demo-bottom: 76px;
+}
+
 html[data-demo] #root {
   position: fixed;
-  inset: 40px 60px 100px;
+  inset: var(--demo-top) var(--demo-side) var(--demo-bottom);
   height: auto;
   overflow: hidden;
   border-radius: 12px;
@@ -21,8 +28,8 @@ html[data-demo] #root {
 
 .demo-traffic-lights {
   position: fixed;
-  top: 59px;
-  left: 79px;
+  top: calc(var(--demo-top) + 19px);
+  left: calc(var(--demo-side) + 19px);
   z-index: 10;
   display: flex;
   gap: 8px;
@@ -67,9 +74,9 @@ html[data-demo] #root {
 .demo-click {
   position: fixed;
   z-index: 2147483646;
-  width: 44px;
-  height: 44px;
-  margin: -22px 0 0 -22px;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
   border-radius: 50%;
   border: 3px solid rgb(68 147 248 / 0.9);
   background: rgb(68 147 248 / 0.25);
@@ -83,6 +90,201 @@ html[data-demo] #root {
   }
   to {
     scale: 1.3;
+    opacity: 0;
+  }
+}
+
+/* The app's traffic lights grey out while another window is in front, as on macOS. */
+html[data-demo-terminal-front] .demo-traffic-lights span {
+  background: #4a4f57;
+}
+
+/* A terminal window running Codex (terminal.ts), behind the app until it's opened. */
+.demo-terminal {
+  position: fixed;
+  top: 17%;
+  left: 17%;
+  z-index: -1;
+  display: flex;
+  flex-direction: column;
+  width: 66%;
+  height: 66%;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #15171c;
+  color: #d6d9de;
+  font: 16px/1.55 var(--font-mono);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.12),
+    0 30px 80px rgb(0 0 0 / 0.6);
+  opacity: 0;
+  outline: none;
+}
+.demo-terminal.open {
+  opacity: 1;
+}
+.demo-terminal.front {
+  z-index: 20;
+  animation: demo-terminal-in 220ms ease-out;
+}
+@keyframes demo-terminal-in {
+  from {
+    scale: 0.97;
+    opacity: 0.4;
+  }
+}
+.demo-terminal-bar {
+  position: relative;
+  display: grid;
+  height: 34px;
+  flex-shrink: 0;
+  place-items: center;
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
+  background: #24272e;
+  color: #9aa0a9;
+  font: 600 14px var(--font-sans);
+}
+.demo-terminal-lights {
+  position: absolute;
+  top: 11px;
+  left: 12px;
+  display: flex;
+  gap: 8px;
+}
+.demo-terminal-lights span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #4a4f57;
+}
+.demo-terminal.front .demo-terminal-lights span:nth-child(1) {
+  background: #ff5f57;
+}
+.demo-terminal.front .demo-terminal-lights span:nth-child(2) {
+  background: #febc2e;
+}
+.demo-terminal.front .demo-terminal-lights span:nth-child(3) {
+  background: #28c840;
+}
+.demo-terminal-screen {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  padding: 14px 18px 12px;
+  white-space: pre-wrap;
+}
+.demo-terminal b {
+  font-weight: 700;
+}
+.demo-terminal .dim {
+  color: #7d838c;
+}
+.demo-terminal .fg {
+  color: #d6d9de;
+}
+.demo-terminal .cyan {
+  color: #56c8d8;
+}
+.demo-terminal .green {
+  color: #5fd068;
+}
+.demo-codex-banner {
+  align-self: flex-start;
+  padding: 2px 14px;
+  border: 1px solid #4a4f57;
+  border-radius: 6px;
+}
+.demo-codex-tips {
+  margin: 14px 0 0 2px;
+}
+.demo-codex-history {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+  overflow: hidden;
+  padding-bottom: 12px;
+}
+.demo-codex-message {
+  display: flex;
+  gap: 10px;
+  margin: 0 -18px;
+  padding: 8px 18px;
+  background: #22252b;
+}
+.demo-codex-step {
+  animation: demo-codex-line 200ms ease-out;
+}
+@keyframes demo-codex-line {
+  from {
+    opacity: 0;
+  }
+}
+.demo-codex-working {
+  margin-bottom: 8px;
+}
+.demo-codex-shimmer {
+  background: linear-gradient(90deg, #7d838c 0%, #f0f2f5 50%, #7d838c 100%) 0 0 / 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: demo-shimmer 1.6s linear infinite;
+}
+@keyframes demo-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.demo-codex-composer {
+  display: flex;
+  min-height: 52px;
+  gap: 10px;
+  margin: 0 -18px;
+  padding: 14px 18px;
+  background: #22252b;
+}
+.demo-terminal.front .demo-codex-composer [data-input]::after {
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  height: 1.15em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: #d6d9de;
+}
+.demo-codex-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 14.5px;
+}
+
+/* An outline around what's about to be used (`demoHighlight` in index.ts). */
+.demo-highlight {
+  position: fixed;
+  z-index: 2147483645;
+  border: 2px solid rgb(68 147 248);
+  border-radius: 9px;
+  box-shadow:
+    0 0 0 4px rgb(68 147 248 / 0.25),
+    0 0 28px rgb(68 147 248 / 0.55);
+  pointer-events: none;
+  animation: demo-highlight-in 260ms ease-out;
+}
+.demo-highlight.out {
+  animation: demo-highlight-out 260ms ease-in forwards;
+}
+@keyframes demo-highlight-in {
+  from {
+    scale: 1.25;
+    opacity: 0;
+  }
+}
+@keyframes demo-highlight-out {
+  to {
+    scale: 1.08;
     opacity: 0;
   }
 }

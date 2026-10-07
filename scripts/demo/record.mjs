@@ -2,8 +2,8 @@
 // Records the README demo: `pnpm demo` → docs/demo.mp4.
 //
 // The browser build's demo mode (src/demo) stands in for the agents; this script plays the
-// reviewer with a real mouse and keyboard, captures the page at 2x, then frames the capture with
-// camera moves and captions. Edit the scenes below to change the story's pacing, and
+// reviewer with a real mouse and keyboard, captures the page at 2x, then adds captions and
+// fast-forwards the routine parts. The whole window stays in view: highlights point things out. Edit the scenes below to change the story's pacing, and
 // src/demo/story.ts to change its code and comments.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -14,12 +14,19 @@ import { createServer } from "vite";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const OUT_FILE = path.join(ROOT, "docs/demo.mp4");
-/** The page, in CSS pixels; it's captured at twice that. Wide enough for the toolbar's labels. */
-const VIEW = { width: 1680, height: 1050 };
+/**
+ * The page, in CSS pixels; it's captured at twice that. Small, so the app is large enough in the
+ * video to read at the README's width; src/demo narrows its panels so the toolbar keeps its labels.
+ */
+const VIEW = { width: 1280, height: 800 };
 const SCALE = 2;
 /** The video. Same aspect ratio as the page. */
 const OUT = { width: 1920, height: 1200, fps: 30 };
-const WIDE = { x: 0, y: 0, w: VIEW.width, h: VIEW.height };
+
+/** A point on the page, as fractions of its size. */
+const at = (fx, fy) => ({ x: VIEW.width * fx, y: VIEW.height * fy });
+/** Beside the diff, out of the way of what happens in it. */
+const aside = () => ({ x: VIEW.width - 90, y: VIEW.height * 0.78 });
 
 const now = () => Date.now() / 1000;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -39,12 +46,14 @@ await server.listen();
 // Headless Chromium captures at 1x unless the device scale is forced.
 const browser = await chromium.launch({ args: [`--force-device-scale-factor=${SCALE}`] });
 const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: SCALE, colorScheme: "dark" });
+// The reviewer copies a prompt in the app and pastes it into the demo's terminal.
+await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://localhost:1431" });
 const page = await context.newPage();
 page.on("pageerror", (error) => console.error("Page error:", error.message));
 await page.goto("http://localhost:1431/?demo");
 await page.waitForFunction(() => window.demo && document.querySelector("[data-file-path]"));
 await page.evaluate(() => document.fonts.ready);
-let mouse = { x: 900, y: 600 };
+let mouse = at(0.54, 0.57);
 await page.mouse.move(mouse.x, mouse.y);
 await sleep(800);
 
@@ -59,36 +68,19 @@ cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
 });
 await cdp.send("Page.startScreencast", { format: "jpeg", quality: 95, maxWidth: VIEW.width * SCALE, maxHeight: VIEW.height * SCALE });
 
-/** Camera moves and captions, timed like the frames. */
-const shots = [];
+/** Captions, timed like the frames. */
 const captions = [];
 
 /** How fast the video plays from here on: marketing time, fast-forwarding the routine parts. */
 const paces = [];
 
-const camera = (rect, ms = 650) => shots.push({ t: now(), rect, ms });
 const caption = (text) => captions.push({ t: now(), text });
 const pace = (rate) => paces.push({ t: now(), rate });
-
-/** A camera rectangle around `box` (CSS pixels) at `zoom`, kept inside the page. */
-function around(box, zoom, { dx = 0, dy = 0 } = {}) {
-  const w = VIEW.width / zoom;
-  const h = VIEW.height / zoom;
-  const cx = box.x + box.width / 2 + dx;
-  const cy = box.y + box.height / 2 + dy;
-  return { x: clamp(cx - w / 2, 0, VIEW.width - w), y: clamp(cy - h / 2, 0, VIEW.height - h), w, h };
-}
 
 async function box(target) {
   const b = await target.boundingBox();
   if (!b) throw new Error(`Not on screen: ${target}`);
   return b;
-}
-
-/** Points the camera at `target` (a locator or a box). */
-async function look(target, zoom, options = {}) {
-  const b = typeof target.boundingBox === "function" ? await box(target) : target;
-  camera(around(b, zoom, options), options.ms);
 }
 
 /** Glides the pointer to `target` (a locator or a point) along an eased path. */
@@ -124,10 +116,19 @@ async function click(target, options) {
   await sleep(60);
 }
 
-/** A click the viewer should notice: at normal speed, after a beat of hovering. */
-async function press(target) {
+/**
+ * Outlines `target` (a locator or a box) for `ms`, so the viewer sees what's about to change.
+ */
+async function highlight(target, ms = 1300) {
+  const b = typeof target.boundingBox === "function" ? await box(target) : target;
+  await page.evaluate(({ b, ms }) => window.demoHighlight(b, ms), { b, ms });
+}
+
+/** A click the viewer should notice: at normal speed, after a beat of hovering, outlined if `outline`. */
+async function press(target, { outline = false } = {}) {
   const rate = paces.at(-1)?.rate ?? 1;
   pace(1);
+  if (outline) await highlight(target);
   await moveTo(target);
   await sleep(300);
   await click(target);
@@ -164,6 +165,23 @@ async function scrollTo(target, y, ms) {
   await scrollDiff(b.y - y, ms);
 }
 
+/** The box of the first `word` in `line`'s text (CSS pixels). */
+function wordBox(line, word) {
+  return line.evaluate((el, word) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.textContent.search(new RegExp(`\\b${word}\\b`));
+      if (at === -1) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + word.length);
+      const { x, y, width, height } = range.getBoundingClientRect();
+      return { x, y, width, height };
+    }
+    throw new Error(`No ${word} in the line`);
+  }, word);
+}
+
 /** Has an agent do something (see `demo` in src/demo/index.ts). */
 const agent = (action, ...args) => page.evaluate(([action, args]) => window.demo[action](...args), [action, args]);
 
@@ -179,79 +197,122 @@ try {
   const header = page.locator("main header");
   const agents = header.getByRole("button", { name: "Agents on this branch" });
   const review = header.getByRole("button", { name: "Review", exact: true });
+  const knight = "src/moves/knight.ts";
+  const test = "test/knight.test.ts";
+
+  const pane = await box(diff);
 
   pace(1);
   caption("Review your agents' work like a pull request");
   await sleep(1300);
   pace(1.6);
 
-  // 1. Claude has added knight moves in a worktree of its own, and is still connected to it.
+  // 1. Claude has added knight moves in a worktree of its own.
   caption("Claude adds knight moves to a chess engine");
-  await moveTo({ x: 1100, y: 620 });
-  await look(diff, 1.45, { dy: -20 });
-  await sleep(700);
-  caption("Claude and Codex are connected to it");
-  await look(agents, 2.8, { dx: -220, dy: 110 });
-  await moveTo(agents);
+  await moveTo(at(0.65, 0.59));
+  await sleep(1300);
+
+  // 2. ⌘-click a name to see where it's defined, outside the diff, then come back.
+  caption("⌘-click to jump to a definition");
+  await moveTo(at(0.68, 0.67), { ms: 300 });
+  const name = await wordBox(fileDiff(knight).locator('[data-line="14"]'), "square");
+  const onName = { x: name.x + name.width / 2, y: name.y + name.height * 0.6 };
+  await moveTo(onName);
+  await sleep(250);
+  pace(1);
+  await page.keyboard.down("Meta");
+  await sleep(350);
+  await click(onName);
+  await page.keyboard.up("Meta");
+  const definition = page.getByRole("dialog", { name: /Where square is defined/ }).locator("[data-hit]").first();
+  await definition.waitFor();
+  pace(1.6);
+  await sleep(300);
+  await press(definition);
+  await page.locator("[data-line]", { hasText: "square(file: number, rank: number)" }).first().waitFor();
+  await moveTo({ x: pane.x + pane.width - 60, y: pane.y + pane.height - 120 }, { ms: 250 });
   await sleep(1100);
+  await click(page.getByRole("button", { name: "Back (⌘[)" }));
 
-  // 2. Ask Codex for a review: it reviewed before, so Review goes straight to it.
-  caption("Ask Codex for a review");
-  await press(review);
-  await agent("codexStarts");
-  await sleep(600);
+  // 3. Only Claude is on the branch, so Review offers a prompt to copy for any agent.
+  caption("Copy a review prompt for any agent");
+  await press(review, { outline: true });
+  await press(page.getByRole("menuitem", { name: /Copy prompt/ }));
+  await sleep(300);
 
-  // 3. Codex's comments land on the lines they're about.
-  caption("Codex comments on the lines");
-  await moveTo({ x: 1150, y: 700 }, { ms: 300 });
-  await look(diff, 1.45, { dy: -20 });
-  await agent("codexComments", "board");
-  await sleep(700);
-  await agent("codexComments", "own");
+  // 4. Paste it into Codex, running in a terminal.
+  caption("Paste it into Codex");
+  await agent("openTerminal");
+  const terminal = page.locator(".demo-terminal");
   await sleep(500);
-  await agent("codexFinishes");
-  const offBoard = card("aren't skipped");
-  await look(offBoard, 2, { dy: 40 });
+  await click(terminal.locator(".demo-codex-composer"));
+  await sleep(250);
   pace(1.2);
-  await sleep(1500);
+  await page.keyboard.press("Meta+V");
+  await sleep(1100);
+  await page.keyboard.press("Enter");
+  await sleep(600);
+  await agent("codexSteps", 1);
+  await agent("codexJoins");
+  await sleep(700);
+  await agent("codexSteps", 1);
+  await sleep(900);
   pace(1.6);
 
-  // 4. The reviewer adds a comment of their own.
+  // 5. Back in Piccolo, Codex is on the branch, and its comments land on the lines.
+  caption("Codex joins and comments on the lines");
+  // On the sidebar, beside the terminal.
+  await click(at(0.1, 0.6));
+  await highlight(agents, 1500);
+  await moveTo(aside(), { ms: 300 });
+  await sleep(900);
+  await agent("codexSteps", 1);
+  await agent("codexComments", "own");
+  await sleep(700);
+  await agent("codexSteps", 1);
+  await agent("codexComments", "test");
+  await sleep(500);
+  await agent("codexFinishes");
+  await sleep(500);
+
+  // 6. Agree with one of Codex's comments, and add a comment of your own.
+  caption("Give it a thumbs up");
+  const own = card("own pieces");
+  pace(1.2);
+  await sleep(1300);
+  pace(1.6);
+  await press(own.getByRole("button", { name: "Thumbs up" }));
+  await sleep(300);
   caption("Add your own comments");
-  const lastLine = fileDiff("test/knight.test.ts").locator('[data-column-number="8"]').first();
-  await scrollTo(lastLine, 430, 600);
-  await look(lastLine, 2, { dx: 380, dy: 80 });
-  await moveTo(lastLine);
-  await click(fileDiff("test/knight.test.ts").locator("[data-utility-button]"));
-  await type("Add a test for a knight in the corner.");
+  const jumps = fileDiff(knight).locator('[data-column-number="4"]').first();
+  await moveTo(jumps);
+  await click(fileDiff(knight).locator("[data-utility-button]"));
+  await type("Let's call this `KNIGHT_JUMPS`, so it reads well next to the other pieces' moves.");
   await sleep(250);
   await press(page.getByRole("button", { name: "Comment", exact: true }));
 
-  // 5. Send the comments back to Claude.
-  caption("Send them to Claude");
-  const address = header.getByRole("button", { name: /^Address/ });
-  await look(address, 2.8, { dx: -200, dy: 110 });
-  await press(address);
+  // 7. Send every comment to Claude.
+  caption("Request changes from Claude");
+  await sleep(400);
+  const requestChanges = header.getByRole("button", { name: /^Request changes/ });
+  await press(requestChanges, { outline: true });
   await agent("claudeWorks");
   await sleep(700);
 
-  // 6. Claude makes the changes and answers each comment, the reviewer's last.
+  // 8. Claude makes the changes and answers each comment.
   caption("Claude makes the changes and replies");
   // Out of the way of the replies, beside the diff.
-  await moveTo({ x: 1590, y: 820 }, { ms: 300 });
-  camera(WIDE, 600);
+  await moveTo(aside(), { ms: 300 });
   await agent("claudeFixes");
   await scrollDiff(-2000, 400);
-  await look(diff, 1.45, { dy: -20 });
-  await agent("claudeReplies", "board");
+  await agent("claudeReplies", "reviewer");
   await sleep(500);
   await agent("claudeReplies", "own");
-  await sleep(500);
-  const newTest = fileDiff("test/knight.test.ts").locator('[data-column-number="10"]').first();
-  await scrollTo(newTest, 300, 700);
-  await look(newTest, 1.8, { dx: 380, dy: 160 });
+  await sleep(1000);
+  const newTest = fileDiff(test).locator('[data-column-number="10"]').first();
+  await scrollTo(newTest, VIEW.height * 0.5, 700);
   await sleep(300);
-  await agent("claudeReplies", "reviewer");
+  await agent("claudeReplies", "test");
   await agent("claudeDone");
   pace(1);
   await sleep(2800);
@@ -272,26 +333,6 @@ await server.close();
 console.log(`Recorded ${frames.length} frames over ${(end - start).toFixed(1)}s`);
 
 // --- Framing --------------------------------------------------------------------------------
-
-const lerp = (a, b, p) => a + (b - a) * p;
-/** Zooms change size exponentially, so they feel even. */
-function mix(a, b, p) {
-  const w = a.w * (b.w / a.w) ** p;
-  const h = (w * VIEW.height) / VIEW.width;
-  const cx = lerp(a.x + a.w / 2, b.x + b.w / 2, p);
-  const cy = lerp(a.y + a.h / 2, b.y + b.h / 2, p);
-  return { x: cx - w / 2, y: cy - h / 2, w, h };
-}
-/** Where the camera is at `t`, considering the first `upto` moves. */
-function cameraAt(t, upto = shots.length) {
-  let rect = WIDE;
-  for (let i = 0; i < upto && shots[i].t <= t; i++) {
-    rect = mix(shots[i].from, shots[i].rect, ease(clamp((t - shots[i].t) / (shots[i].ms / 1000), 0, 1)));
-  }
-  return rect;
-}
-// A move starts from wherever the camera was, which may be partway through the one before.
-for (let i = 0; i < shots.length; i++) shots[i].from = cameraAt(shots[i].t, i);
 
 /** The caption at `t`, and how visible it is: it fades in, and out before the next one. */
 function captionAt(t) {
@@ -323,15 +364,10 @@ const ffmpeg = spawn(
 );
 const finished = new Promise((resolve, reject) => ffmpeg.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited with ${code}`)))));
 
-/** What to draw at `t`: the latest frame captured by then, where the camera is, the caption. */
+/** What to draw at `t`: the latest frame captured by then, and the caption. */
 function sceneAt(t) {
   const index = Math.max(0, frames.findLastIndex((f) => f.t <= t));
-  const cam = cameraAt(t);
-  return {
-    src: `/${path.basename(frames[index].file)}`,
-    crop: { x: cam.x * SCALE, y: cam.y * SCALE, w: cam.w * SCALE, h: cam.h * SCALE },
-    caption: captionAt(t),
-  };
+  return { src: `/${path.basename(frames[index].file)}`, caption: captionAt(t) };
 }
 
 // The moment each video frame shows, sped up as `pace` says.
@@ -351,7 +387,7 @@ fs.rmSync(frameDir, { recursive: true, force: true });
 console.log(`\rWrote ${path.relative(ROOT, OUT_FILE)}: ${(total / OUT.fps).toFixed(1)}s, ${(fs.statSync(OUT_FILE).size / 1e6).toFixed(1)} MB`);
 
 
-/** The page that draws each video frame: a crop of a captured frame, then the caption. */
+/** The page that draws each video frame: a captured frame, then the caption. */
 function compositorPage() {
   return /* html */ `<!doctype html>
 <style>@font-face { font-family: Inter; src: url(/inter.woff2); font-weight: 100 900; }</style>
@@ -368,10 +404,10 @@ function compositorPage() {
     }
     return loaded.img;
   }
-  async function draw(target, { src, crop, caption }) {
+  async function draw(target, { src, caption }) {
     const c = target.getContext("2d");
     c.imageSmoothingQuality = "high";
-    c.drawImage(await image(src), crop.x, crop.y, crop.w, crop.h, 0, 0, target.width, target.height);
+    c.drawImage(await image(src), 0, 0, target.width, target.height);
     if (!caption) return;
     c.save();
     c.globalAlpha = caption.alpha;
