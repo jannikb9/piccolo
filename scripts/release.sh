@@ -6,7 +6,8 @@
 # Needs: rustup targets aarch64-apple-darwin and x86_64-apple-darwin, `gh` logged in, a
 # "## <version> — <date>" section in CHANGELOG.md, and the updater's signing key at
 # ~/.tauri/piccolo.key (its public half is in tauri.conf.json; installed apps only accept updates
-# signed with it).
+# signed with it). It asks for the key's passphrase (scripts/signing-key-passphrase.sh sets it),
+# unless TAURI_SIGNING_PRIVATE_KEY_PASSWORD has it.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -31,13 +32,44 @@ if [ ! -f "$key" ]; then
   exit 1
 fi
 
+# Older pnpm ignores minimumReleaseAge in pnpm-workspace.yaml.
+case "$(pnpm --version)" in
+  10.1[6-9].* | 10.[2-9][0-9].* | 1[1-9].*) ;;
+  *)
+    echo "pnpm $(pnpm --version) is too old: the release needs 10.16 or later (package.json's packageManager)." >&2
+    exit 1
+    ;;
+esac
+
+if [ -z "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD+set}" ]; then
+  if [ ! -t 0 ]; then
+    echo "Run this in a terminal: it asks for the signing key's passphrase." >&2
+    exit 1
+  fi
+  printf "Passphrase for %s: " "$key"
+  trap 'stty echo' EXIT INT TERM
+  stty -echo
+  read -r TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+  stty echo
+  echo
+fi
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# A wrong passphrase fails now, not after the build.
+check="$(mktemp -d)"
+echo "passphrase check" > "$check/file"
+if ! pnpm tauri signer sign -f "$key" "$check/file" >/dev/null 2>&1; then
+  rm -rf "$check"
+  echo "That passphrase doesn't open $key." >&2
+  exit 1
+fi
+rm -rf "$check"
+
 # Build exactly the locked dependencies: a release must not pick up a newly published version.
 pnpm install --frozen-lockfile
 
-# Tauri reads the key from its path. A passphrase-protected key takes its passphrase from
-# TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
-TAURI_SIGNING_PRIVATE_KEY="$key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD-}" \
-  pnpm tauri build --target universal-apple-darwin --bundles app \
+# The build reads the key from its path (`signer sign` above takes it only as -f).
+export TAURI_SIGNING_PRIVATE_KEY="$key"
+pnpm tauri build --target universal-apple-darwin --bundles app \
   --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
 
 bundle="src-tauri/target/universal-apple-darwin/release/bundle"

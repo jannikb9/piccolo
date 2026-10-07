@@ -1,0 +1,3 @@
+# Dependencies resolve to versions at least a day old (minutes): hijacked releases are usually
+# caught and pulled within hours.
+minimumReleaseAge: 1440
