@@ -1,7 +1,7 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronDown, Copy, Eye, LoaderCircle } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useCopyPrompt, useRequestReview, useSendComments, useSessionActivity, useSessions } from "../lib/queries";
 import { agentLabel, cn, modelLabel } from "../lib/utils";
 import type { AgentSession, ReviewRequest, SessionActivity, Worktree } from "../types";
@@ -114,13 +114,6 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
 
   if (marks.length === 0) return null;
 
-  // Room for the marks fanned out, so the toolbar doesn't shift as they spread; collapsed, they sit
-  // at its right end.
-  const size = 24;
-  const spread = 4;
-  const overlap = -9;
-  const width = marks.length * size + (marks.length - 1) * spread;
-
   return (
     <Popover.Root
       open={open}
@@ -147,22 +140,21 @@ export function AgentsButton({ worktree }: { worktree: Worktree }) {
           }}
           className="group/agents flex h-7 shrink-0 items-center rounded-md px-1"
         >
-          <span className="flex justify-end" style={{ width }}>
-            {marks.map(([agent, state], i) => (
-              <span
-                key={agent}
-                style={{ zIndex: marks.length - i, "--overlap": `${overlap}px`, "--spread": `${spread}px` } as CSSProperties}
-                className={cn(
-                  "relative grid size-6 shrink-0 place-items-center rounded-full bg-bg-raised ring-2 ring-bg transition-[margin] duration-200 ease-out",
-                  i > 0 && "ml-[var(--overlap)] group-hover/agents:ml-[var(--spread)] group-data-[state=open]/agents:ml-[var(--spread)]",
-                )}
-              >
-                <span className="absolute inset-0 rounded-full border border-border" />
-                <AgentIcon name={agent} className="size-3.5" />
-                <StateBadge state={state} />
-              </span>
-            ))}
-          </span>
+          {/* Overlapped at rest; hovering fans the marks out and the toolbar makes room for them. */}
+          {marks.map(([agent, state], i) => (
+            <span
+              key={agent}
+              style={{ zIndex: marks.length - i }}
+              className={cn(
+                "relative grid size-6 shrink-0 place-items-center rounded-full bg-bg-raised ring-2 ring-bg transition-[margin] duration-200 ease-out",
+                i > 0 && "-ml-[9px] group-hover/agents:ml-1 group-data-[state=open]/agents:ml-1",
+              )}
+            >
+              <span className="absolute inset-0 rounded-full border border-border" />
+              <AgentIcon name={agent} className="size-3.5" />
+              <StateBadge state={state} />
+            </span>
+          ))}
         </button>
       </Popover.Trigger>
       <Popover.Portal>
