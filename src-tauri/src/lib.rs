@@ -72,7 +72,7 @@ pub fn run() {
             navigate::file_text,
             updates::check_update,
             updates::install_update,
-            worktrunk::worktrunk_installed,
+            worktrunk::worktrunk_status,
             worktrunk::install_worktrunk,
         ])
         .run(tauri::generate_context!())

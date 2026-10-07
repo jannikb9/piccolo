@@ -435,13 +435,13 @@ export function useLiveGitData() {
   }, [client]);
 }
 
-/** Whether worktrunk is installed (`null` until known), and installing it. */
+/** Whether worktrunk is installed and Homebrew is there to install it (`null` until known), and installing it. */
 export function useWorktrunk() {
   const client = useQueryClient();
-  const installed = useQuery({ queryKey: keys.worktrunk, queryFn: api.worktrunkInstalled, staleTime: Infinity });
+  const status = useQuery({ queryKey: keys.worktrunk, queryFn: api.worktrunkStatus, staleTime: Infinity });
   const install = useMutation({
     mutationFn: api.installWorktrunk,
     onSuccess: () => client.invalidateQueries({ queryKey: keys.worktrunk }),
   });
-  return { installed: installed.data ?? null, install };
+  return { installed: status.data?.installed ?? null, homebrew: status.data?.homebrew ?? null, install };
 }

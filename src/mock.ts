@@ -23,6 +23,7 @@ import type {
   SymbolSearch,
   Thread,
   WorktreeStats,
+  WorktrunkStatus,
 } from "./types";
 
 const minutesAgo = (m: number) => Date.now() - m * 60_000;
@@ -833,10 +834,14 @@ export function mockCheckUpdate(): Promise<AvailableUpdate | null> {
   return delay({ version, currentVersion: previous ?? "0.0.0", changelog: changelog.slice(changelog.search(/^## /m)) });
 }
 
-/** Installed, unless `localStorage["mock-worktrunk"] = "missing"` (which shows the install offer). */
-let mockWorktrunk = localStorage.getItem("mock-worktrunk") !== "missing";
+/**
+ * Installed, unless `localStorage["mock-worktrunk"]` is "missing" (which shows the install offer)
+ * or "no-brew" (the offer, without Homebrew to install with).
+ */
+let mockWorktrunk = !["missing", "no-brew"].includes(localStorage.getItem("mock-worktrunk") ?? "");
+const mockHomebrew = localStorage.getItem("mock-worktrunk") !== "no-brew";
 
-export const mockWorktrunkInstalled = () => delay(mockWorktrunk);
+export const mockWorktrunkStatus = (): Promise<WorktrunkStatus> => delay({ installed: mockWorktrunk, homebrew: mockHomebrew });
 
 export function mockInstallWorktrunk(): Promise<void> {
   return new Promise((resolve) =>

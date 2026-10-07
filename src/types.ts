@@ -255,3 +255,9 @@ export type DownloadProgress = {
   /** Bytes in the download; `null` when the server doesn't say. */
   total: number | null;
 };
+
+export type WorktrunkStatus = {
+  installed: boolean;
+  /** Whether Homebrew is there to install worktrunk with. */
+  homebrew: boolean;
+};

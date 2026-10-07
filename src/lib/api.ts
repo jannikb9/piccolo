@@ -10,7 +10,7 @@ import {
   mockCheckUpdate,
   mockInstallUpdate,
   mockInstallWorktrunk,
-  mockWorktrunkInstalled,
+  mockWorktrunkStatus,
   mockAddWorktree,
   mockChangedFiles,
   mockCommits,
@@ -55,6 +55,7 @@ import type {
   SymbolSearch,
   Thread,
   WorktreeStats,
+  WorktrunkStatus,
 } from "../types";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
@@ -197,10 +198,10 @@ export const api = {
     return invoke("install_update", { onProgress: channel });
   },
 
-  /** Whether worktrunk (`wt`), which Piccolo uses for creating and removing worktrees, is installed. */
-  worktrunkInstalled: (): Promise<boolean> => (isTauri ? invoke("worktrunk_installed") : mockWorktrunkInstalled()),
+  /** Whether worktrunk (`wt`), which Piccolo uses for creating and removing worktrees, is installed, and whether Homebrew is there to install it. */
+  worktrunkStatus: (): Promise<WorktrunkStatus> => (isTauri ? invoke("worktrunk_status") : mockWorktrunkStatus()),
 
-  /** `brew install worktrunk`, or without Homebrew a download of `wt` into `~/.local/bin`. */
+  /** `brew install worktrunk`. */
   installWorktrunk: (): Promise<void> => (isTauri ? invoke("install_worktrunk") : mockInstallWorktrunk()),
 
   appVersion: (): Promise<string> => (isTauri ? getVersion() : Promise.resolve("0.0.0")),

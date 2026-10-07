@@ -149,7 +149,9 @@ pub fn fetch(repo: &Path) -> Result<()> {
 ///
 /// Uses worktrunk's `wt switch` when it's installed, so the worktree lands where the user's other
 /// worktrees do and the project's approved hooks run (e.g. installing dependencies). Hooks that
-/// still need approval are skipped: the app can't ask. Without worktrunk, `git worktree add` into
+/// still need approval are skipped: the app can't ask. A branch new to this clone skips them all:
+/// the hooks would run in its worktree, on its code (`package.json` scripts, `build.rs`…), which is
+/// someone else's until reviewed. Without worktrunk, `git worktree add` into
 /// `<repo>.<branch>` next to the repository, like worktrunk's default.
 pub fn add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<String> {
     // Git refuses such branch names; one from elsewhere would be read as an option.
@@ -159,7 +161,9 @@ pub fn add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<Strin
     match crate::worktrunk::find() {
         Some(wt) => {
             let switch = |extra: &[&str]| run_worktrunk(&wt, repo, &[&["switch", branch, "--no-cd"], extra].concat());
-            if let Err(e) = switch(&[]) {
+            if !has_local_branch(repo, branch) {
+                switch(&["--no-hooks"])?;
+            } else if let Err(e) = switch(&[]) {
                 if !e.contains("approval") {
                     return Err(e);
                 }
@@ -176,6 +180,10 @@ pub fn add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<Strin
         .ok_or_else(|| format!("{branch} wasn't checked out"))
 }
 
+fn has_local_branch(repo: &Path, branch: &str) -> bool {
+    git(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok()
+}
+
 fn git_add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<()> {
     if list_worktrees(repo)?.iter().any(|e| e.branch.as_deref() == Some(branch)) {
         return Ok(());
@@ -183,8 +191,7 @@ fn git_add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<()> {
     let name = repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let path = repo.with_file_name(format!("{name}.{}", branch.replace('/', "-")));
     let path = path_str(&path)?;
-    let local = git(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok();
-    if local {
+    if has_local_branch(repo, branch) {
         git(repo, &["worktree", "add", "--quiet", "--end-of-options", path, branch])?;
     } else {
         git(repo, &["worktree", "add", "--quiet", "--track", "-b", branch, "--end-of-options", path, remote_ref])?;
@@ -801,18 +808,33 @@ pub fn blobs(wt: &Path, specs: &[String]) -> Result<Vec<Option<String>>> {
     Ok(blobs)
 }
 
-/// `path` in the worktree `wt`. `None` for an absolute path or one with `..`, which git never
-/// reports: it would point outside the worktree.
+/// `path` in the worktree `wt`. `None` for an absolute path, one with `..` or one through a
+/// symlinked folder, none of which git reports: they could point outside the worktree.
 pub fn worktree_file(wt: &Path, path: &str) -> Option<PathBuf> {
     let path = Path::new(path);
-    path.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)).then(|| wt.join(path))
+    if !path.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)) {
+        return None;
+    }
+    let mut dir = wt.to_path_buf();
+    for component in path.parent().into_iter().flat_map(Path::components) {
+        dir.push(component);
+        if fs::symlink_metadata(&dir).ok()?.is_symlink() {
+            return None;
+        }
+    }
+    Some(wt.join(path))
 }
 
 /// Large files are left out of patches; their diffs aren't reviewable line by line anyway.
 const MAX_TEXT_BYTES: u64 = 4 * 1024 * 1024;
 
+/// A symlink reads as where it points, as git stores it: following it could show any file on the
+/// machine, say a contributor's link to `~/.aws/credentials`.
 pub fn read_text(path: &Path) -> Option<String> {
-    let meta = fs::metadata(path).ok()?;
+    let meta = fs::symlink_metadata(path).ok()?;
+    if meta.is_symlink() {
+        return Some(fs::read_link(path).ok()?.to_string_lossy().into_owned());
+    }
     if !meta.is_file() || meta.len() > MAX_TEXT_BYTES {
         return None;
     }
@@ -998,6 +1020,13 @@ mod tests {
         assert_eq!(file_contents(&repo, None, "../secret.txt").unwrap(), None);
         let absolute = root.join("secret.txt");
         assert_eq!(file_contents(&repo, None, absolute.to_str().unwrap()).unwrap(), None);
+
+        // A contributor's symlinks to files outside: the link reads as its target, as git has it,
+        // and nothing is read through a linked folder.
+        std::os::unix::fs::symlink(&absolute, repo.join("link.txt")).unwrap();
+        std::os::unix::fs::symlink(&root, repo.join("linked")).unwrap();
+        assert_eq!(file_contents(&repo, None, "link.txt").unwrap(), Some(absolute.display().to_string()));
+        assert_eq!(file_contents(&repo, None, "linked/secret.txt").unwrap(), None);
 
         assert!(add_worktree(&repo, "--help", "origin/main").is_err());
         assert!(add_worktree(&repo, "feat", "--force").is_err());

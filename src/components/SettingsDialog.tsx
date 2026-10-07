@@ -6,8 +6,7 @@ import { isTauri, onOpenSettings } from "../lib/api";
 import { codeThemes, type CodeThemeId } from "../lib/codeThemes";
 import { useWorktrunk } from "../lib/queries";
 import { useStore } from "../store";
-import { InstallStatus, WORKTRUNK_BLURB } from "./WorktrunkDialog";
-import { Button } from "./ui";
+import { InstallButton, InstallStatus, WORKTRUNK_BLURB } from "./WorktrunkDialog";
 
 /** App settings, opened from the app menu or with ⌘,. */
 export function SettingsDialog() {
@@ -77,7 +76,7 @@ export function SettingsDialog() {
 }
 
 function WorktrunkSetting() {
-  const { installed, install } = useWorktrunk();
+  const { installed, homebrew, install } = useWorktrunk();
   return (
     <section className="border-t border-border-subtle p-4">
       <h3 className="mb-2 text-[12px] font-medium text-fg-subtle">Worktrunk</h3>
@@ -89,9 +88,9 @@ function WorktrunkSetting() {
           </p>
         ) : (
           <>
-            <Button variant="primary" disabled={installed === null || install.isPending} onClick={() => install.mutate()}>
+            <InstallButton homebrew={homebrew} busy={install.isPending} onClick={() => install.mutate()}>
               Install worktrunk
-            </Button>
+            </InstallButton>
             <InstallStatus busy={install.isPending} error={install.error} />
           </>
         )}

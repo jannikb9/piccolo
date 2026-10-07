@@ -1,9 +1,9 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { AlertTriangle, Check, LoaderCircle, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useWorktrunk } from "../lib/queries";
 import { useStore } from "../store";
-import { Button } from "./ui";
+import { Button, Tooltip } from "./ui";
 
 /** The first check waits for the app to settle, and for the update offer, which comes first. */
 const OFFER_DELAY = 2_000;
@@ -42,7 +42,7 @@ export function WorktrunkDialog() {
 }
 
 function WorktrunkContent({ onNever }: { onNever: () => void }) {
-  const { installed, install } = useWorktrunk();
+  const { installed, homebrew, install } = useWorktrunk();
   const done = installed === true;
   const busy = install.isPending;
 
@@ -75,8 +75,7 @@ function WorktrunkContent({ onNever }: { onNever: () => void }) {
         <div className="space-y-2 px-4 py-3 text-[13px] text-fg-muted">
           <p>{WORKTRUNK_BLURB}</p>
           <p className="text-[12px] text-fg-subtle">
-            Installs with Homebrew if you have it. Otherwise it downloads <code>wt</code> from worktrunk's GitHub release into{" "}
-            <code>~/.local/bin</code>, and your shell setup stays as it is.
+            Installs with Homebrew: <code>brew install worktrunk</code>.
           </p>
         </div>
 
@@ -104,14 +103,44 @@ function WorktrunkContent({ onNever }: { onNever: () => void }) {
               <Dialog.Close asChild>
                 <Button disabled={busy}>Not now</Button>
               </Dialog.Close>
-              <Button variant="primary" data-primary disabled={busy} onClick={() => install.mutate()}>
+              <InstallButton homebrew={homebrew} busy={busy} onClick={() => install.mutate()}>
                 {install.isError ? "Try again" : "Install worktrunk"}
-              </Button>
+              </InstallButton>
             </>
           )}
         </footer>
       </Dialog.Content>
     </Dialog.Portal>
+  );
+}
+
+/**
+ * Installs worktrunk, which needs Homebrew: without it the button is disabled and its tooltip says
+ * why. A disabled button gets no pointer events, so the tooltip hangs on a wrapper.
+ */
+export function InstallButton({
+  homebrew,
+  busy,
+  onClick,
+  children,
+}: {
+  homebrew: boolean | null;
+  busy: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const button = (
+    <Button variant="primary" data-primary disabled={homebrew !== true || busy} onClick={onClick}>
+      {children}
+    </Button>
+  );
+  if (homebrew !== false) return button;
+  return (
+    <Tooltip label="Installing worktrunk needs Homebrew (brew.sh)">
+      <span tabIndex={0} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent">
+        {button}
+      </span>
+    </Tooltip>
   );
 }
 
