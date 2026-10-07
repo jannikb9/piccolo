@@ -14,6 +14,9 @@ cd "$(dirname "$0")/.."
 version="$(node -p 'require("./src-tauri/tauri.conf.json").version')"
 tag="v$version"
 key="$HOME/.tauri/piccolo.key"
+# Only this key signs Piccolo. A key exported for another app (e.g. in ~/.zshrc) would make the
+# signer refuse -f below and could end up signing the build.
+unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PATH
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "Commit your changes first: the release is tagged at HEAD." >&2
@@ -57,9 +60,13 @@ export TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 # A wrong passphrase fails now, not after the build.
 check="$(mktemp -d)"
 echo "passphrase check" > "$check/file"
-if ! pnpm tauri signer sign -f "$key" "$check/file" >/dev/null 2>&1; then
+if ! out="$(pnpm tauri signer sign -f "$key" "$check/file" 2>&1)"; then
   rm -rf "$check"
-  echo "That passphrase doesn't open $key." >&2
+  if printf '%s' "$out" | grep -q "Wrong password"; then
+    echo "That passphrase doesn't open $key." >&2
+  else
+    printf 'Signing a test file with %s failed:\n%s\n' "$key" "$out" >&2
+  fi
   exit 1
 fi
 rm -rf "$check"
