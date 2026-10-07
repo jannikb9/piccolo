@@ -152,7 +152,7 @@ pub fn fetch(repo: &Path) -> Result<()> {
 /// still need approval are skipped: the app can't ask. Without worktrunk, `git worktree add` into
 /// `<repo>.<branch>` next to the repository, like worktrunk's default.
 pub fn add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<String> {
-    match worktrunk() {
+    match crate::worktrunk::find() {
         Some(wt) => {
             let switch = |extra: &[&str]| run_worktrunk(&wt, repo, &[&["switch", branch, "--no-cd"], extra].concat());
             if let Err(e) = switch(&[]) {
@@ -342,7 +342,7 @@ pub fn is_merged(wt: &Path, base: &str) -> bool {
 /// too once it's merged. Otherwise `git worktree remove`, which deletes before returning and
 /// keeps the branch.
 pub fn remove_worktree(repo: &Path, path: &str, force: bool) -> Result<()> {
-    let Some(wt) = worktrunk() else { return git_remove_worktree(repo, path, force) };
+    let Some(wt) = crate::worktrunk::find() else { return git_remove_worktree(repo, path, force) };
     let mut args = vec!["remove"];
     if force {
         args.push("--force");
@@ -369,17 +369,6 @@ fn run_worktrunk(wt: &Path, repo: &Path, args: &[&str]) -> Result<()> {
 /// Apps started from the Dock get a minimal PATH; hooks and credential helpers need the user's tools.
 fn user_path() -> String {
     format!("/opt/homebrew/bin:/usr/local/bin:{}", std::env::var("PATH").unwrap_or_default())
-}
-
-/// worktrunk's `wt`, looked up where package managers install it: apps started from the Dock
-/// don't get the user's shell PATH.
-fn worktrunk() -> Option<PathBuf> {
-    let home = dirs::home_dir().unwrap_or_default();
-    ["/opt/homebrew/bin/wt", "/usr/local/bin/wt"]
-        .map(PathBuf::from)
-        .into_iter()
-        .chain([home.join(".cargo/bin/wt"), home.join(".local/bin/wt")])
-        .find(|p| p.is_file())
 }
 
 fn path_str(path: &Path) -> Result<&str> {

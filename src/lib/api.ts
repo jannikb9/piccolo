@@ -9,6 +9,8 @@ import {
   mockAttachmentData,
   mockCheckUpdate,
   mockInstallUpdate,
+  mockInstallWorktrunk,
+  mockWorktrunkInstalled,
   mockAddWorktree,
   mockChangedFiles,
   mockCommits,
@@ -194,6 +196,12 @@ export const api = {
     channel.onmessage = onProgress;
     return invoke("install_update", { onProgress: channel });
   },
+
+  /** Whether worktrunk (`wt`), which Piccolo uses for creating and removing worktrees, is installed. */
+  worktrunkInstalled: (): Promise<boolean> => (isTauri ? invoke("worktrunk_installed") : mockWorktrunkInstalled()),
+
+  /** `brew install worktrunk`, or without Homebrew a download of `wt` into `~/.local/bin`. */
+  installWorktrunk: (): Promise<void> => (isTauri ? invoke("install_worktrunk") : mockInstallWorktrunk()),
 
   appVersion: (): Promise<string> => (isTauri ? getVersion() : Promise.resolve("0.0.0")),
 };

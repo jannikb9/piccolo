@@ -9,6 +9,7 @@ import { ReviewPane, Welcome } from "./components/ReviewPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { UpdateDialog } from "./components/UpdateDialog";
+import { WorktrunkDialog } from "./components/WorktrunkDialog";
 import { shikiThemes } from "./lib/codeThemes";
 import { onToggleSidebar } from "./lib/api";
 import { hashString } from "./lib/diff";
@@ -131,6 +132,7 @@ export default function App() {
       </Group>
       <SettingsDialog />
       <UpdateDialog />
+      <WorktrunkDialog />
     </TooltipPrimitive.Provider>
   );
 }

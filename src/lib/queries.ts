@@ -42,6 +42,7 @@ export const keys = {
   fileText: (path: string, rev: string | null, file: string) => ["file-text", path, rev, file] as const,
   branches: (repoId: string) => ["branches", repoId] as const,
   fetch: (repoId: string) => ["fetch", repoId] as const,
+  worktrunk: ["worktrunk"] as const,
 };
 
 /** Keeps showing the previous result while switching scope or diff options, but never another worktree's. */
@@ -432,4 +433,15 @@ export function useLiveGitData() {
       offSessions();
     };
   }, [client]);
+}
+
+/** Whether worktrunk is installed (`null` until known), and installing it. */
+export function useWorktrunk() {
+  const client = useQueryClient();
+  const installed = useQuery({ queryKey: keys.worktrunk, queryFn: api.worktrunkInstalled, staleTime: Infinity });
+  const install = useMutation({
+    mutationFn: api.installWorktrunk,
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.worktrunk }),
+  });
+  return { installed: installed.data ?? null, install };
 }

@@ -23,7 +23,7 @@ pub fn search_path() -> &'static [PathBuf] {
         let home = dirs::home_dir().unwrap_or_default();
         let mut dirs = login_shell_path().unwrap_or_default();
         dirs.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
-        dirs.extend([home.join(".local/bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")]);
+        dirs.extend([home.join(".local/bin"), home.join(".cargo/bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")]);
         let mut seen = std::collections::HashSet::new();
         dirs.retain(|d| seen.insert(d.clone()));
         dirs

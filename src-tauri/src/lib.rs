@@ -10,6 +10,7 @@ mod requests;
 mod sessions;
 mod updates;
 mod watch;
+mod worktrunk;
 
 use repos::Repos;
 use tauri::Manager;
@@ -71,6 +72,8 @@ pub fn run() {
             navigate::file_text,
             updates::check_update,
             updates::install_update,
+            worktrunk::worktrunk_installed,
+            worktrunk::install_worktrunk,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

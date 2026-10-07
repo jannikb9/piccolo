@@ -43,5 +43,5 @@ if pgrep -xq piccolo; then
   echo "Piccolo is running: quit and reopen it to use the new version."
 fi
 if ! command -v wt >/dev/null 2>&1; then
-  echo "Optional: install worktrunk (brew install worktrunk) and Piccolo creates worktrees with it."
+  echo "Optional: Piccolo offers to install worktrunk on first launch, and then creates worktrees with it."
 fi

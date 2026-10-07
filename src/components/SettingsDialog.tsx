@@ -1,10 +1,13 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import * as RadioGroup from "@radix-ui/react-radio-group";
-import { X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { isTauri, onOpenSettings } from "../lib/api";
 import { codeThemes, type CodeThemeId } from "../lib/codeThemes";
+import { useWorktrunk } from "../lib/queries";
 import { useStore } from "../store";
+import { InstallStatus, WORKTRUNK_BLURB } from "./WorktrunkDialog";
+import { Button } from "./ui";
 
 /** App settings, opened from the app menu or with ⌘,. */
 export function SettingsDialog() {
@@ -65,10 +68,35 @@ export function SettingsDialog() {
               </RadioGroup.Root>
               <p className="mt-2 text-[12px] text-fg-faint">Light and dark variants follow your system appearance.</p>
             </section>
+            <WorktrunkSetting />
           </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function WorktrunkSetting() {
+  const { installed, install } = useWorktrunk();
+  return (
+    <section className="border-t border-border-subtle p-4">
+      <h3 className="mb-2 text-[12px] font-medium text-fg-subtle">Worktrunk</h3>
+      <p className="text-[12px] text-fg-subtle">{WORKTRUNK_BLURB}</p>
+      <div className="mt-3 flex min-h-7 items-center gap-3">
+        {installed === true ? (
+          <p className="flex items-center gap-1.5 text-[13px] text-fg-muted">
+            <Check className="size-3.5 text-add" strokeWidth={2.5} /> Installed
+          </p>
+        ) : (
+          <>
+            <Button variant="primary" disabled={installed === null || install.isPending} onClick={() => install.mutate()}>
+              Install worktrunk
+            </Button>
+            <InstallStatus busy={install.isPending} error={install.error} />
+          </>
+        )}
+      </div>
+    </section>
   );
 }
 

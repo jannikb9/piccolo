@@ -833,6 +833,20 @@ export function mockCheckUpdate(): Promise<AvailableUpdate | null> {
   return delay({ version, currentVersion: previous ?? "0.0.0", changelog: changelog.slice(changelog.search(/^## /m)) });
 }
 
+/** Installed, unless `localStorage["mock-worktrunk"] = "missing"` (which shows the install offer). */
+let mockWorktrunk = localStorage.getItem("mock-worktrunk") !== "missing";
+
+export const mockWorktrunkInstalled = () => delay(mockWorktrunk);
+
+export function mockInstallWorktrunk(): Promise<void> {
+  return new Promise((resolve) =>
+    setTimeout(() => {
+      mockWorktrunk = true;
+      resolve();
+    }, 2000),
+  );
+}
+
 export function mockInstallUpdate(onProgress: (progress: DownloadProgress) => void): Promise<void> {
   const total = 14_000_000;
   return new Promise((resolve) => {

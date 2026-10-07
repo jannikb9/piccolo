@@ -39,6 +39,8 @@ type State = {
   hideWhitespace: boolean;
   hideImports: boolean;
   codeTheme: CodeThemeId;
+  /** Whether launching offers to install worktrunk when it's missing; "Don't ask again" turns it off. */
+  offerWorktrunk: boolean;
   /** worktreeId → set of viewed file paths */
   viewed: Record<string, PathSet>;
   /**
@@ -75,6 +77,7 @@ type State = {
   toggleHideWhitespace: () => void;
   toggleHideImports: () => void;
   setCodeTheme: (theme: CodeThemeId) => void;
+  setOfferWorktrunk: (offer: boolean) => void;
   toggleViewed: (worktreeId: string, path: string) => void;
   setCollapsed: (worktreeId: string, path: string, collapsed: boolean) => void;
   setActivePath: (path: string | null) => void;
@@ -113,6 +116,7 @@ export const useStore = create<State>()(
       hideWhitespace: false,
       hideImports: false,
       codeTheme: "github",
+      offerWorktrunk: true,
       viewed: {},
       collapsed: {},
       activePath: null,
@@ -139,6 +143,7 @@ export const useStore = create<State>()(
       toggleHideWhitespace: () => set((s) => ({ hideWhitespace: !s.hideWhitespace })),
       toggleHideImports: () => set((s) => ({ hideImports: !s.hideImports })),
       setCodeTheme: (codeTheme) => set({ codeTheme }),
+      setOfferWorktrunk: (offerWorktrunk) => set({ offerWorktrunk }),
       // Like GitHub: marking a file viewed collapses it, un-marking expands it again.
       toggleViewed: (wt, path) =>
         set((s) => {
@@ -231,6 +236,7 @@ export const useStore = create<State>()(
         hideWhitespace: s.hideWhitespace,
         hideImports: s.hideImports,
         codeTheme: s.codeTheme,
+        offerWorktrunk: s.offerWorktrunk,
         fileTab: s.fileTab,
       }),
     },
