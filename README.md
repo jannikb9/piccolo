@@ -15,6 +15,3 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/jannikbe
 ```
 
 Piccolo offers new versions itself when they come out (before 0.2.0, run the command again).
-
-Optional: with [worktrunk](https://worktrunk.dev) installed, Piccolo creates worktrees with it. On first launch
-it offers to install it (also in Settings), or run `brew install worktrunk` yourself.
