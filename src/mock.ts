@@ -1,13 +1,16 @@
 // Placeholder data used when the UI runs in a plain browser (`pnpm dev`) instead of the desktop app.
+import changelog from "../CHANGELOG.md?raw";
 import { hashString } from "./lib/diff";
 import type { ImageUpload } from "./lib/images";
 import type {
   AgentSession,
   Attachment,
+  AvailableUpdate,
   ChangedFile,
   Commit,
   DiffPatch,
   DiffScope,
+  DownloadProgress,
   ExcerptRow,
   FileVersions,
   GeneralThread,
@@ -818,4 +821,29 @@ export function mockAddWorktree(repoId: string, branch: string): Promise<string>
   const wt = worktree(repoId, `${repo.name}.${branch.replace(/\//g, "-")}`, branch, { minutes: 0 });
   repo.worktrees.push(wt);
   return new Promise((resolve) => setTimeout(() => resolve(wt.path), 800));
+}
+
+/**
+ * `localStorage["mock-update"]` = "1" offers the newest version in CHANGELOG.md (as an update from
+ * the one before it); the download takes a few seconds and ends in "Restarting…".
+ */
+export function mockCheckUpdate(): Promise<AvailableUpdate | null> {
+  if (localStorage.getItem("mock-update") !== "1") return delay(null);
+  const [version, previous] = [...changelog.matchAll(/^## (\S+)/gm)].map((m) => m[1]);
+  return delay({ version, currentVersion: previous ?? "0.0.0", changelog: changelog.slice(changelog.search(/^## /m)) });
+}
+
+export function mockInstallUpdate(onProgress: (progress: DownloadProgress) => void): Promise<void> {
+  const total = 14_000_000;
+  return new Promise((resolve) => {
+    let downloaded = 0;
+    const timer = setInterval(() => {
+      downloaded = Math.min(total, downloaded + 700_000);
+      onProgress({ downloaded, total });
+      if (downloaded === total) {
+        clearInterval(timer);
+        setTimeout(resolve, 600);
+      }
+    }, 120);
+  });
 }

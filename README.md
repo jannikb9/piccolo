@@ -14,7 +14,7 @@ https://github.com/user-attachments/assets/cea912a4-5ca6-4630-8343-0f6929352f6b
 curl -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.sh | sh
 ```
 
-Run it again to update.
+Piccolo offers new versions itself when they come out (before 0.2.0, run the command again).
 
 Optional: with [worktrunk](https://worktrunk.dev) installed (`brew install worktrunk`), Piccolo creates
 worktrees with it.

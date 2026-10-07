@@ -8,10 +8,12 @@ mod programs;
 mod repos;
 mod requests;
 mod sessions;
+mod updates;
 mod watch;
 
 use repos::Repos;
 use tauri::Manager;
+use updates::PendingUpdate;
 use watch::Watchers;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,6 +22,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(PendingUpdate::default())
         .setup(|app| {
             menu::install(app)?;
             let handle = app.handle();
@@ -65,6 +69,8 @@ pub fn run() {
             requests::request_review,
             navigate::find_symbol,
             navigate::file_text,
+            updates::check_update,
+            updates::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

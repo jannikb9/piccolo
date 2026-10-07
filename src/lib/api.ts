@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, message, open } from "@tauri-apps/plugin-dialog";
@@ -6,6 +7,8 @@ import {
   mockAddGeneralThread,
   mockAddThread,
   mockAttachmentData,
+  mockCheckUpdate,
+  mockInstallUpdate,
   mockAddWorktree,
   mockChangedFiles,
   mockCommits,
@@ -33,11 +36,13 @@ import {
 import type { ImageUpload } from "./images";
 import type {
   AgentSession,
+  AvailableUpdate,
   ChangedFile,
   Commit,
   DiffOptions,
   DiffPatch,
   DiffScope,
+  DownloadProgress,
   FileVersions,
   GeneralThread,
   LineRange,
@@ -178,6 +183,19 @@ export const api = {
   /** `null` when the file doesn't exist at `rev` or isn't text. */
   fileText: (path: string, rev: string | null, file: string): Promise<string | null> =>
     isTauri ? invoke("file_text", { path, rev, file }) : mockFileText(path, rev, file),
+
+  /** The newest release on GitHub when it's newer than the running app. */
+  checkUpdate: (): Promise<AvailableUpdate | null> => (isTauri ? invoke("check_update") : mockCheckUpdate()),
+
+  /** Downloads and installs the release `checkUpdate` found, then restarts the app into it. */
+  installUpdate: (onProgress: (progress: DownloadProgress) => void): Promise<void> => {
+    if (!isTauri) return mockInstallUpdate(onProgress);
+    const channel = new Channel<DownloadProgress>();
+    channel.onmessage = onProgress;
+    return invoke("install_update", { onProgress: channel });
+  },
+
+  appVersion: (): Promise<string> => (isTauri ? getVersion() : Promise.resolve("0.0.0")),
 };
 
 export async function pickRepoFolder(): Promise<string | null> {
@@ -190,6 +208,11 @@ export async function pickRepoFolder(): Promise<string | null> {
 export function confirmAction(title: string, text: string, okLabel: string): Promise<boolean> {
   if (!isTauri) return Promise.resolve(window.confirm(text ? `${title}\n\n${text}` : title));
   return ask(text, { title, kind: "warning", okLabel, cancelLabel: "Cancel" });
+}
+
+export async function showInfo(title: string, text: string): Promise<void> {
+  if (!isTauri) return window.alert(`${title}\n\n${text}`);
+  await message(text, { title, kind: "info" });
 }
 
 export async function showError(title: string, text: string): Promise<void> {
@@ -231,6 +254,13 @@ export function onOpenSettings(callback: () => void): () => void {
 
 /** Opens Settings, e.g. from a link in a menu. */
 export const openSettings = () => window.dispatchEvent(new Event("open-settings"));
+
+/** Fires when Piccolo > Check for Updates… is chosen. */
+export function onCheckForUpdates(callback: () => void): () => void {
+  if (!isTauri) return () => {};
+  const unlisten = listen("check-for-updates", () => callback());
+  return () => void unlisten.then((fn) => fn());
+}
 
 /** Fires when View > Toggle Sidebar is chosen (⌃⌘S). */
 export function onToggleSidebar(callback: () => void): () => void {

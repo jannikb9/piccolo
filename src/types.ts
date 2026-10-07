@@ -241,3 +241,17 @@ export type RemoteBranch = {
   /** Commit date of the tip, epoch ms. */
   updatedAt: number;
 };
+
+/** A newer release than the running app, found by `checkUpdate`. */
+export type AvailableUpdate = {
+  version: string;
+  currentVersion: string;
+  /** CHANGELOG.md as of `version`: `## <version> — <date>` sections, newest first. */
+  changelog: string;
+};
+
+export type DownloadProgress = {
+  downloaded: number;
+  /** Bytes in the download; `null` when the server doesn't say. */
+  total: number | null;
+};

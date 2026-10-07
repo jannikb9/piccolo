@@ -1,0 +1,20 @@
+# Changelog
+
+What's new in each release, for people using the app: Piccolo shows the sections newer than the
+installed version when it offers an update, and the release's GitHub page shows its own. Every
+release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
+each entry on one line, as both show line breaks as they are.
+
+## 0.2.0 — 2026-10-07
+
+- **Updates in the app**: Piccolo tells you when a new version is out, shows what changed and installs it with one click. Piccolo › Check for Updates… looks right away.
+- **Work with agents from the toolbar**: ask any running Claude or Codex session to review the branch, or to address the comments it hasn't seen. Without one, Piccolo copies a prompt to paste into a new session.
+- **See who's on the branch**: the agents working on a worktree show in the toolbar, with their model and whether they're busy.
+- **Comments in Markdown** that renders as you type, a thumbs up for agents' comments, and "Dismiss" for comments you don't want raised again.
+- **Comments on the whole branch**, and a Comments tab listing every thread.
+- **Commit picker**: step through the uncommitted changes and each commit, or see them all.
+- Narrow diff panes switch to a unified diff.
+
+## 0.1.0 — 2026-10-04
+
+- First release: review your worktrees' changes like a pull request and leave comments your agents read and answer with the `piccolo` command.
