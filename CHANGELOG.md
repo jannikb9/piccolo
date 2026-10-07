@@ -11,7 +11,7 @@ each entry on one line, as both show line breaks as they are.
 - **Request changes**: the button that sends your comments to the agent building the branch is now called Request changes, like on GitHub.
 - **Safer review of other people's branches**: checking out a branch new to your clone no longer runs worktrunk's hooks from it, and symlinks show the path they point to instead of that file's contents.
 - worktrunk now installs only through Homebrew.
-- The Files and Comments tabs stay legible in a narrow file panel, and no gap opens in the toolbar next to the agents.
+- The Files and Comments tabs stay legible in a narrow file panel, and no gap opens in the toolbar next to the agents, and Codex's icon no longer sits on a white tile.
 
 ## 0.2.1 — 2026-10-07
 
