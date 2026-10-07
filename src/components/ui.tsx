@@ -1,7 +1,6 @@
 import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "../lib/utils";
@@ -160,56 +159,6 @@ export function CopyButton({ text, label, className }: { text: string; label: st
     >
       {copied ? <Check className="size-3" strokeWidth={2.5} /> : <Copy className="size-3" />}
     </IconButton>
-  );
-}
-
-type SegmentedOption<T extends string> = { value: T; label: ReactNode; tooltip?: string };
-
-export function Segmented<T extends string>({
-  value,
-  onChange,
-  options,
-  label,
-}: {
-  /** `null` when none of the options applies. */
-  value: T | null;
-  onChange: (value: T) => void;
-  options: SegmentedOption<T>[];
-  label: string;
-}) {
-  return (
-    <ToggleGroup.Root
-      type="single"
-      aria-label={label}
-      value={value ?? ""}
-      // Radix emits "" when the active item is clicked again; a segmented control always has a value.
-      onValueChange={(v) => v && onChange(v as T)}
-      className="flex h-7 items-center gap-px rounded-lg border border-border-subtle bg-bg-inset p-0.5"
-    >
-      {options.map((o) => {
-        const item = (
-          <ToggleGroup.Item
-            key={o.value}
-            value={o.value}
-            aria-label={typeof o.label === "string" ? undefined : o.tooltip}
-            // Styled via aria-checked: the Tooltip trigger overwrites the item's data-state attribute.
-            className={cn(
-              "flex h-full items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-fg-subtle transition-colors",
-              "hover:text-fg-muted aria-checked:bg-bg-active aria-checked:text-fg aria-checked:shadow-sm aria-checked:shadow-black/10",
-            )}
-          >
-            {o.label}
-          </ToggleGroup.Item>
-        );
-        return o.tooltip ? (
-          <Tooltip key={o.value} label={o.tooltip}>
-            {item}
-          </Tooltip>
-        ) : (
-          item
-        );
-      })}
-    </ToggleGroup.Root>
   );
 }
 

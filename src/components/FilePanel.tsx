@@ -1,4 +1,4 @@
-import { Check, ChevronRight, Folder, FolderOpen, MessageSquare } from "lucide-react";
+import { Check, ChevronRight, Files, Folder, FolderOpen, MessageSquare, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { COLLAPSED_BY_DEFAULT, type FileSection } from "../lib/sections";
 import { cn, totals, type TreeNode } from "../lib/utils";
@@ -56,15 +56,12 @@ export function FilePanel({
           sidebarCollapsed && "pl-[86px]",
         )}
       >
-        <div role="tablist" aria-label="Show" className="flex min-w-0 items-center gap-0.5">
-          <TabButton tab="files" current={tab} onSelect={setTab} label="Files" count={fileCount} />
-          <TabButton tab="comments" current={tab} onSelect={setTab} label="Comments" count={openComments} />
+        {/* A size container, so the tabs drop their labels for icons when there's no room for them. */}
+        <div role="tablist" aria-label="Show" className="@container flex min-w-0 flex-1 items-center gap-0.5">
+          <TabButton tab="files" current={tab} onSelect={setTab} label="Files" icon={Files} count={fileCount} />
+          <TabButton tab="comments" current={tab} onSelect={setTab} label="Comments" icon={MessageSquare} count={openComments} />
         </div>
-        {sidebarCollapsed && (
-          <span className="ml-auto">
-            <SidebarToggle collapsed onToggle={onToggleSidebar} />
-          </span>
-        )}
+        {sidebarCollapsed && <SidebarToggle collapsed onToggle={onToggleSidebar} />}
       </header>
       <div className="h-px shrink-0 bg-border-subtle">
         <div className="h-full bg-accent transition-[width] duration-300 ease-out" style={{ width: `${progress * 100}%` }} />
@@ -103,12 +100,14 @@ function TabButton({
   current,
   onSelect,
   label,
+  icon: Icon,
   count,
 }: {
   tab: FileTab;
   current: FileTab;
   onSelect: (tab: FileTab) => void;
   label: string;
+  icon: LucideIcon;
   count: number;
 }) {
   const active = tab === current;
@@ -117,13 +116,16 @@ function TabButton({
       type="button"
       role="tab"
       aria-selected={active}
+      title={label}
       onClick={() => onSelect(tab)}
       className={cn(
-        "flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-[13px] font-medium transition-colors",
+        "flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[13px] font-medium transition-colors",
         active ? "bg-bg-hover text-fg" : "text-fg-subtle hover:bg-bg-hover hover:text-fg-muted",
       )}
     >
-      <span className="truncate">{label}</span>
+      {/* Both labels need about 170px; with less, both tabs show their icon instead. */}
+      <Icon aria-hidden className="size-3.5 @min-[176px]:hidden" />
+      <span className="sr-only @min-[176px]:not-sr-only">{label}</span>
       <span
         className={cn(
           "tabular shrink-0 rounded-full px-1.5 text-[11px] font-medium text-fg-subtle",

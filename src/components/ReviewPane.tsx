@@ -1,3 +1,4 @@
+import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import type { UseQueryResult } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -11,16 +12,17 @@ import {
   Import,
   Pilcrow,
   Rows2,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useLayoutEffect, useRef, type ReactNode, type Ref } from "react";
 import { useAddRepo, useWorktreeStats } from "../lib/queries";
 import { cn, scopeKey, totals } from "../lib/utils";
 import { useStore } from "../store";
-import type { ChangedFile, DiffPatch, DiffScope, GeneralThread, Repo, Thread, Worktree } from "../types";
+import type { ChangedFile, DiffLayout, DiffPatch, DiffScope, GeneralThread, Repo, Thread, Worktree } from "../types";
 import { CommitPicker } from "./CommitPicker";
 import { DiffView, type DiffViewHandle } from "./DiffView";
 import { AddressButton, AgentsButton, ReviewButton } from "./SessionList";
-import { DiffCount, IconButton, Segmented, Skeleton, Tooltip, useJustDone } from "./ui";
+import { DiffCount, Skeleton, Tooltip, useJustDone } from "./ui";
 
 export function ReviewPane({
   repo,
@@ -128,13 +130,6 @@ function Toolbar({
   scope: DiffScope;
   files: ChangedFile[];
 }) {
-  const layout = useStore((s) => s.layout);
-  const narrow = useStore((s) => s.narrowDiff);
-  const setLayout = useStore((s) => s.setLayout);
-  const hideWhitespace = useStore((s) => s.hideWhitespace);
-  const toggleHideWhitespace = useStore((s) => s.toggleHideWhitespace);
-  const hideImports = useStore((s) => s.hideImports);
-  const toggleHideImports = useStore((s) => s.toggleHideImports);
   const { additions, deletions } = totals(files);
   const branch = worktree.branch ?? worktree.head;
   const merged = !!useWorktreeStats(worktree, repo.defaultBranch).data?.merged;
@@ -156,41 +151,103 @@ function Toolbar({
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <CommitPicker worktree={worktree} base={repo.defaultBranch} scope={scope} />
-        <div className="flex items-center gap-0.5">
-          <IconButton
-            label={hideWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
-            aria-pressed={hideWhitespace}
-            onClick={toggleHideWhitespace}
-            className="size-7"
-          >
-            <Pilcrow className="size-3.5" />
-          </IconButton>
-          <IconButton
-            label={hideImports ? "Show import changes" : "Hide import changes"}
-            aria-pressed={hideImports}
-            onClick={toggleHideImports}
-            className="size-7"
-          >
-            <Import className="size-3.5" />
-          </IconButton>
-        </div>
-        {/* A narrow pane is always unified, so there's nothing to choose. */}
-        {!narrow && (
-          <Segmented
-            label="Diff layout"
-            value={layout}
-            onChange={setLayout}
-            options={[
-              { value: "split", label: <Columns2 className="size-3.5" />, tooltip: "Split" },
-              { value: "unified", label: <Rows2 className="size-3.5" />, tooltip: "Unified" },
-            ]}
-          />
-        )}
+        <DiffOptions />
         <ReviewButton worktree={worktree} />
         <AddressButton worktree={worktree} />
         <AgentsButton worktree={worktree} />
       </div>
     </header>
+  );
+}
+
+const layouts = [
+  { value: "split", label: "Split", icon: Columns2 },
+  { value: "unified", label: "Unified", icon: Rows2 },
+] as const;
+
+const diffOptionClass =
+  "flex h-7 cursor-default items-center gap-2 rounded px-2 outline-none data-[highlighted]:bg-bg-hover data-[highlighted]:text-fg";
+
+/**
+ * How the diff is laid out and what it leaves out, like GitHub's diff settings menu. The button
+ * stays highlighted while anything is hidden, so a filtered diff isn't mistaken for the whole change.
+ */
+function DiffOptions() {
+  const layout = useStore((s) => s.layout);
+  const narrow = useStore((s) => s.narrowDiff);
+  const setLayout = useStore((s) => s.setLayout);
+  const hideWhitespace = useStore((s) => s.hideWhitespace);
+  const toggleHideWhitespace = useStore((s) => s.toggleHideWhitespace);
+  const hideImports = useStore((s) => s.hideImports);
+  const toggleHideImports = useStore((s) => s.toggleHideImports);
+  const hiding = [hideWhitespace && "whitespace", hideImports && "import"].filter(Boolean).join(" and ");
+  const options = [
+    { label: "Hide whitespace changes", icon: Pilcrow, checked: hideWhitespace, toggle: toggleHideWhitespace },
+    { label: "Hide import changes", icon: Import, checked: hideImports, toggle: toggleHideImports },
+  ];
+
+  return (
+    <DropdownMenuPrimitive.Root>
+      <Tooltip label={hiding ? `Hiding ${hiding} changes` : "Diff options"}>
+        <DropdownMenuPrimitive.Trigger
+          aria-label="Diff options"
+          className={cn(
+            "grid size-7 place-items-center rounded-md outline-none transition-colors",
+            hiding
+              ? "bg-accent-soft text-accent"
+              : "text-fg-subtle hover:bg-bg-hover hover:text-fg data-[state=open]:bg-bg-hover data-[state=open]:text-fg",
+          )}
+        >
+          <SlidersHorizontal className="size-3.5" />
+        </DropdownMenuPrimitive.Trigger>
+      </Tooltip>
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          align="end"
+          sideOffset={4}
+          className="z-50 min-w-52 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
+        >
+          {/* A narrow pane is always unified, so there's nothing to choose. */}
+          {!narrow && (
+            <>
+              <DropdownMenuPrimitive.RadioGroup value={layout} onValueChange={(v) => setLayout(v as DiffLayout)}>
+                {layouts.map(({ value, label, icon: Icon }) => (
+                  <DropdownMenuPrimitive.RadioItem
+                    key={value}
+                    value={value}
+                    onSelect={(e) => e.preventDefault()}
+                    className={diffOptionClass}
+                  >
+                    <Icon className="size-3.5 text-fg-subtle" />
+                    {label}
+                    <DropdownMenuPrimitive.ItemIndicator className="ml-auto pl-4">
+                      <Check className="size-3.5 text-accent" />
+                    </DropdownMenuPrimitive.ItemIndicator>
+                  </DropdownMenuPrimitive.RadioItem>
+                ))}
+              </DropdownMenuPrimitive.RadioGroup>
+              <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />
+            </>
+          )}
+          {options.map(({ label, icon: Icon, checked, toggle }) => (
+            <DropdownMenuPrimitive.CheckboxItem
+              key={label}
+              checked={checked}
+              onCheckedChange={toggle}
+              // The menu stays open, so several options can be switched in one go.
+              onSelect={(e) => e.preventDefault()}
+              className={diffOptionClass}
+            >
+              <Icon className="size-3.5 text-fg-subtle" />
+              {label}
+              <DropdownMenuPrimitive.ItemIndicator className="ml-auto pl-4">
+                <Check className="size-3.5 text-accent" />
+              </DropdownMenuPrimitive.ItemIndicator>
+            </DropdownMenuPrimitive.CheckboxItem>
+          ))}
+        </DropdownMenuPrimitive.Content>
+      </DropdownMenuPrimitive.Portal>
+    </DropdownMenuPrimitive.Root>
   );
 }
 
