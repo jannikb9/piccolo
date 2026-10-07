@@ -5,6 +5,14 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 0.2.2 — 2026-10-07
+
+- **Diff options in one menu**: switching between split and unified diffs and hiding whitespace or import changes now live in one toolbar menu, which stays highlighted while anything is hidden.
+- **Request changes**: the button that sends your comments to the agent building the branch is now called Request changes, like on GitHub.
+- **Safer review of other people's branches**: checking out a branch new to your clone no longer runs worktrunk's hooks from it, and symlinks show the path they point to instead of that file's contents.
+- worktrunk now installs only through Homebrew.
+- The Files and Comments tabs stay legible in a narrow file panel, and no gap opens in the toolbar next to the agents.
+
 ## 0.2.1 — 2026-10-07
 
 - **worktrunk in one click**: Piccolo offers to install worktrunk, which it uses to create worktrees, on first launch and in Settings. It's optional.
