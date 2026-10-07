@@ -54,7 +54,9 @@ pub fn search(wt: &Path, rev: Option<&str>, name: &str, from: &str) -> Result<Sy
         args.push("--untracked");
     }
     args.extend(["-e", name]);
-    args.extend(rev);
+    if let Some(rev) = rev {
+        args.extend(["--end-of-options", rev]);
+    }
     args.push("--");
     let specs = lang.pathspecs(from);
     args.extend(specs.iter().map(String::as_str));

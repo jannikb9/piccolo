@@ -11,7 +11,7 @@ https://github.com/user-attachments/assets/cea912a4-5ca6-4630-8343-0f6929352f6b
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.sh | sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.sh | sh
 ```
 
 Piccolo offers new versions itself when they come out (before 0.2.0, run the command again).

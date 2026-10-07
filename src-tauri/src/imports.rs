@@ -21,7 +21,7 @@ pub fn filter_patch(wt: &Path, range: &DiffRange, patch: &str) -> Result<String>
     let mut olds = git::blobs(wt, &old_specs)?.into_iter();
     let mut news = match &range.new_rev {
         Some(rev) => git::blobs(wt, &new_paths.iter().map(|p| format!("{rev}:{p}")).collect::<Vec<_>>())?,
-        None => new_paths.iter().map(|p| git::read_text(&wt.join(p))).collect(),
+        None => new_paths.iter().map(|p| git::worktree_file(wt, p).and_then(|p| git::read_text(&p))).collect(),
     }
     .into_iter();
 

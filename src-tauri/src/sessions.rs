@@ -379,7 +379,7 @@ fn model_of(agent: &str, id: &str, claude: &Path, codex: &Path) -> Option<String
 
 /// `value` as one shell word.
 pub(crate) fn shell_quote(value: &str) -> String {
-    if !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || "/._-~+=:@".contains(c)) {
+    if !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+:@".contains(c)) {
         value.to_string()
     } else {
         format!("'{}'", value.replace('\'', "'\\''"))

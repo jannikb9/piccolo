@@ -5,6 +5,11 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 0.2.1 — 2026-10-07
+
+- **worktrunk in one click**: Piccolo offers to install worktrunk, which it uses to create worktrees, on first launch and in Settings. It's optional.
+- **Security hardening**: the app's window only runs Piccolo's own code and never loads content from the internet, so a malicious diff or comment can't run scripts in it.
+
 ## 0.2.0 — 2026-10-07
 
 - **Updates in the app**: Piccolo tells you when a new version is out, shows what changed and installs it with one click. Piccolo › Check for Updates… looks right away.

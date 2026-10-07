@@ -798,7 +798,8 @@ pub fn locate_in_worktree(threads: &mut [Thread], wt: &Path) {
     for thread in threads.iter_mut() {
         let on_new_lines = thread.range.is_some_and(|r| r.end_side == Side::Additions);
         let Some(path) = thread.path.as_ref().filter(|_| on_new_lines) else { continue };
-        thread.position = std::fs::read_to_string(wt.join(path)).ok().and_then(|c| relocate(thread, &c));
+        let contents = git::worktree_file(wt, path).and_then(|p| std::fs::read_to_string(p).ok());
+        thread.position = contents.and_then(|c| relocate(thread, &c));
     }
 }
 

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::UNIX_EPOCH;
 
@@ -152,6 +152,10 @@ pub fn fetch(repo: &Path) -> Result<()> {
 /// still need approval are skipped: the app can't ask. Without worktrunk, `git worktree add` into
 /// `<repo>.<branch>` next to the repository, like worktrunk's default.
 pub fn add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<String> {
+    // Git refuses such branch names; one from elsewhere would be read as an option.
+    if branch.starts_with('-') || remote_ref.starts_with('-') {
+        return Err(format!("not a branch: {branch}"));
+    }
     match crate::worktrunk::find() {
         Some(wt) => {
             let switch = |extra: &[&str]| run_worktrunk(&wt, repo, &[&["switch", branch, "--no-cd"], extra].concat());
@@ -181,9 +185,9 @@ fn git_add_worktree(repo: &Path, branch: &str, remote_ref: &str) -> Result<()> {
     let path = path_str(&path)?;
     let local = git(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok();
     if local {
-        git(repo, &["worktree", "add", "--quiet", path, branch])?;
+        git(repo, &["worktree", "add", "--quiet", "--end-of-options", path, branch])?;
     } else {
-        git(repo, &["worktree", "add", "--quiet", "--track", "-b", branch, path, remote_ref])?;
+        git(repo, &["worktree", "add", "--quiet", "--track", "-b", branch, "--end-of-options", path, remote_ref])?;
     }
     Ok(())
 }
@@ -321,7 +325,7 @@ pub struct ChangedFile {
 }
 
 pub fn merge_base(wt: &Path, base: &str) -> Result<String> {
-    Ok(git(wt, &["merge-base", base, "HEAD"])?.trim().to_string())
+    Ok(git(wt, &["merge-base", "--end-of-options", base, "HEAD"])?.trim().to_string())
 }
 
 /// Whether HEAD's changes are already in `base`, however they got there: merged, squash-merged or
@@ -329,9 +333,9 @@ pub fn merge_base(wt: &Path, base: &str) -> Result<String> {
 /// releasing consumes them on `base` after the merge, so merging again would bring them back.
 pub fn is_merged(wt: &Path, base: &str) -> bool {
     // Exits non-zero when the merge conflicts, which means the branch has something new.
-    let Ok(out) = git(wt, &["merge-tree", "--write-tree", base, "HEAD"]) else { return false };
+    let Ok(out) = git(wt, &["merge-tree", "--write-tree", "--end-of-options", base, "HEAD"]) else { return false };
     let tree = out.lines().next().unwrap_or_default().trim();
-    git(wt, &["diff", "--quiet", base, tree, "--", ".", ":(exclude).changeset"]).is_ok()
+    git(wt, &["diff", "--quiet", "--end-of-options", base, tree, "--", ".", ":(exclude).changeset"]).is_ok()
 }
 
 /// Deletes a linked worktree. `force` also discards uncommitted changes; `repo` is any other
@@ -386,7 +390,7 @@ fn git_remove_worktree(repo: &Path, path: &str, force: bool) -> Result<()> {
 
 /// Commits (ahead, behind) of HEAD relative to `base`.
 pub fn ahead_behind(wt: &Path, base: &str) -> Result<(u32, u32)> {
-    let out = git(wt, &["rev-list", "--left-right", "--count", &format!("{base}...HEAD")])?;
+    let out = git(wt, &["rev-list", "--left-right", "--count", "--end-of-options", &format!("{base}...HEAD")])?;
     let mut counts = out.split_whitespace().map(|n| n.parse().unwrap_or(0));
     let behind = counts.next().unwrap_or(0);
     let ahead = counts.next().unwrap_or(0);
@@ -408,7 +412,7 @@ pub struct Commit {
 /// Commits on HEAD that aren't in `base`, newest first. Without a base there are none to list.
 pub fn commits(wt: &Path, base: Option<&str>) -> Result<Vec<Commit>> {
     let Some(base) = base else { return Ok(Vec::new()) };
-    let out = git(wt, &["log", "-z", "--max-count=500", "--format=%H%x00%h%x00%an%x00%ct%x00%s", &format!("{base}..HEAD"), "--"])?;
+    let out = git(wt, &["log", "-z", "--max-count=500", "--format=%H%x00%h%x00%an%x00%ct%x00%s", "--end-of-options", &format!("{base}..HEAD"), "--"])?;
     Ok(parse_commits(&out))
 }
 
@@ -661,7 +665,7 @@ pub fn full_file_diff(wt: &Path, range: &DiffRange, old_path: &str, path: &str) 
     }
     // No textual diff: untracked (all added) or unchanged (all context).
     let contents = match &range.new_rev {
-        None => read_text(&wt.join(path)),
+        None => worktree_file(wt, path).and_then(|p| read_text(&p)),
         rev => file_contents(wt, rev.as_deref(), path)?,
     };
     let Some(contents) = contents else { return Ok(Vec::new()) };
@@ -752,15 +756,15 @@ fn new_file_patch(path: &str, contents: &str) -> String {
 /// `None` if the file doesn't exist there or isn't text.
 pub fn file_contents(wt: &Path, rev: Option<&str>, path: &str) -> Result<Option<String>> {
     match rev {
-        None => Ok(read_text(&wt.join(path))),
+        None => Ok(worktree_file(wt, path).and_then(|p| read_text(&p))),
         Some(rev) => {
             let spec = format!("{rev}:{path}");
-            if git(wt, &["cat-file", "-e", &spec]).is_err() {
+            if git(wt, &["cat-file", "-e", "--end-of-options", &spec]).is_err() {
                 return Ok(None);
             }
             let out = Command::new("git")
                 .current_dir(wt)
-                .args(["cat-file", "blob", &spec])
+                .args(["cat-file", "blob", "--end-of-options", &spec])
                 .output()
                 .map_err(|e| e.to_string())?;
             Ok(text_from_bytes(out.stdout))
@@ -795,6 +799,13 @@ pub fn blobs(wt: &Path, specs: &[String]) -> Result<Vec<Option<String>>> {
     }
     blobs.resize(specs.len(), None);
     Ok(blobs)
+}
+
+/// `path` in the worktree `wt`. `None` for an absolute path or one with `..`, which git never
+/// reports: it would point outside the worktree.
+pub fn worktree_file(wt: &Path, path: &str) -> Option<PathBuf> {
+    let path = Path::new(path);
+    path.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)).then(|| wt.join(path))
 }
 
 /// Large files are left out of patches; their diffs aren't reviewable line by line anyway.
@@ -950,6 +961,46 @@ mod tests {
         // Already checked out: nothing to do.
         git_add_worktree(&repo, "feat/rows", "origin/feat/rows").unwrap();
         assert_eq!(list_worktrees(&repo).unwrap().len(), 2);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Revisions, paths and branch names come from the webview: none of them may act as a git
+    /// option or reach outside the worktree.
+    #[test]
+    fn refuses_options_and_paths_outside_the_worktree() {
+        let root = std::env::temp_dir().join(format!("review-git-hostile-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let run = |args: &[&str]| git(&repo, args).unwrap();
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "user.email", "t@example.com"]);
+        run(&["config", "user.name", "Test"]);
+        fs::write(repo.join("a.txt"), "one\n").unwrap();
+        fs::write(root.join("secret.txt"), "secret\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "init"]);
+
+        let written = root.join("written");
+        let output = format!("--output={}", written.display());
+        assert!(commits(&repo, Some(&output)).is_err());
+        assert!(merge_base(&repo, &output).is_err());
+        assert!(ahead_behind(&repo, &output).is_err());
+        assert!(!is_merged(&repo, &output));
+        assert!(!root.join("written..HEAD").exists() && !written.exists());
+
+        let touched = root.join("touched");
+        let pager = format!("--open-files-in-pager=touch {}", touched.display());
+        assert!(crate::navigate::search(&repo, Some(&pager), "one", "a.txt").is_err());
+        assert!(!touched.exists());
+
+        assert_eq!(file_contents(&repo, None, "a.txt").unwrap().as_deref(), Some("one\n"));
+        assert_eq!(file_contents(&repo, None, "../secret.txt").unwrap(), None);
+        let absolute = root.join("secret.txt");
+        assert_eq!(file_contents(&repo, None, absolute.to_str().unwrap()).unwrap(), None);
+
+        assert!(add_worktree(&repo, "--help", "origin/main").is_err());
+        assert!(add_worktree(&repo, "feat", "--force").is_err());
         let _ = fs::remove_dir_all(&root);
     }
 

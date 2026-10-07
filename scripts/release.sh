@@ -31,9 +31,14 @@ if [ ! -f "$key" ]; then
   exit 1
 fi
 
-TAURI_SIGNING_PRIVATE_KEY="$(cat "$key")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+# Build exactly the locked dependencies: a release must not pick up a newly published version.
+pnpm install --frozen-lockfile
+
+# Tauri reads the key from its path. A passphrase-protected key takes its passphrase from
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+TAURI_SIGNING_PRIVATE_KEY="$key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD-}" \
   pnpm tauri build --target universal-apple-darwin --bundles app \
-  --config '{"bundle":{"createUpdaterArtifacts":true}}'
+  --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
 
 bundle="src-tauri/target/universal-apple-darwin/release/bundle"
 app="$bundle/macos/Piccolo.app"
