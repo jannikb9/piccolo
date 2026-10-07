@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs (or updates) Piccolo from the latest GitHub release:
-#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.sh | sh
 #
 # The app goes to /Applications (or ~/Applications when that isn't writable) and the `piccolo`
 # command is linked into ~/.local/bin.
@@ -25,7 +25,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 echo "Downloading Piccolo…"
 # HTTPS only, also after GitHub redirects to its download host.
-curl --proto "=https" --tlsv1.2 -fSL --progress-bar "$url" -o "$tmp/Piccolo.zip"
+curl -fSL --progress-bar "$url" -o "$tmp/Piccolo.zip"
 ditto -x -k "$tmp/Piccolo.zip" "$tmp"
 
 # Replace the bundle rather than copying over it: macOS kills a binary that was overwritten in place.

@@ -11,5 +11,5 @@ https://github.com/user-attachments/assets/71e7bbd2-8a11-4dff-bc63-d7a5ddd1b99b
 ## Install
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.sh | sh
 ```
