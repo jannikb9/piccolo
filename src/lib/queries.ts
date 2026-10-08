@@ -205,6 +205,16 @@ export function useRequestReview(worktree: Worktree) {
   });
 }
 
+/** Stops waiting for a request whose agent won't say it's done. */
+export function useStopRequest() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.stopRequest(id),
+    onError: (error) => showError("Couldn't stop waiting", String(error)),
+    onSettled: () => client.invalidateQueries({ queryKey: ["sessions"] }),
+  });
+}
+
 /** Where `name` is defined and used, at `rev` (`null`: the working tree). */
 export function useSymbolSearch(worktreePath: string, rev: string | null, name: string, from: string) {
   return useQuery({

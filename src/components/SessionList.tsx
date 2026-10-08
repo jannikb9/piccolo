@@ -1,12 +1,12 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
-import { Check, ChevronDown, Copy, Eye, LoaderCircle } from "lucide-react";
+import { Check, ChevronDown, Copy, Eye, LoaderCircle, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useCopyPrompt, useRequestReview, useSendComments, useSessionActivity, useSessions } from "../lib/queries";
+import { useCopyPrompt, useRequestReview, useSendComments, useSessionActivity, useSessions, useStopRequest } from "../lib/queries";
 import { agentLabel, cn, modelLabel } from "../lib/utils";
 import type { AgentSession, ReviewRequest, SessionActivity, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
-import { Tooltip, useJustDone } from "./ui";
+import { IconButton, Tooltip, useJustDone } from "./ui";
 
 /** A session as the app names it: its title, else its agent. */
 const sessionName = (session: AgentSession) => session.title ?? `${agentLabel(session.agent)} session`;
@@ -212,8 +212,20 @@ function AgentsPanel({ worktree }: { worktree: Worktree }) {
   );
 }
 
-/** An agent or session in the panel: its mark, name and what it's doing. */
-function Row({ icon, state = "idle", title, detail }: { icon: string; state?: AgentState; title: string; detail: ReactNode }) {
+/** An agent or session in the panel: its mark, name and what it's doing, then `action`. */
+function Row({
+  icon,
+  state = "idle",
+  title,
+  detail,
+  action,
+}: {
+  icon: string;
+  state?: AgentState;
+  title: string;
+  detail: ReactNode;
+  action?: ReactNode;
+}) {
   return (
     <li className="flex items-center gap-2 px-2 py-1.5">
       <StatusIcon agent={icon} state={state} />
@@ -223,6 +235,7 @@ function Row({ icon, state = "idle", title, detail }: { icon: string; state?: Ag
         </span>
         <span className="tabular truncate text-[11.5px] text-fg-subtle">{detail}</span>
       </span>
+      {action}
     </li>
   );
 }
@@ -257,7 +270,33 @@ function SessionRow({
         : plural(written, "comment");
   const detail = session.model ? `${modelLabel(session.model)} · ${doing}` : doing;
 
-  return <Row icon={session.agent} state={state} title={sessionName(session)} detail={detail} />;
+  return (
+    <Row
+      icon={session.agent}
+      state={state}
+      title={sessionName(session)}
+      detail={detail}
+      action={underway && <StopButton request={request} />}
+    />
+  );
+}
+
+/**
+ * Stops waiting for a request, for an agent that won't say it's done (it stopped, or forgot to run
+ * `piccolo done`), which would otherwise spin forever.
+ */
+function StopButton({ request }: { request: ReviewRequest }) {
+  const stop = useStopRequest();
+  return (
+    <IconButton
+      label={request.startedAt === null ? "Withdraw the request" : "Stop waiting, and count it as done"}
+      disabled={stop.isPending}
+      onClick={() => stop.mutate(request.id)}
+      className="size-5 shrink-0"
+    >
+      <X className="size-3.5" />
+    </IconButton>
+  );
 }
 
 /** The agent's mark with a dot for its state: green running, a spinner while busy. */

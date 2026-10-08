@@ -268,6 +268,20 @@ impl Store {
         Ok(())
     }
 
+    /// Stops waiting for request `id`, for when its agent won't say it's done: one the agent took
+    /// on counts as finished now, one it never took on is withdrawn.
+    pub fn stop_request(&self, id: i64) -> Result<()> {
+        let request = self.request(id)?;
+        if request.finished_at.is_some() {
+            return Ok(());
+        }
+        if request.started_at.is_none() {
+            return self.cancel_request(id);
+        }
+        sql(self.conn.execute("UPDATE review_requests SET finished_at = ?2 WHERE id = ?1", params![id, now_ms()]))?;
+        Ok(())
+    }
+
     /// Messages the agent wrote on `target`'s branch while `request` ran: from its session, or
     /// signed with its name when the session isn't known.
     fn written_during(&self, target: &Target, request: &Request) -> Result<i64> {
@@ -351,6 +365,12 @@ pub async fn copy_prompt(path: String, kind: Kind) -> Result<String> {
         store.prompt_for(&Target::of(Path::new(&path))?, kind, head_of(&path).as_deref())
     })
     .await
+}
+
+/// Stops waiting for request `id`, for when its agent won't say it's done.
+#[tauri::command]
+pub async fn stop_request(id: i64) -> Result<()> {
+    blocking(move || Store::open()?.stop_request(id)).await
 }
 
 #[cfg(test)]
@@ -440,6 +460,18 @@ mod tests {
         assert_eq!(copied.agent, ANY_AGENT);
         let gemini = Caller { id: "gemini-1".into(), agent: "gemini".into() };
         assert_eq!(store.start_request(&target, copied.id, Some(&gemini)).unwrap().agent, "gemini");
+
+        // Stopping a request the agent took on finishes it, so it counts as a previous review;
+        // one it never took on is withdrawn.
+        store.stop_request(copied.id).unwrap();
+        let stopped = store.request(copied.id).unwrap();
+        assert!(stopped.finished_at.is_some());
+        assert_eq!(store.previous_review(&target, "gemini", Some("gemini-1"), i64::MAX).unwrap().unwrap().id, copied.id);
+        store.stop_request(copied.id).unwrap();
+        assert_eq!(store.request(copied.id).unwrap().finished_at, stopped.finished_at);
+        let never = store.add_request(&target, Kind::Review, "codex", Some("thread-1"), None, &[]).unwrap();
+        store.stop_request(never.id).unwrap();
+        assert!(store.request(never.id).is_err());
 
         std::fs::remove_dir_all(&root).unwrap();
     }

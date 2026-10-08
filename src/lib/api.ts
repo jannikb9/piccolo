@@ -26,6 +26,7 @@ import {
   mockReply,
   mockCopyPrompt,
   mockRequestReview,
+  mockStopRequest,
   mockSendComments,
   mockSessionActivity,
   mockSessions,
@@ -174,6 +175,9 @@ export const api = {
   /** Asks the running `session` to review the worktree. */
   requestReview: (path: string, session: string): Promise<ReviewRequest> =>
     isTauri ? invoke("request_review", { path, session }) : mockRequestReview(path, session),
+
+  /** Stops waiting for a request whose agent won't say it's done. */
+  stopRequest: (id: number): Promise<void> => (isTauri ? invoke("stop_request", { id }) : mockStopRequest(id)),
 
 
   /** Deletes a message; deleting a thread's first message deletes the thread. */

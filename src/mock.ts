@@ -652,6 +652,16 @@ export function mockRequestReview(_worktreePath: string, session: string): Promi
   return mockAsk("review", session, []);
 }
 
+export function mockStopRequest(id: number): Promise<void> {
+  const index = mockRequests.findIndex((r) => r.id === id);
+  const request = mockRequests[index];
+  if (request && request.finishedAt === null) {
+    if (request.startedAt === null) mockRequests.splice(index, 1);
+    else request.finishedAt = Date.now();
+  }
+  return delay(undefined);
+}
+
 /** `to` is `null` for a copied prompt, which any agent can take. */
 function mockAsk(kind: ReviewRequest["kind"], to: string | null, sent: number[]): Promise<ReviewRequest> {
   const session = mockSessionList.find((s) => s.id === to);

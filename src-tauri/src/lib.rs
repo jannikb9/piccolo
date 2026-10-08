@@ -68,6 +68,7 @@ pub fn run() {
             requests::send_comments,
             requests::copy_prompt,
             requests::request_review,
+            requests::stop_request,
             navigate::find_symbol,
             navigate::file_text,
             updates::check_update,
