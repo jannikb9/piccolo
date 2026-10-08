@@ -6,7 +6,7 @@
 
 <p align="center">Review your coding agents' work like a pull request. A Mac app.</p>
 
-https://github.com/user-attachments/assets/71e7bbd2-8a11-4dff-bc63-d7a5ddd1b99b
+https://github.com/user-attachments/assets/ca82d5d0-571a-44f0-811e-458a738a9573
 
 ## Install
 
