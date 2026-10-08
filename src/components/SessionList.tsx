@@ -317,9 +317,14 @@ const menuItem =
   "flex h-8 cursor-default items-center gap-2 rounded px-2 outline-none data-[disabled]:opacity-50 data-[highlighted]:bg-bg-hover data-[highlighted]:text-fg";
 const menuLabel = "px-2 pt-1.5 pb-0.5 text-[11px] font-medium text-fg-faint";
 
+const buttonFrame = "h-7 shrink-0 rounded-md border border-border bg-bg-raised text-[12px] font-medium text-fg";
+const buttonPart = "flex items-center gap-1.5 px-2 outline-none hover:bg-bg-hover";
+
 /**
  * A toolbar button that does its likeliest thing on a click, with a chevron for the menu of the
- * others, when there are any. Without a likeliest thing (`onClick` is `null`), a click opens the menu.
+ * others. It's only split while both halves do something different: without a likeliest thing
+ * (`onClick` is `null`), the whole button opens the menu; disabled, or without a menu, it's one
+ * button.
  */
 function SplitButton({
   tooltip,
@@ -338,51 +343,66 @@ function SplitButton({
   /** The menu's items; no chevron without them. */
   menu: ReactNode | null;
 }) {
-  const [open, setOpen] = useState(false);
-  const mainRef = useRef<HTMLButtonElement>(null);
-  return (
-    <div className="flex h-7 shrink-0 items-stretch rounded-md border border-border bg-bg-raised text-[12px] font-medium text-fg">
+  const chevron = <ChevronDown className="size-3 text-fg-subtle" />;
+  const content = (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.Content
+        align="end"
+        sideOffset={4}
+        className="z-50 w-64 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
+      >
+        {menu}
+      </DropdownMenuPrimitive.Content>
+    </DropdownMenuPrimitive.Portal>
+  );
+
+  if (disabled || !menu) {
+    return (
       <Tooltip label={tooltip}>
         {/* Not `disabled`, which would keep the tooltip saying why from showing. */}
         <button
-          ref={mainRef}
           type="button"
           aria-disabled={disabled}
-          onClick={() => {
-            if (disabled) return;
-            if (onClick) onClick();
-            else setOpen((o) => !o);
-          }}
-          className={cn(
-            "flex items-center gap-1.5 px-2 hover:bg-bg-hover aria-disabled:opacity-50 aria-disabled:hover:bg-transparent",
-            menu ? "rounded-l-md" : "rounded-md",
-          )}
+          onClick={disabled ? undefined : (onClick ?? undefined)}
+          className={cn(buttonFrame, buttonPart, "aria-disabled:opacity-50 aria-disabled:hover:bg-bg-raised")}
         >
+          {children}
+          {!onClick && menu && chevron}
+        </button>
+      </Tooltip>
+    );
+  }
+
+  if (!onClick) {
+    return (
+      <DropdownMenuPrimitive.Root modal={false}>
+        <Tooltip label={tooltip}>
+          <DropdownMenuPrimitive.Trigger className={cn(buttonFrame, buttonPart, "data-[state=open]:bg-bg-hover")}>
+            {children}
+            {chevron}
+          </DropdownMenuPrimitive.Trigger>
+        </Tooltip>
+        {content}
+      </DropdownMenuPrimitive.Root>
+    );
+  }
+
+  return (
+    <div className={cn(buttonFrame, "flex items-stretch")}>
+      <Tooltip label={tooltip}>
+        <button type="button" onClick={onClick} className={cn(buttonPart, "rounded-l-md")}>
           {children}
         </button>
       </Tooltip>
-      {menu && (
-        <DropdownMenuPrimitive.Root modal={false} open={open} onOpenChange={setOpen}>
-          <DropdownMenuPrimitive.Trigger
-            aria-label={chevronLabel}
-            disabled={disabled}
-            className="grid w-6 place-items-center rounded-r-md border-l border-border text-fg-subtle outline-none hover:bg-bg-hover hover:text-fg data-[state=open]:bg-bg-hover"
-          >
-            <ChevronDown className="size-3" />
-          </DropdownMenuPrimitive.Trigger>
-          <DropdownMenuPrimitive.Portal>
-            <DropdownMenuPrimitive.Content
-              align="end"
-              sideOffset={4}
-              // A click on the button toggles the menu; it mustn't also count as dismissing it.
-              onInteractOutside={(e) => mainRef.current?.contains(e.target as Node) && e.preventDefault()}
-              className="z-50 w-64 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
-            >
-              {menu}
-            </DropdownMenuPrimitive.Content>
-          </DropdownMenuPrimitive.Portal>
-        </DropdownMenuPrimitive.Root>
-      )}
+      <DropdownMenuPrimitive.Root modal={false}>
+        <DropdownMenuPrimitive.Trigger
+          aria-label={chevronLabel}
+          className="grid w-6 place-items-center rounded-r-md border-l border-border text-fg-subtle outline-none hover:bg-bg-hover hover:text-fg data-[state=open]:bg-bg-hover"
+        >
+          <ChevronDown className="size-3" />
+        </DropdownMenuPrimitive.Trigger>
+        {content}
+      </DropdownMenuPrimitive.Root>
     </div>
   );
 }
