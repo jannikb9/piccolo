@@ -171,9 +171,6 @@ const diffOptionHeading = "px-1 pb-1.5 text-[11px] font-medium text-fg-faint";
  * while anything is hidden, so a filtered diff isn't mistaken for the whole change.
  */
 function DiffOptions() {
-  const layout = useStore((s) => s.layout);
-  const narrow = useStore((s) => s.narrowDiff);
-  const setLayout = useStore((s) => s.setLayout);
   const hideWhitespace = useStore((s) => s.hideWhitespace);
   const toggleHideWhitespace = useStore((s) => s.toggleHideWhitespace);
   const hideImports = useStore((s) => s.hideImports);
@@ -206,27 +203,10 @@ function DiffOptions() {
           onOpenAutoFocus={(e) => e.preventDefault()}
           className="z-50 flex w-52 flex-col gap-3 rounded-md border border-border bg-bg-raised p-2 text-[12.5px] text-fg-muted shadow-lg shadow-black/20 outline-none"
         >
-          {/* A narrow pane is always unified, so there's nothing to choose. */}
-          {!narrow && (
-            <section>
-              <h3 className={diffOptionHeading}>Layout</h3>
-              <div role="radiogroup" aria-label="Layout" className="grid grid-cols-2 gap-0.5 rounded-md bg-bg p-0.5 ring-1 ring-border">
-                {layouts.map(({ value, label, icon: Icon }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    role="radio"
-                    aria-checked={layout === value}
-                    onClick={() => setLayout(value as DiffLayout)}
-                    className="flex h-6 items-center justify-center gap-1.5 rounded text-[12px] font-medium transition-colors hover:text-fg aria-checked:bg-bg-active aria-checked:text-fg aria-checked:shadow-sm aria-checked:shadow-black/20"
-                  >
-                    <Icon className="size-3.5" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
+          <section>
+            <h3 className={diffOptionHeading}>Layout</h3>
+            <LayoutSwitch />
+          </section>
           <section>
             <h3 className={diffOptionHeading}>Hide</h3>
             {options.map(({ label, checked, toggle }) => (
@@ -247,6 +227,41 @@ function DiffOptions() {
       </Popover.Portal>
     </Popover.Root>
   );
+}
+
+/**
+ * Unified or split diffs. A narrow pane is always unified, so there the switch shows that, disabled,
+ * and its tooltip says why.
+ */
+function LayoutSwitch() {
+  const layout = useStore((s) => s.layout);
+  const narrow = useStore((s) => s.narrowDiff);
+  const setLayout = useStore((s) => s.setLayout);
+  const shown = narrow ? "unified" : layout;
+  const group = (
+    <div
+      role="radiogroup"
+      aria-label="Layout"
+      aria-disabled={narrow || undefined}
+      className="grid grid-cols-2 gap-0.5 rounded-md bg-bg p-0.5 ring-1 ring-border aria-disabled:opacity-50"
+    >
+      {layouts.map(({ value, label, icon: Icon }) => (
+        <button
+          key={value}
+          type="button"
+          role="radio"
+          aria-checked={shown === value}
+          aria-disabled={narrow || undefined}
+          onClick={() => !narrow && setLayout(value as DiffLayout)}
+          className="flex h-6 items-center justify-center gap-1.5 rounded text-[12px] font-medium transition-colors not-aria-disabled:hover:text-fg aria-checked:bg-bg-active aria-checked:text-fg aria-checked:shadow-sm aria-checked:shadow-black/20"
+        >
+          <Icon className="size-3.5" />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+  return narrow ? <Tooltip label="Split diffs are only available in a wider window">{group}</Tooltip> : group;
 }
 
 /**
