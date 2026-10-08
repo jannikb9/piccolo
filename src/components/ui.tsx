@@ -229,6 +229,21 @@ export function Skeleton({ className, style }: { className?: string; style?: CSS
   return <span className={cn("block animate-pulse rounded bg-bg-hover", className)} style={style} />;
 }
 
+/** A checkbox's box, for a control that is a checkbox (`role="checkbox"` or a label around one). */
+export function CheckBox({ checked }: { checked: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "grid size-3.5 shrink-0 place-items-center rounded-[4px] border transition-colors",
+        checked ? "border-accent bg-accent text-accent-fg" : "border-border-strong",
+      )}
+    >
+      {checked && <Check className="size-2.5" strokeWidth={3.5} />}
+    </span>
+  );
+}
+
 export function ViewedToggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
   return (
     <button
@@ -246,14 +261,7 @@ export function ViewedToggle({ checked, onChange }: { checked: boolean; onChange
           : "border-border text-fg-subtle hover:border-border-strong hover:text-fg-muted",
       )}
     >
-      <span
-        className={cn(
-          "grid size-3.5 place-items-center rounded-[4px] border transition-colors",
-          checked ? "border-accent bg-accent text-accent-fg" : "border-border-strong",
-        )}
-      >
-        {checked && <Check className="size-2.5" strokeWidth={3.5} />}
-      </span>
+      <CheckBox checked={checked} />
       Viewed
     </button>
   );

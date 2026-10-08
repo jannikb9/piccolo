@@ -1,4 +1,4 @@
-import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
+import * as Popover from "@radix-ui/react-popover";
 import type { UseQueryResult } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -9,8 +9,6 @@ import {
   GitBranch,
   GitCompareArrows,
   GitMerge,
-  Import,
-  Pilcrow,
   Rows2,
   SlidersHorizontal,
 } from "lucide-react";
@@ -22,7 +20,7 @@ import type { ChangedFile, DiffLayout, DiffPatch, DiffScope, GeneralThread, Repo
 import { CommitPicker } from "./CommitPicker";
 import { DiffView, type DiffViewHandle } from "./DiffView";
 import { AddressButton, AgentsButton, ReviewButton } from "./SessionList";
-import { DiffCount, Skeleton, Tooltip, useJustDone } from "./ui";
+import { CheckBox, DiffCount, Skeleton, Tooltip, useJustDone } from "./ui";
 
 export function ReviewPane({
   repo,
@@ -161,16 +159,16 @@ function Toolbar({
 }
 
 const layouts = [
-  { value: "split", label: "Split", icon: Columns2 },
   { value: "unified", label: "Unified", icon: Rows2 },
+  { value: "split", label: "Split", icon: Columns2 },
 ] as const;
 
-const diffOptionClass =
-  "flex h-7 cursor-default items-center gap-2 rounded px-2 outline-none data-[highlighted]:bg-bg-hover data-[highlighted]:text-fg";
+const diffOptionHeading = "px-1 pb-1.5 text-[11px] font-medium text-fg-faint";
 
 /**
- * How the diff is laid out and what it leaves out, like GitHub's diff settings menu. The button
- * stays highlighted while anything is hidden, so a filtered diff isn't mistaken for the whole change.
+ * How the diff is laid out and what it leaves out, like GitHub's diff settings: a switch between
+ * the two layouts, and a checkbox for each kind of change to hide. The button stays highlighted
+ * while anything is hidden, so a filtered diff isn't mistaken for the whole change.
  */
 function DiffOptions() {
   const layout = useStore((s) => s.layout);
@@ -182,14 +180,14 @@ function DiffOptions() {
   const toggleHideImports = useStore((s) => s.toggleHideImports);
   const hiding = [hideWhitespace && "whitespace", hideImports && "import"].filter(Boolean).join(" and ");
   const options = [
-    { label: "Hide whitespace changes", icon: Pilcrow, checked: hideWhitespace, toggle: toggleHideWhitespace },
-    { label: "Hide import changes", icon: Import, checked: hideImports, toggle: toggleHideImports },
+    { label: "Whitespace changes", checked: hideWhitespace, toggle: toggleHideWhitespace },
+    { label: "Import changes", checked: hideImports, toggle: toggleHideImports },
   ];
 
   return (
-    <DropdownMenuPrimitive.Root>
+    <Popover.Root>
       <Tooltip label={hiding ? `Hiding ${hiding} changes` : "Diff options"}>
-        <DropdownMenuPrimitive.Trigger
+        <Popover.Trigger
           aria-label="Diff options"
           className={cn(
             "grid size-7 place-items-center rounded-md outline-none transition-colors",
@@ -199,55 +197,55 @@ function DiffOptions() {
           )}
         >
           <SlidersHorizontal className="size-3.5" />
-        </DropdownMenuPrimitive.Trigger>
+        </Popover.Trigger>
       </Tooltip>
-      <DropdownMenuPrimitive.Portal>
-        <DropdownMenuPrimitive.Content
+      <Popover.Portal>
+        <Popover.Content
           align="end"
           sideOffset={4}
-          className="z-50 min-w-52 rounded-md border border-border bg-bg-raised p-1 text-[12.5px] text-fg-muted shadow-lg shadow-black/20"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          className="z-50 flex w-52 flex-col gap-3 rounded-md border border-border bg-bg-raised p-2 text-[12.5px] text-fg-muted shadow-lg shadow-black/20 outline-none"
         >
           {/* A narrow pane is always unified, so there's nothing to choose. */}
           {!narrow && (
-            <>
-              <DropdownMenuPrimitive.RadioGroup value={layout} onValueChange={(v) => setLayout(v as DiffLayout)}>
+            <section>
+              <h3 className={diffOptionHeading}>Layout</h3>
+              <div role="radiogroup" aria-label="Layout" className="grid grid-cols-2 gap-0.5 rounded-md bg-bg p-0.5 ring-1 ring-border">
                 {layouts.map(({ value, label, icon: Icon }) => (
-                  <DropdownMenuPrimitive.RadioItem
+                  <button
                     key={value}
-                    value={value}
-                    onSelect={(e) => e.preventDefault()}
-                    className={diffOptionClass}
+                    type="button"
+                    role="radio"
+                    aria-checked={layout === value}
+                    onClick={() => setLayout(value as DiffLayout)}
+                    className="flex h-6 items-center justify-center gap-1.5 rounded text-[12px] font-medium transition-colors hover:text-fg aria-checked:bg-bg-active aria-checked:text-fg aria-checked:shadow-sm aria-checked:shadow-black/20"
                   >
-                    <Icon className="size-3.5 text-fg-subtle" />
+                    <Icon className="size-3.5" />
                     {label}
-                    <DropdownMenuPrimitive.ItemIndicator className="ml-auto pl-4">
-                      <Check className="size-3.5 text-accent" />
-                    </DropdownMenuPrimitive.ItemIndicator>
-                  </DropdownMenuPrimitive.RadioItem>
+                  </button>
                 ))}
-              </DropdownMenuPrimitive.RadioGroup>
-              <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />
-            </>
+              </div>
+            </section>
           )}
-          {options.map(({ label, icon: Icon, checked, toggle }) => (
-            <DropdownMenuPrimitive.CheckboxItem
-              key={label}
-              checked={checked}
-              onCheckedChange={toggle}
-              // The menu stays open, so several options can be switched in one go.
-              onSelect={(e) => e.preventDefault()}
-              className={diffOptionClass}
-            >
-              <Icon className="size-3.5 text-fg-subtle" />
-              {label}
-              <DropdownMenuPrimitive.ItemIndicator className="ml-auto pl-4">
-                <Check className="size-3.5 text-accent" />
-              </DropdownMenuPrimitive.ItemIndicator>
-            </DropdownMenuPrimitive.CheckboxItem>
-          ))}
-        </DropdownMenuPrimitive.Content>
-      </DropdownMenuPrimitive.Portal>
-    </DropdownMenuPrimitive.Root>
+          <section>
+            <h3 className={diffOptionHeading}>Hide</h3>
+            {options.map(({ label, checked, toggle }) => (
+              <button
+                key={label}
+                type="button"
+                role="checkbox"
+                aria-checked={checked}
+                onClick={toggle}
+                className="flex h-7 w-full items-center gap-2 rounded px-1 text-left transition-colors hover:bg-bg-hover hover:text-fg"
+              >
+                <CheckBox checked={checked} />
+                {label}
+              </button>
+            ))}
+          </section>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
