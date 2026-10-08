@@ -5,7 +5,7 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
-## 0.2.3 — 2026-10-08
+## 1.0.0 — 2026-10-08
 
 - **Stop waiting for an agent**: when an agent never says it's done, the × beside it in the agents panel stops its spinner and counts its work as done.
 - **Review the same agent again in one click**: Review asks the agent that reviewed last, and the menus of Review and Request changes list every other connected agent.
