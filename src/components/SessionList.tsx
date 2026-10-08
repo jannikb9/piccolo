@@ -1,11 +1,12 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
-import { Check, ChevronDown, Copy, Eye, LoaderCircle, X } from "lucide-react";
+import { Check, ChevronDown, Copy, LoaderCircle, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useCopyPrompt, useRequestReview, useSendComments, useSessionActivity, useSessions, useStopRequest } from "../lib/queries";
 import { agentLabel, cn, modelLabel } from "../lib/utils";
 import type { AgentSession, ReviewRequest, SessionActivity, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
+import { BuilderBot, ReviewerBot } from "./BotIcons";
 import { IconButton, Tooltip, useJustDone } from "./ui";
 
 /** A session as the app names it: its title, else its agent. */
@@ -407,11 +408,14 @@ function SplitButton({
   );
 }
 
-/** The mark on a split button: the session it goes to, else `fallback` (a clipboard), then a check once copied. */
-function TargetIcon({ agent, copied, fallback }: { agent: string | undefined; copied: boolean; fallback?: ReactNode }) {
+/**
+ * A button's mark: the agent a click sends to straight away, which splits the button from its menu;
+ * otherwise its bot. A check once its prompt is copied.
+ */
+function ButtonIcon({ agent, bot: Bot, copied }: { agent: string | undefined; bot: typeof ReviewerBot; copied: boolean }) {
   if (copied) return <Check className="size-3.5" strokeWidth={2.5} />;
   if (agent) return <AgentIcon name={agent} className="size-3.5" />;
-  return fallback ?? <Copy className="size-3.5 text-fg-muted" />;
+  return <Bot className="size-3.5 text-fg-muted" />;
 }
 
 /** A session's model in a menu, beside its name. */
@@ -481,7 +485,7 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
         </>
       }
     >
-      <TargetIcon agent={again?.agent} copied={copied} fallback={<Eye className="size-3.5 text-fg-muted" />} />
+      <ButtonIcon agent={busy ? undefined : again?.agent} bot={ReviewerBot} copied={copied} />
       {/* A narrow toolbar keeps the mark. */}
       <span className="hidden @2xl:inline">{copied ? "Copied" : "Review"}</span>
     </SplitButton>
@@ -561,7 +565,7 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
         )
       }
     >
-      <TargetIcon agent={author?.agent} copied={copied} />
+      <ButtonIcon agent={busy || empty ? undefined : author?.agent} bot={BuilderBot} copied={copied} />
       {/* A narrow toolbar keeps the mark and the count. */}
       <span className="hidden @3xl:inline">{copied ? "Copied" : "Request changes"}</span>
       {!copied && !empty && (
