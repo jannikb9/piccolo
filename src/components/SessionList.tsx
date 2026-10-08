@@ -440,30 +440,38 @@ function CopyItem({ after, onSelect }: { after: boolean; onSelect: () => void })
 
 /**
  * "Review": asks for a review of the branch. Another round goes to the session that reviewed it
- * last, while it's around and free; otherwise a click opens the menu. The menu asks another session
- * on the branch instead (never the author), or copies a prompt to paste into any agent; that agent
- * shows up here once it starts on the review.
+ * last, while it's connected; otherwise a click opens the menu. The menu asks any other connected
+ * session instead, or copies a prompt to paste into any agent; that agent shows up here once it
+ * starts on the review.
  */
 export function ReviewButton({ worktree }: { worktree: Worktree }) {
-  const { current, author, requestOf } = useAgents(worktree);
+  const { activity, current, author, requestOf } = useAgents(worktree);
   const review = useRequestReview(worktree);
   const copy = useCopyPrompt(worktree);
   const [copied, markCopied] = useJustDone();
   const busy = review.isPending || copy.isPending;
   const copyPrompt = () => copy.mutate("review", { onSuccess: markCopied });
 
-  // The author reviewing its own work isn't worth offering, nor a session that's at work.
-  const reviewers = current.filter((s) => s.reachable && s.id !== author?.id && stateOf(s, requestOf(s)) !== "busy");
-  const reviewedAt = (s: AgentSession) => {
-    const request = requestOf(s);
-    return request?.kind === "review" ? request.requestedAt : 0;
-  };
-  const again = reviewers.filter((s) => reviewedAt(s) > 0).sort((a, b) => reviewedAt(b) - reviewedAt(a))[0] ?? null;
-  const others = reviewers.filter((s) => s.id !== again?.id);
+  const connected = current.filter((s) => s.reachable);
+  // Requests come newest first. The author reviewing its own work isn't worth a click.
+  const lastReview = activity.requests.find(
+    (r) => r.kind === "review" && r.sessionId !== author?.id && connected.some((s) => s.id === r.sessionId),
+  );
+  const again = connected.find((s) => s.id === lastReview?.sessionId) ?? null;
+  const others = connected.filter((s) => s.id !== again?.id);
 
   return (
     <SplitButton
-      tooltip={again ? `Ask ${sessionName(again)} to review the branch again` : "Ask for a review of the branch"}
+      tooltip={
+        again ? (
+          <span className="flex flex-col gap-0.5">
+            <span>Ask {sessionName(again)} to review the branch again</span>
+            {stateOf(again, requestOf(again)) === "busy" && <span className="text-fg-subtle">It's at work right now</span>}
+          </span>
+        ) : (
+          "Ask for a review of the branch"
+        )
+      }
       disabled={busy}
       onClick={again ? () => review.mutate(again.id) : null}
       menuLabel="Ask for a review elsewhere"
@@ -477,6 +485,7 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
                   <AgentIcon name={session.agent} className="size-3.5" />
                   <span className="min-w-0 flex-1 truncate text-fg">{sessionName(session)}</span>
                   <ModelName session={session} />
+                  {session.id === author?.id && <span className="text-[11px] text-fg-subtle">Author</span>}
                 </DropdownMenuPrimitive.Item>
               ))}
             </>
@@ -495,8 +504,8 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
 /**
  * "Request changes N": sends the comments the author hasn't seen to it, to address, from the reviewer or
  * from reviewing agents; disabled, saying why, while there are none. Without an author it copies a
- * prompt for every open comment, to paste into any agent. Its menu sends them to another session on
- * the branch instead, or copies the prompt.
+ * prompt for every open comment, to paste into any agent. Its menu sends them to any other connected
+ * session instead, or copies the prompt.
  */
 export function AddressButton({ worktree }: { worktree: Worktree }) {
   const { activity, current, author } = useAgents(worktree);
