@@ -15,6 +15,17 @@ export const REVIEW_TITLE = "Review knight moves";
 
 const lines = (...l: string[]) => l.join("\n") + "\n";
 
+const KNIGHT_TEST = lines(
+  'import { expect, test } from "vitest";',
+  'import { Board } from "../src/board";',
+  'import { knightMoves } from "../src/moves/knight";',
+  "",
+  'test("a knight in the middle has eight moves", () => {',
+  '  const board = Board.withPieces({ d4: "white knight" });',
+  '  expect(knightMoves(board, "d4")).toHaveLength(8);',
+  "});",
+);
+
 /** Each file on `main`, as Claude first wrote it (`v1`), and after it addressed the review (`v2`). */
 export const FILES: { path: string; main: string; v1: string; v2: string }[] = [
   {
@@ -25,8 +36,7 @@ export const FILES: { path: string; main: string; v1: string; v2: string }[] = [
       "",
       "/** Every jump a knight makes: two squares one way, one to the side. */",
       "const JUMPS = [",
-      "  [1, 2], [2, 1], [2, -1], [1, -2],",
-      "  [-1, -2], [-2, -1], [-2, 1], [-1, 2],",
+      "  [1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2],",
       "];",
       "",
       "/** The squares the knight on `from` can move to. */",
@@ -45,8 +55,7 @@ export const FILES: { path: string; main: string; v1: string; v2: string }[] = [
       "",
       "/** Every jump a knight makes: two squares one way, one to the side. */",
       "const KNIGHT_JUMPS = [",
-      "  [1, 2], [2, 1], [2, -1], [1, -2],",
-      "  [-1, -2], [-2, -1], [-2, 1], [-1, 2],",
+      "  [1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2],",
       "];",
       "",
       "/** The squares the knight on `from` can move to. */",
@@ -67,31 +76,8 @@ export const FILES: { path: string; main: string; v1: string; v2: string }[] = [
   {
     path: "test/knight.test.ts",
     main: "",
-    v1: lines(
-      'import { expect, test } from "vitest";',
-      'import { Board } from "../src/board";',
-      'import { knightMoves } from "../src/moves/knight";',
-      "",
-      'test("a knight in the middle has eight moves", () => {',
-      '  const board = Board.withPieces({ d4: "white knight" });',
-      '  expect(knightMoves(board, "d4")).toHaveLength(8);',
-      "});",
-    ),
-    v2: lines(
-      'import { expect, test } from "vitest";',
-      'import { Board } from "../src/board";',
-      'import { knightMoves } from "../src/moves/knight";',
-      "",
-      'test("a knight in the middle has eight moves", () => {',
-      '  const board = Board.withPieces({ d4: "white knight" });',
-      '  expect(knightMoves(board, "d4")).toHaveLength(8);',
-      "});",
-      "",
-      'test("a knight next to its own pawn can\'t take it", () => {',
-      '  const board = Board.withPieces({ d4: "white knight", e6: "white pawn" });',
-      '  expect(knightMoves(board, "d4")).not.toContain("e6");',
-      "});",
-    ),
+    v1: KNIGHT_TEST,
+    v2: KNIGHT_TEST,
   },
 ];
 
@@ -151,7 +137,7 @@ export const OTHER_FILE = {
 };
 
 /** The name the reviewer ⌘-clicks, on this line of the diff, to see where it's defined. */
-export const LOOKUP = { path: "src/moves/knight.ts", line: 14, name: "square" };
+export const LOOKUP = { path: "src/moves/knight.ts", line: 13, name: "square" };
 
 /**
  * A comment on lines of a file, where it sits in v1 and after Claude's changes (v2). `key` names
@@ -164,16 +150,9 @@ export const CODEX_COMMENTS: StoryComment[] = [
   {
     key: "own",
     path: "src/moves/knight.ts",
-    v1: [15, 15],
-    v2: [16, 18],
-    body: "**Bug:** this also lands on squares with our own pieces. A knight can only move to an empty square or take an opponent's piece.",
-  },
-  {
-    key: "test",
-    path: "test/knight.test.ts",
-    v1: [5, 8],
-    v2: [5, 8],
-    body: "The test has the knight alone on the board, so it can't catch the bug above. Put one of its own pieces where it could jump.",
+    v1: [13, 13],
+    v2: [14, 14],
+    body: "**Bug:** this also lands on squares with our own pieces.",
   },
 ];
 
@@ -187,8 +166,7 @@ export const REVIEWER_COMMENT = {
 
 /** Claude's answers, by the comment they answer (`reviewer` for the reviewer's). */
 export const CLAUDE_REPLIES: Record<string, string> = {
-  own: "Fixed: squares with our own pieces are skipped now, so the knight can still take the opponent's pieces but never its own.",
-  test: "Added `a knight next to its own pawn can't take it`, which fails without the fix.",
+  own: "Fixed: squares with our own pieces are skipped now.",
   reviewer: "Renamed it to `KNIGHT_JUMPS`.",
 };
 
@@ -201,6 +179,5 @@ export const COMMITS = {
 export const CODEX_STEPS: { title: string; detail: string; output: string }[] = [
   { title: "Ran", detail: `piccolo -C ${WORKTREE} guide --request 1`, output: "# Reviewing feat/knight-moves  … +18 lines" },
   { title: "Explored", detail: "", output: "Read knight.ts, knight.test.ts, board.ts" },
-  { title: "Ran", detail: "piccolo comment --as codex src/moves/knight.ts:15 …", output: "Commented on src/moves/knight.ts:15 (#1)." },
-  { title: "Ran", detail: "piccolo comment --as codex test/knight.test.ts:5-8 …", output: "Commented on test/knight.test.ts:5-8 (#2)." },
+  { title: "Ran", detail: "piccolo comment --as codex src/moves/knight.ts:13 …", output: "Commented on src/moves/knight.ts:13 (#1)." },
 ];

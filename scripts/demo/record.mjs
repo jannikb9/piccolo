@@ -157,14 +157,6 @@ async function scrollDiff(dy, ms = 700) {
   await sleep(60);
 }
 
-/** Scrolls the diff until `target` sits `y` pixels from the top of the page. */
-async function scrollTo(target, y, ms) {
-  // The diff only renders what's near the screen: scroll down until the target exists.
-  for (let i = 0; i < 20 && (await target.count()) === 0; i++) await scrollDiff(500, 150);
-  const b = await box(target);
-  await scrollDiff(b.y - y, ms);
-}
-
 /** The box of the first `word` in `line`'s text (CSS pixels). */
 function wordBox(line, word) {
   return line.evaluate((el, word) => {
@@ -198,7 +190,6 @@ try {
   const agents = header.getByRole("button", { name: "Agents on this branch" });
   const review = header.getByRole("button", { name: "Review", exact: true });
   const knight = "src/moves/knight.ts";
-  const test = "test/knight.test.ts";
 
   const pane = await box(diff);
 
@@ -215,7 +206,7 @@ try {
   // 2. ⌘-click a name to see where it's defined, outside the diff, then come back.
   caption("⌘-click to jump to a definition");
   await moveTo(at(0.68, 0.67), { ms: 300 });
-  const name = await wordBox(fileDiff(knight).locator('[data-line="14"]'), "square");
+  const name = await wordBox(fileDiff(knight).locator('[data-line="13"]'), "square");
   const onName = { x: name.x + name.width / 2, y: name.y + name.height * 0.6 };
   await moveTo(onName);
   await sleep(250);
@@ -269,9 +260,6 @@ try {
   await agent("codexSteps", 1);
   await agent("codexComments", "own");
   await sleep(700);
-  await agent("codexSteps", 1);
-  await agent("codexComments", "test");
-  await sleep(500);
   await agent("codexFinishes");
   await sleep(500);
 
@@ -309,13 +297,25 @@ try {
   await sleep(500);
   await agent("claudeReplies", "own");
   await sleep(1000);
-  const newTest = fileDiff(test).locator('[data-column-number="10"]').first();
-  await scrollTo(newTest, VIEW.height * 0.5, 700);
-  await sleep(300);
-  await agent("claudeReplies", "test");
   await agent("claudeDone");
   pace(1);
-  await sleep(2800);
+  await sleep(1500);
+
+  // 9. Both comments are answered: resolve them. The first collapsing brings the second into view.
+  caption("Resolve comments once they're addressed");
+  /** The Resolve button of the thread whose last message starts with `reply`. */
+  const resolve = (reply) =>
+    page
+      .locator("div")
+      .filter({ hasText: reply })
+      .filter({ has: page.getByRole("button", { name: "Resolve", exact: true }) })
+      .last() // The innermost match is the thread's card.
+      .getByRole("button", { name: "Resolve", exact: true });
+  await sleep(500);
+  await press(resolve("Renamed it to"), { outline: true });
+  await sleep(700);
+  await press(resolve("Fixed: squares with our own pieces"), { outline: true });
+  await sleep(2300);
 } catch (error) {
   // Shows where the story got stuck.
   await page.screenshot({ path: path.join(os.tmpdir(), "piccolo-demo-error.png") });
