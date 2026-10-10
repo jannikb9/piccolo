@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Records the README demo: `pnpm demo` → docs/demo.mp4.
+// Records the README demo: `pnpm demo` → docs/Piccolo.Demo.mp4.
 //
 // The browser build's demo mode (src/demo) stands in for the agents; this script plays the
 // reviewer with a real mouse and keyboard, captures the page at 2x, then adds captions and
@@ -13,7 +13,7 @@ import { chromium } from "playwright";
 import { createServer } from "vite";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
-const OUT_FILE = path.join(ROOT, "docs/demo.mp4");
+const OUT_FILE = path.join(ROOT, "docs/Piccolo.Demo.mp4");
 /**
  * The page, in CSS pixels; it's captured at twice that. Small, so the app is large enough in the
  * video to read at the README's width; src/demo narrows its panels so the toolbar keeps its labels.

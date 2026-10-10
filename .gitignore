@@ -24,4 +24,4 @@ dist-ssr
 *.sw?
 
 # The demo video (`pnpm demo`); the README plays a copy uploaded to GitHub.
-docs/demo.mp4
+docs/Piccolo.Demo.mp4

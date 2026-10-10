@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="macOS">
 </p>
 
-https://github.com/user-attachments/assets/ca82d5d0-571a-44f0-811e-458a738a9573
+https://github.com/user-attachments/assets/a0c3a22a-257f-4c27-b9fc-273d6ba40b21
 
 ## Why Piccolo?
 
