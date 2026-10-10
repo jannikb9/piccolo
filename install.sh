@@ -1,12 +1,12 @@
 #!/bin/sh
 # Installs (or updates) Piccolo from the latest GitHub release:
-#   curl -fsSL https://raw.githubusercontent.com/jannikbertram/piccolo/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/jannikb9/piccolo/main/install.sh | sh
 #
 # The app goes to /Applications (or ~/Applications when that isn't writable) and the `piccolo`
 # command is linked into ~/.local/bin.
 set -eu
 
-url="https://github.com/jannikbertram/piccolo/releases/latest/download/Piccolo.zip"
+url="https://github.com/jannikb9/piccolo/releases/latest/download/Piccolo.zip"
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "Piccolo runs on macOS only." >&2

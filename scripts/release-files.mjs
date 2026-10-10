@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const [version, tarball, outDir] = process.argv.slice(2);
-const repo = "jannikbertram/piccolo";
+const repo = "jannikb9/piccolo";
 
 const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
 // Everything from the first `## <version>` heading on; the intro above it is for contributors.
