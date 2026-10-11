@@ -20,8 +20,6 @@ https://github.com/user-attachments/assets/7a986ed4-90d3-4e10-964b-64e41566a2c0
 curl -fsSL https://raw.githubusercontent.com/jannikb9/piccolo/main/install.sh | sh
 ```
 
-**Updates:** The app will automatically notify you about updates when available.
-
 ## Why Piccolo?
 
 The progress on agentic coding has drastically changed the workflows for most, if not all engineers. We run multiple sessions in parallel, each working in its own worktree. The produced code is reviewed both by us and independent agents.
