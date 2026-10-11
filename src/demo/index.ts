@@ -301,17 +301,25 @@ window.addEventListener("mouseup", () => pointer.classList.remove("pressed"), op
 declare global {
   interface Window {
     demoHighlight: (box: { x: number; y: number; width: number; height: number }, ms: number) => void;
+    demoUnhighlight: () => void;
   }
+}
+/** Fades `outline` out and removes it. */
+function fadeOut(outline: HTMLElement) {
+  if (outline.classList.contains("out")) return;
+  outline.classList.add("out");
+  outline.addEventListener("animationend", () => outline.remove());
 }
 window.demoHighlight = ({ x, y, width, height }, ms) => {
   const outline = document.createElement("div");
   outline.className = "demo-highlight";
   Object.assign(outline.style, { left: `${x - 5}px`, top: `${y - 5}px`, width: `${width + 10}px`, height: `${height + 10}px` });
   document.body.append(outline);
-  setTimeout(() => {
-    outline.classList.add("out");
-    outline.addEventListener("animationend", () => outline.remove());
-  }, ms);
+  setTimeout(() => fadeOut(outline), ms);
+};
+/** The outline sits where its target was: it goes before a click that makes the target change. */
+window.demoUnhighlight = () => {
+  for (const outline of document.querySelectorAll<HTMLElement>(".demo-highlight")) fadeOut(outline);
 };
 window.addEventListener("keydown", (e) => {
   // ⌘ alone is held for ⌘-click, not typed.

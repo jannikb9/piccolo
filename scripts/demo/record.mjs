@@ -124,12 +124,21 @@ async function highlight(target, ms = 1300) {
   await page.evaluate(({ b, ms }) => window.demoHighlight(b, ms), { b, ms });
 }
 
-/** A click the viewer should notice: at normal speed, after a beat of hovering, outlined if `outline`. */
+/**
+ * A click the viewer should notice: at normal speed, after a beat of hovering. If `outline`, the
+ * target is outlined as the pointer travels to it, and the outline fades while the pointer rests
+ * on it: the click can resize the target (Request changes loses its count), and the outline
+ * doesn't follow.
+ */
 async function press(target, { outline = false } = {}) {
   const rate = paces.at(-1)?.rate ?? 1;
   pace(1);
-  if (outline) await highlight(target);
+  if (outline) {
+    await highlight(target, 5000);
+    await sleep(400);
+  }
   await moveTo(target);
+  if (outline) await page.evaluate(() => window.demoUnhighlight());
   await sleep(300);
   await click(target);
   await sleep(350);
