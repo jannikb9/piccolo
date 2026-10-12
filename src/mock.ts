@@ -698,7 +698,8 @@ export function mockCopyPrompt(worktreePath: string, kind: ReviewRequest["kind"]
   const sent = kind === "implement" ? unseenBy(worktreePath, null) : [];
   if (kind === "implement" && sent.length === 0) return Promise.reject("There are no comments to send");
   return mockAsk(kind, null, sent).then(
-    (r) => `Piccolo asks you to review the changes in the worktree ${worktreePath}. Run \`piccolo -C ${worktreePath} guide --request ${r.id}\` and follow the steps it prints.`,
+    (r) =>
+      `${kind === "review" ? "Review the changes for Piccolo." : `Address ${sent.length === 1 ? "a review comment" : `${sent.length} review comments`} from Piccolo.`} The worktree is ${worktreePath}. Run \`piccolo -C ${worktreePath} guide --request ${r.id}\` and follow the steps it prints.`,
   );
 }
 

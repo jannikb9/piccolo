@@ -10,7 +10,7 @@
 //! session building the branch, or asked to address comments, implements.
 
 use crate::comments::{blocking, now_ms, sql, Store, Target};
-use crate::git::{self, Result};
+use crate::git::{self, DiffOptions, Result, Scope};
 use crate::sessions::{self, shell_quote, Caller, Session};
 use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
@@ -134,10 +134,29 @@ impl Store {
         if kind == Kind::Implement && threads.is_empty() {
             return Err("There are no comments to send".into());
         }
+        let gist = match kind {
+            Kind::Review => Gist { files: most_changed(target), comments: Vec::new() },
+            Kind::Implement => self.gist_of(&threads)?,
+        };
         let request = self.add_request(target, kind, agent, session, head, &threads)?;
         let again = kind == Kind::Review && self.previous_review(target, agent, session, request.id)?.is_some();
-        let text = prompt(&request, &target.worktree, again);
+        let text = prompt(&request, &target.label(), &target.worktree, again, &gist);
         Ok((request, text))
+    }
+
+    /// What the comments `threads` are about: the files they're on and how each one opens.
+    fn gist_of(&self, threads: &[i64]) -> Result<Gist> {
+        let mut gist = Gist { files: Vec::new(), comments: Vec::new() };
+        for &id in threads {
+            let thread = self.thread(id)?;
+            if let Some(path) = thread.path.filter(|p| !gist.files.contains(p)) {
+                gist.files.push(path);
+            }
+            if let Some(first) = thread.messages.first() {
+                gist.comments.push(opening(&first.body));
+            }
+        }
+        Ok(gist)
     }
 
     /// The open comments a request to address them brings `session` (every open one for any agent):
@@ -336,20 +355,89 @@ impl Store {
     }
 }
 
-/// The prompt that hands `request` on the worktree at `worktree` to an agent.
-fn prompt(request: &Request, worktree: &str, again: bool) -> String {
-    let guide = format!("Run `piccolo -C {} guide --request {}` and follow the steps it prints.", shell_quote(worktree), request.id);
-    match request.kind {
-        Kind::Review => {
-            let again = if again { " again, now that it has changed" } else { "" };
-            format!("Piccolo asks you to review the changes in the worktree {worktree}{again}. {guide}")
-        }
-        Kind::Implement => {
-            let what = if request.threads.len() == 1 { "a review comment" } else { "review comments" };
-            let ids: Vec<String> = request.threads.iter().map(|id| format!("#{id}")).collect();
-            format!("The reviewer sent you {what} from Piccolo to address: {}, on the worktree {worktree}. {guide}", ids.join(", "))
+/// What a prompt says the work is about, so the agent sees at a glance what it's asked (and can
+/// name its session after it).
+struct Gist {
+    /// The files involved, most relevant first.
+    files: Vec<String>,
+    /// How each comment to address opens.
+    comments: Vec<String>,
+}
+
+/// The files changed on `target`'s branch, most changed first and generated ones last; none when
+/// git can't tell.
+fn most_changed(target: &Target) -> Vec<String> {
+    let base = git::default_branch(Path::new(&target.repo));
+    let Ok(mut files) = git::changed_files(Path::new(&target.worktree), base.as_deref(), Scope::All, DiffOptions::default()) else {
+        return Vec::new();
+    };
+    files.sort_by_key(|f| (f.generated, std::cmp::Reverse(f.additions + f.deletions)));
+    files.into_iter().map(|f| f.path).collect()
+}
+
+/// The first words of a comment, to quote: its first line without Markdown markers, cut short.
+fn opening(body: &str) -> String {
+    const MAX: usize = 50;
+    let line = body.lines().map(|l| l.trim_start_matches(['#', '>', '-', '*', ' ']).trim()).find(|l| !l.is_empty()).unwrap_or_default();
+    let words = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if words.chars().count() <= MAX {
+        return words;
+    }
+    let cut: String = words.chars().take(MAX).collect();
+    let kept = match cut.rsplit_once(' ') {
+        Some((head, _)) => head,
+        None => &cut,
+    };
+    format!("{}…", kept.trim_end_matches([',', '.', ':', ';']))
+}
+
+/// The first `shown` of `names` and how many others there are, as prose: "a, b and 3 more".
+fn some_of(names: &[String], shown: usize, others: impl Fn(usize) -> String) -> String {
+    let mut parts = names[..names.len().min(shown)].to_vec();
+    if names.len() > shown {
+        parts.push(others(names.len() - shown));
+    }
+    match parts.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, init)) => format!("{} and {last}", init.join(", ")),
+        None => String::new(),
+    }
+}
+
+/// `files` by their names alone, each once, as prose.
+fn file_names(files: &[String]) -> String {
+    let mut names: Vec<String> = Vec::new();
+    for file in files {
+        let name = Path::new(file).file_name().map_or_else(|| file.clone(), |n| n.to_string_lossy().into_owned());
+        if !names.contains(&name) {
+            names.push(name);
         }
     }
+    some_of(&names, 3, |n| if n == 1 { "1 other file".to_string() } else { format!("{n} other files") })
+}
+
+/// The prompt that hands `request` on `branch`, in the worktree at `worktree`, to an agent. It
+/// opens with what the work is about, since agents name a new session after its first message.
+fn prompt(request: &Request, branch: &str, worktree: &str, again: bool, gist: &Gist) -> String {
+    let guide = format!("Run `piccolo -C {} guide --request {}` and follow the steps it prints.", shell_quote(worktree), request.id);
+    let task = match request.kind {
+        Kind::Review => {
+            let again = if again { " again, now that it has changed" } else { "" };
+            let files = if gist.files.is_empty() { String::new() } else { format!(" They touch {}.", file_names(&gist.files)) };
+            format!("Review the changes on {branch} for Piccolo{again}.{files}")
+        }
+        Kind::Implement => {
+            let what = match request.threads.len() {
+                1 => "a review comment".to_string(),
+                n => format!("{n} review comments"),
+            };
+            let files = if gist.files.is_empty() { String::new() } else { format!(" in {}", file_names(&gist.files)) };
+            let quotes: Vec<String> = gist.comments.iter().map(|c| format!("“{c}”")).collect();
+            let quotes = if quotes.is_empty() { String::new() } else { format!(": {}", some_of(&quotes, 2, |n| format!("{n} more"))) };
+            format!("Address {what} from Piccolo on {branch}{files}{quotes}.")
+        }
+    };
+    format!("{task} The worktree is {worktree}. {guide}")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -465,15 +553,19 @@ mod tests {
         assert!(list(&store, &other).unwrap().is_empty());
         store.cancel_request(unasked.id).unwrap();
         assert_eq!(list(&store, &target).unwrap().len(), 2);
-        let text = prompt(&again, "/wt/a b", true);
-        assert!(text.contains("`piccolo -C '/wt/a b' guide --request ") && text.contains("again"), "{text}");
+        let files = Gist { files: vec!["src/a.rs".into(), "lib/a.rs".into(), "b.ts".into(), "c.ts".into(), "d.ts".into()], comments: Vec::new() };
+        let text = prompt(&again, "feat", "/wt/a b", true, &files);
+        assert!(text.starts_with("Review the changes on feat for Piccolo again, now that it has changed. They touch a.rs, b.ts, c.ts and 1 other file."), "{text}");
+        assert!(text.contains("`piccolo -C '/wt/a b' guide --request "), "{text}");
 
         // Asked to address comments: the comments are kept, and a review asked afterwards isn't
         // taken for a second one.
         let implement = store.add_request(&target, Kind::Implement, "claude", None, None, &[first, 9]).unwrap();
         assert_eq!((implement.kind, implement.threads.clone()), (Kind::Implement, vec![first, 9]));
-        let text = prompt(&implement, "/wt", false);
-        assert!(text.contains(&format!("to address: #{first}, #9, on the worktree /wt")) && text.contains("guide --request "), "{text}");
+        let gist = Gist { files: vec!["a.txt".into()], comments: vec!["Why?".into(), "Rename this".into(), "Test it".into()] };
+        let text = prompt(&implement, "feat", "/wt", false, &gist);
+        assert!(text.starts_with("Address 2 review comments from Piccolo on feat in a.txt: “Why?”, “Rename this” and 1 more. The worktree is /wt."), "{text}");
+        assert!(text.contains("guide --request "), "{text}");
         let claude = Caller { id: "claude-1".into(), agent: "claude".into() };
         store.start_request(&target, implement.id, Some(&claude)).unwrap();
         // `done` for a review doesn't finish it; for the work it was asked, it does.
@@ -485,7 +577,7 @@ mod tests {
         // A copied prompt is for any agent: the one that takes it on is named.
         let text = store.prompt_for(&target, Kind::Review, None).unwrap();
         let copied = list(&store, &target).unwrap().remove(0);
-        assert!(text.contains(&format!("guide --request {}", copied.id)), "{text}");
+        assert!(text.contains(&format!("guide --request {}", copied.id)) && text.contains("They touch a.txt"), "{text}");
         assert_eq!(copied.agent, ANY_AGENT);
         let gemini = Caller { id: "gemini-1".into(), agent: "gemini".into() };
         assert_eq!(store.start_request(&target, copied.id, Some(&gemini)).unwrap().agent, "gemini");
@@ -503,6 +595,16 @@ mod tests {
         assert!(store.request(never.id).is_err());
 
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn quotes_the_opening_of_a_comment() {
+        assert_eq!(opening("\n## Why?\n\nBecause"), "Why?");
+        assert_eq!(opening("> quoted  text"), "quoted text");
+        assert_eq!(opening("Debounce the query before searching, or every keystroke hits the index"), "Debounce the query before searching, or every…");
+        assert_eq!(some_of(&[], 2, |n| format!("{n} more")), "");
+        assert_eq!(some_of(&["a".into()], 2, |n| format!("{n} more")), "a");
+        assert_eq!(some_of(&["a".into(), "b".into(), "c".into()], 2, |n| format!("{n} more")), "a, b and 1 more");
     }
 
     #[test]
