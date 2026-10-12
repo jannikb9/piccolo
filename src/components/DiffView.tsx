@@ -1,12 +1,13 @@
-import type {
-  CodeViewItem,
-  DiffLineAnnotation,
-  FileDiffLoadedFiles,
-  FileDiffMetadata,
-  PostRenderPhase,
-  SelectedLineRange,
+import {
+  hydratePartialDiff,
+  type CodeViewItem,
+  type DiffLineAnnotation,
+  type FileDiffLoadedFiles,
+  type FileDiffMetadata,
+  type PostRenderPhase,
+  type SelectedLineRange,
 } from "@pierre/diffs";
-import { CodeView, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
+import { CodeView, useWorkerPool, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
 import { ChevronRight, MessageSquare } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -69,6 +70,25 @@ function annotationSignature(annotations: DiffLineAnnotation<Note>[]): string {
       return `${side}:${lineNumber}:${note.kind}:${detail}`;
     })
     .join(";");
+}
+
+/**
+ * Expanding context hands the library whole files, which it highlights in a worker. It waits
+ * 300 ms for that, then draws the entire diff as plain text until the worker is done, which takes
+ * seconds for big files. Highlighting first, under the key the expanded diff will have, keeps the
+ * diff as it is until the expanded lines can be drawn highlighted.
+ */
+async function highlightBeforeExpanding(
+  pool: ReturnType<typeof useWorkerPool>,
+  fileDiff: FileDiffMetadata,
+  files: FileDiffLoadedFiles,
+) {
+  if (!pool?.isWorkingPool()) return;
+  try {
+    await pool.primeDiffHighlightCache(hydratePartialDiff("clone", fileDiff, files));
+  } catch {
+    // Only a head start: the library highlights by itself when this fails.
+  }
 }
 
 export function DiffView({
@@ -364,6 +384,7 @@ export function DiffView({
     if (reveal && reveal.at > openedAt.current) showThread.current(reveal.threadId);
   }, [reveal]);
 
+  const pool = useWorkerPool();
   const loadDiffFiles = useCallback(
     async (fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
       const oldPath = fileDiff.prevName ?? fileDiff.name;
@@ -373,9 +394,11 @@ export function DiffView({
       const newFile = { name: fileDiff.name, contents: versions.new, cacheKey: `${key}:new:${fileDiff.name}` };
       if (fileDiff.type === "rename-pure") return { oldFile: null, newFile };
       if (versions.old == null) throw new Error(`${oldPath} is not available`);
-      return { oldFile: { name: oldPath, contents: versions.old, cacheKey: `${key}:old:${oldPath}` }, newFile };
+      const files = { oldFile: { name: oldPath, contents: versions.old, cacheKey: `${key}:old:${oldPath}` }, newFile };
+      await highlightBeforeExpanding(pool, fileDiff, files);
+      return files;
     },
-    [worktree.path, diff, patchVersion],
+    [pool, worktree.path, diff, patchVersion],
   );
 
   const options = useMemo(
