@@ -233,7 +233,7 @@ export async function showError(title: string, text: string): Promise<void> {
   await message(text, { title, kind: "error" });
 }
 
-/** Fires when worktrees are added/removed or a worktree switches branch. */
+/** Fires when worktrees are added/removed, a worktree switches branch or gets a commit, or its files change. */
 export function onRepoChanged(callback: (repoId: string) => void): () => void {
   if (!isTauri) return () => {};
   const unlisten = listen<string>("repo-changed", (e) => callback(e.payload));

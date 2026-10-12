@@ -413,8 +413,9 @@ export function useReorderRepos() {
 }
 
 /**
- * Keeps git data fresh: refetch when the window regains focus or a repository's worktrees change,
- * and reload comments when they change (an agent replying from the command line).
+ * Keeps git data fresh: refetch when the window regains focus, or a repository's worktrees, commits
+ * or files change (an agent at work), and reload comments when they change (an agent replying from
+ * the command line).
  */
 export function useLiveGitData() {
   const client = useQueryClient();

@@ -3,7 +3,7 @@
 
 use crate::imports;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -572,6 +572,19 @@ fn generated_paths<'a>(wt: &Path, paths: impl Iterator<Item = &'a str>) -> Resul
         .filter(|c| c.len() == 3 && matches!(c[2], "set" | "true"))
         .map(|c| c[0].to_string())
         .collect())
+}
+
+/// Of `paths` (inside the worktree `root`), the ones git ignores: untracked and matching a
+/// `.gitignore`. A tracked file never counts, whatever the patterns say. When git can't tell,
+/// none are reported, so the caller treats everything as a change.
+pub fn ignored_paths(root: &Path, paths: &[PathBuf]) -> HashSet<PathBuf> {
+    let input: String = paths.iter().map(|p| format!("{}\0", p.to_string_lossy())).collect();
+    // Exits with 1 when nothing is ignored, which reads as an error here too.
+    let Ok(out) = git_bytes_with_input(root, &["check-ignore", "-z", "--stdin"], &input) else { return HashSet::new() };
+    out.split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| PathBuf::from(String::from_utf8_lossy(p).into_owned()))
+        .collect()
 }
 
 fn git_with_input(cwd: &Path, args: &[&str], input: &str) -> Result<String> {
