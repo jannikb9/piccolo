@@ -5,6 +5,10 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.0.3 — 2026-10-12
+
+- **The diff follows the agent**: changes an agent makes to files, and commits it makes, show up in Piccolo as they happen, including in the commit picker, instead of after reloading.
+
 ## 1.0.2 — 2026-10-12
 
 - **Request changes always works**: it's only disabled while no comment is open, and a copied prompt nobody picked up no longer leaves it waiting. Without an agent building the branch it opens a menu of the connected agents, reviewers included, and Copy prompt; the agent you ask becomes the default.
