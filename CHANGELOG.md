@@ -5,6 +5,10 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.0.1 — 2026-10-12
+
+- **Syntax highlighting stays when you show unmodified lines**: expanding context in a large file no longer turns the whole diff white while the file is highlighted.
+
 ## 1.0.0 — 2026-10-08
 
 - **Stop waiting for an agent**: when an agent never says it's done, the × beside it in the agents panel stops its spinner and counts its work as done.
