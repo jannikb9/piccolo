@@ -5,6 +5,11 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.0.2 — 2026-10-12
+
+- **Request changes always works**: it's only disabled while no comment is open, and a copied prompt nobody picked up no longer leaves it waiting. Without an agent building the branch it opens a menu of the connected agents, reviewers included, and Copy prompt; the agent you ask becomes the default.
+- **Reviewers can address comments**: an agent that wrote the comments can be asked to make the changes itself, and comments that are still open can be sent again.
+
 ## 1.0.1 — 2026-10-12
 
 - **Syntax highlighting stays when you show unmodified lines**: expanding context in a large file no longer turns the whole diff white while the file is highlighted.
