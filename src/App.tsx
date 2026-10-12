@@ -3,6 +3,7 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Group, Panel, Separator, useDefaultLayout, useGroupRef, type PanelSize } from "react-resizable-panels";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FilePanel } from "./components/FilePanel";
 import type { DiffViewHandle } from "./components/DiffView";
 import { ReviewPane, Welcome } from "./components/ReviewPane";
@@ -92,42 +93,48 @@ export default function App() {
           maxSize={420}
           groupResizeBehavior="preserve-pixel-size"
         >
-          <Sidebar selectedId={worktree?.id ?? null} shortcuts={shortcuts} onToggle={sidebar.toggle} />
+          <ErrorBoundary what="the sidebar">
+            <Sidebar selectedId={worktree?.id ?? null} shortcuts={shortcuts} onToggle={sidebar.toggle} />
+          </ErrorBoundary>
         </Panel>
         <ResizeHandle />
         <Panel id="files" defaultSize={272} minSize={220} maxSize={520} groupResizeBehavior="preserve-pixel-size">
-          <FilePanel
-            worktree={worktree}
-            worktreeId={worktree?.id ?? ""}
-            sections={sections}
-            fileCount={files.length}
-            viewedCount={viewedCount}
-            commentCounts={commentCounts}
-            threads={threads}
-            generalThreads={generalThreads}
-            loading={!!worktree && filesQuery.isPending}
-            onSelect={jumpTo}
-            sidebarCollapsed={sidebar.collapsed}
-            onToggleSidebar={sidebar.toggle}
-          />
+          <ErrorBoundary what="the file list" resetKey={worktree?.id}>
+            <FilePanel
+              worktree={worktree}
+              worktreeId={worktree?.id ?? ""}
+              sections={sections}
+              fileCount={files.length}
+              viewedCount={viewedCount}
+              commentCounts={commentCounts}
+              threads={threads}
+              generalThreads={generalThreads}
+              loading={!!worktree && filesQuery.isPending}
+              onSelect={jumpTo}
+              sidebarCollapsed={sidebar.collapsed}
+              onToggleSidebar={sidebar.toggle}
+            />
+          </ErrorBoundary>
         </Panel>
         <ResizeHandle />
         <Panel id="diff" minSize={400}>
-          {selection ? (
-            <ReviewPane
-              repo={selection.repo}
-              worktree={selection.worktree}
-              scope={scope}
-              files={files}
-              filesQuery={filesQuery}
-              patchQuery={patchQuery}
-              threads={threads}
-              generalThreads={generalThreads}
-              viewRef={viewRef}
-            />
-          ) : (
-            <Welcome loading={repos.isPending} />
-          )}
+          <ErrorBoundary what="the diff" resetKey={worktree?.id}>
+            {selection ? (
+              <ReviewPane
+                repo={selection.repo}
+                worktree={selection.worktree}
+                scope={scope}
+                files={files}
+                filesQuery={filesQuery}
+                patchQuery={patchQuery}
+                threads={threads}
+                generalThreads={generalThreads}
+                viewRef={viewRef}
+              />
+            ) : (
+              <Welcome loading={repos.isPending} />
+            )}
+          </ErrorBoundary>
         </Panel>
       </Group>
       <SettingsDialog />
