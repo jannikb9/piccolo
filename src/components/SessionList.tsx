@@ -290,7 +290,13 @@ function StopButton({ request }: { request: ReviewRequest }) {
   const stop = useStopRequest();
   return (
     <IconButton
-      label={request.startedAt === null ? "Withdraw the request" : "Stop waiting, and count it as done"}
+      label={
+        request.kind === "implement"
+          ? "Stop waiting: the comments can be sent again"
+          : request.startedAt === null
+            ? "Withdraw the request"
+            : "Stop waiting, and count it as done"
+      }
       disabled={stop.isPending}
       onClick={() => stop.mutate(request.id)}
       className="size-5 shrink-0"
@@ -502,10 +508,12 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
 }
 
 /**
- * "Request changes N": sends the open comments to an agent, to address; only disabled while there
- * are none. The author, the session building the branch, is what a click sends to; without one the
- * whole button is a menu of the connected sessions (a reviewer can be asked to make its own
- * suggestions) and a copied prompt for any agent. An agent asked becomes the author.
+ * "Request changes N": sends the comments an agent hasn't been sent, to address: those it was never
+ * asked about and those with something new. Disabled while it has them all, which is when it's at
+ * work on them: until a comment is added, or the request is stopped in the agents panel. The author,
+ * the session building the branch, is what a click sends to; without one the whole button is a menu
+ * of the connected sessions (a reviewer can be asked to make its own suggestions) and a copied
+ * prompt for any agent. An agent asked becomes the author.
  */
 export function AddressButton({ worktree }: { worktree: Worktree }) {
   const { activity, current, author, requestOf } = useAgents(worktree);
@@ -515,22 +523,24 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
   const busy = send.isPending || copy.isPending;
   const copyPrompt = () => copy.mutate("implement", { onSuccess: markCopied });
   const toSend = (session: AgentSession) => activity.toSend[session.id] ?? activity.open;
-  // Sent comments again, because they're still open.
-  const again = (session: AgentSession) =>
-    (activity.unseen[session.id] ?? []).length === 0 &&
-    activity.requests.some((r) => r.kind === "implement" && r.sessionId === session.id);
 
   const threads = author ? toSend(author) : activity.open;
   const others = current.filter((s) => s.reachable && s.id !== author?.id);
   // A copied prompt becomes an agent's work once it takes it on, which can take a while, or never.
   const starting = activity.requests.some((r) => r.kind === "implement" && isUnderway(r) && !r.sessionId);
-  const empty = activity.open.length === 0;
+  const empty = threads.length === 0;
+  const atWork = !!author && activity.requests.some((r) => r.kind === "implement" && isUnderway(r) && r.sessionId === author.id);
 
-  const tooltip = empty
-    ? "No comments to address"
-    : author
-      ? `${again(author) ? "Send again to" : "Send to"} ${sessionName(author)}: ${plural(threads.length, "comment")}`
-      : `Ask an agent to address ${plural(threads.length, "comment")}`;
+  const tooltip =
+    activity.open.length === 0
+      ? "No comments to address"
+      : empty && author
+        ? atWork
+          ? `${sessionName(author)} is addressing the comments`
+          : `${sessionName(author)} has every comment`
+        : author
+          ? `Send to ${sessionName(author)}: ${plural(threads.length, "comment")}`
+          : `Ask an agent to address ${plural(threads.length, "comment")}`;
 
   return (
     <SplitButton
@@ -538,6 +548,11 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
         <span className="flex flex-col gap-0.5">
           <span>{tooltip}</span>
           {!empty && <span className="text-fg-subtle">{startedBy(threads, activity)}</span>}
+          {empty && author && activity.open.length > 0 && (
+            <span className="text-fg-subtle">
+              {atWork ? "Add a comment, or stop waiting in the agents panel" : "Add a comment to send more"}
+            </span>
+          )}
           {!empty && !author && starting && <span className="text-fg-subtle">A copied prompt hasn't been taken on yet</span>}
         </span>
       }
@@ -550,14 +565,18 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
             <>
               <DropdownMenuPrimitive.Label className={menuLabel}>{author ? "Send to another session" : "Send to a session"}</DropdownMenuPrimitive.Label>
               {others.map((session) => (
-                <DropdownMenuPrimitive.Item key={session.id} onSelect={() => send.mutate(session.id)} className={menuItem}>
+                <DropdownMenuPrimitive.Item
+                  key={session.id}
+                  disabled={toSend(session).length === 0}
+                  onSelect={() => send.mutate(session.id)}
+                  className={menuItem}
+                >
                   <AgentIcon name={session.agent} className="size-3.5" />
                   <span className="min-w-0 flex-1 truncate text-fg">{sessionName(session)}</span>
                   <ModelName session={session} />
                   {requestOf(session)?.kind === "review" && <span className="text-[11px] text-fg-subtle">Reviewer</span>}
                   <span className="tabular text-[11px] text-fg-subtle">
-                    {again(session) ? "Again · " : ""}
-                    {toSend(session).length}
+                    {toSend(session).length === 0 ? "Has all" : toSend(session).length}
                   </span>
                 </DropdownMenuPrimitive.Item>
               ))}

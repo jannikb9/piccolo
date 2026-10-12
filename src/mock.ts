@@ -634,12 +634,14 @@ const unseenBy = (worktreePath: string, session: string | null) =>
     )
     .map((t) => t.id);
 
-/** What sending comments to `session` brings: every open comment for one not asked to address any yet, else what's new, else all again. */
+/**
+ * What sending comments to `session` brings (`Store::comments_to_send`): the open comments it
+ * hasn't been asked to address, and those with something new since it saw them.
+ */
 function toSendTo(worktreePath: string, session: string) {
-  const open = unseenBy(worktreePath, null);
-  if (!mockRequests.some((r) => r.kind === "implement" && r.sessionId === session)) return open;
-  const added = unseenBy(worktreePath, session);
-  return added.length > 0 ? added : open;
+  const sent = new Set(mockRequests.filter((r) => r.kind === "implement" && r.sessionId === session).flatMap((r) => r.threads));
+  const added = new Set(unseenBy(worktreePath, session));
+  return unseenBy(worktreePath, null).filter((id) => !sent.has(id) || added.has(id));
 }
 
 /** Comments and replies each session wrote, by the agent names its mock messages are signed with. */
@@ -708,7 +710,11 @@ export function mockStopRequest(id: number): Promise<void> {
   const index = mockRequests.findIndex((r) => r.id === id);
   const request = mockRequests[index];
   if (request && request.finishedAt === null) {
-    if (request.startedAt === null) mockRequests.splice(index, 1);
+    // As in `Store::stop_request`: comments sent to be addressed count as unsent again.
+    if (request.kind === "implement" && request.sessionId) {
+      for (const id of request.threads) delete seen[request.sessionId]?.[id];
+    }
+    if (request.kind === "implement" || request.startedAt === null) mockRequests.splice(index, 1);
     else request.finishedAt = Date.now();
   }
   return delay(undefined);

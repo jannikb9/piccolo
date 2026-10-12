@@ -14,6 +14,7 @@ use crate::git::{self, Result};
 use crate::sessions::{self, shell_quote, Caller, Session};
 use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::Path;
 
 pub(crate) const SCHEMA: &str = "
@@ -139,24 +140,24 @@ impl Store {
         Ok((request, text))
     }
 
-    /// The open comments a request to address them brings `session` (every open one for any agent).
-    /// Asked for the first time, a session gets all of them, even those it wrote itself: a reviewer
-    /// can be asked to make the changes it suggested. One already at work on them gets what's new
-    /// since it saw them, or all of them again when nothing is: the reviewer decides whether
-    /// they've been addressed.
+    /// The open comments a request to address them brings `session` (every open one for any agent):
+    /// those it hasn't been asked to address, which for a session asked for the first time is all of
+    /// them, even those it wrote itself (a reviewer can be asked to make the changes it suggested),
+    /// and those with something new since it saw them. None once it has been sent everything, until
+    /// a comment is added or the request it was sent in is stopped.
     pub fn comments_to_send(&self, target: &Target, session: Option<&str>) -> Result<Vec<i64>> {
         let open = self.unseen(target, None)?;
         let Some(session) = session else { return Ok(open) };
-        let asked: bool = sql(self.conn.query_row(
-            &format!("SELECT COUNT(*) > 0 FROM review_requests WHERE kind = 'implement' AND session_id = ?4 AND {ON_BRANCH}"),
-            params![target.repo, target.branch, target.worktree, session],
-            |r| r.get(0),
-        ))?;
-        if !asked {
-            return Ok(open);
+        let mut stmt = sql(self.conn.prepare(&format!(
+            "SELECT threads FROM review_requests WHERE kind = 'implement' AND session_id = ?4 AND {ON_BRANCH}"
+        )))?;
+        let rows = sql(stmt.query_map(params![target.repo, target.branch, target.worktree, session], |r| r.get::<_, Option<String>>(0)))?;
+        let mut sent = HashSet::new();
+        for threads in sql(rows.collect::<rusqlite::Result<Vec<_>>>())? {
+            sent.extend(threads.unwrap_or_default().split_whitespace().filter_map(|id| id.parse::<i64>().ok()));
         }
-        let new = self.unseen(target, Some(session))?;
-        Ok(if new.is_empty() { open } else { new })
+        let new: HashSet<i64> = self.unseen(target, Some(session))?.into_iter().collect();
+        Ok(open.into_iter().filter(|id| !sent.contains(id) || new.contains(id)).collect())
     }
 
     /// Records a request for `kind` of work for whichever agent is given its prompt, and returns
@@ -288,12 +289,20 @@ impl Store {
         Ok(())
     }
 
-    /// Stops waiting for request `id`, for when its agent won't say it's done: one the agent took
-    /// on counts as finished now, one it never took on is withdrawn.
+    /// Stops waiting for request `id`, for when its agent won't say it's done. A review the agent
+    /// took on counts as finished now; one it never took on is withdrawn. A request to address
+    /// comments is withdrawn either way, and its comments count as unsent again: stopping it is how
+    /// the same comments go out again, to the same session or another.
     pub fn stop_request(&self, id: i64) -> Result<()> {
         let request = self.request(id)?;
         if request.finished_at.is_some() {
             return Ok(());
+        }
+        if request.kind == Kind::Implement {
+            if let Some(session) = &request.session_id {
+                self.forget_seen(session, &request.threads)?;
+            }
+            return self.cancel_request(id);
         }
         if request.started_at.is_none() {
             return self.cancel_request(id);
@@ -515,14 +524,29 @@ mod tests {
         assert_eq!(store.unseen(&target, Some("thread-1")).unwrap(), [mine]);
         assert_eq!(store.comments_to_send(&target, Some("thread-1")).unwrap(), [suggested, mine]);
 
-        // Once asked, what it has seen isn't sent again unless nothing else is.
+        // Once asked, what it has seen isn't sent again: nothing is left to send.
         let asked = store.add_request(&target, Kind::Implement, "codex", Some("thread-1"), None, &[suggested, mine]).unwrap();
         wait();
         store.mark_seen("thread-1", &asked.threads).unwrap();
-        assert_eq!(store.comments_to_send(&target, Some("thread-1")).unwrap(), [suggested, mine]);
+        assert!(store.comments_to_send(&target, Some("thread-1")).unwrap().is_empty());
+
+        // A reply in a thread, or a new comment, even one it wrote itself, brings just that.
         wait();
         store.reply(mine, By::REVIEWER, "Still open", &[]).unwrap();
         assert_eq!(store.comments_to_send(&target, Some("thread-1")).unwrap(), [mine]);
+        let new = NewThread { by: by_codex, path: "a.txt", old_path: None, range: additions(5, 5), body: "Why?", images: &[] };
+        let later = store.add_thread(&target, &wt, &range, new).unwrap();
+        assert_eq!(store.comments_to_send(&target, Some("thread-1")).unwrap(), [mine, later]);
+
+        // Sending them records the request and what was seen; stopping it puts them back to unsent,
+        // whether or not the agent took it on.
+        wait();
+        let second = store.add_request(&target, Kind::Implement, "codex", Some("thread-1"), None, &[mine, later]).unwrap();
+        store.mark_seen("thread-1", &second.threads).unwrap();
+        assert!(store.comments_to_send(&target, Some("thread-1")).unwrap().is_empty());
+        store.stop_request(second.id).unwrap();
+        assert!(store.request(second.id).is_err());
+        assert_eq!(store.comments_to_send(&target, Some("thread-1")).unwrap(), [mine, later]);
 
         std::fs::remove_dir_all(&root).unwrap();
     }

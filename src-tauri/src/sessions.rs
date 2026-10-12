@@ -477,6 +477,17 @@ impl Store {
         Ok(traces)
     }
 
+    /// Forgets that `session` has seen `threads`, so what others wrote in them counts as new again.
+    pub fn forget_seen(&self, session: &str, threads: &[i64]) -> Result<()> {
+        for thread in threads {
+            sql(self.conn.execute(
+                "DELETE FROM session_threads WHERE session_id = ?1 AND thread_id = ?2",
+                params![session, thread],
+            ))?;
+        }
+        Ok(())
+    }
+
     /// Records that `session` has seen `threads` as they are now.
     pub fn mark_seen(&self, session: &str, threads: &[i64]) -> Result<()> {
         mark_seen(&self.conn, session, threads, now_ms())
@@ -850,8 +861,8 @@ mod tests {
             frame["message"]["content"].as_str().unwrap().to_string()
         };
 
-        // What it hasn't seen, as a request to address them; asked again, they're all sent again,
-        // as long as they're open.
+        // What it hasn't been sent, as a request to address them; asked again with nothing new,
+        // nothing is sent.
         let session = &sessions[0];
         let send = |store: &Store| store.ask(&target, Kind::Implement, session, None);
         let request = send(&store).unwrap();
@@ -859,17 +870,22 @@ mod tests {
         let text = received();
         assert!(text.contains(&format!("review comments from Piccolo to address: #{first}, #{second}")), "{text}");
         assert!(text.contains(&format!("piccolo -C {} guide --request {}", target.worktree, request.id)), "{text}");
+        assert!(send(&store).is_err());
+
+        // A reply brings just its thread.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        store.reply(first, By::REVIEWER, "Not quite", &[]).unwrap();
         let again = send(&store).unwrap();
-        assert_eq!(again.threads, [first, second]);
-        assert!(received().contains(&format!("#{first}, #{second}")));
+        assert_eq!(again.threads, [first]);
+        assert!(received().contains(&format!("#{first}")));
 
         // Nothing is counted as seen when the session can't be reached.
         std::thread::sleep(std::time::Duration::from_millis(2));
-        store.reply(first, By::REVIEWER, "Not quite", &[]).unwrap();
+        store.reply(second, By::REVIEWER, "And this", &[]).unwrap();
         drop(listener);
         std::fs::remove_file(format!("/tmp/review-test-{}-s1.sock", std::process::id())).unwrap();
         assert!(send(&store).is_err());
-        assert_eq!(store.unseen(&target, Some("s1")).unwrap(), [first]);
+        assert_eq!(store.unseen(&target, Some("s1")).unwrap(), [second]);
         // The failed request isn't kept.
         assert_eq!(crate::requests::list(&store, &target).unwrap().len(), 2);
 
