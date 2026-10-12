@@ -8,7 +8,7 @@ import {
   type SelectedLineRange,
 } from "@pierre/diffs";
 import { CodeView, useWorkerPool, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
-import { ChevronRight, MessageSquare } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
@@ -33,7 +33,7 @@ import { cn, splitPath } from "../lib/utils";
 import { useDiffLayout, useStore } from "../store";
 import type { ChangedFile, DiffPatch, GeneralThread, LineRange, Side, Thread, Worktree } from "../types";
 import { CodeNavigation } from "./CodeNav";
-import { Composer, Conversation, DetachedNote, ThreadCard } from "./Comments";
+import { BranchComments, Composer, DetachedNote, ThreadCard } from "./Comments";
 import { FindBar } from "./FindBar";
 import { CopyButton, DiffBlocks, DiffCount, StatusBadge, Tooltip, ViewedToggle } from "./ui";
 
@@ -136,6 +136,20 @@ export function DiffView({
   const patchVersion = useMemo(() => hashString(diff.patch), [diff.patch]);
   const byPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
 
+  // Threads that can't sit in a file go above the diff, like general comments: those on files it
+  // doesn't show, and those on lines of a file the branch deleted, which has no new side left.
+  const { inline, detached } = useMemo(() => {
+    const inline: Thread[] = [];
+    const detached: { thread: Thread; reason: string }[] = [];
+    for (const thread of threads) {
+      const file = byPath.get(thread.path);
+      if (!file) detached.push({ thread, reason: "Not in diff" });
+      else if (!thread.position && file.status === "deleted") detached.push({ thread, reason: "File deleted" });
+      else inline.push(thread);
+    }
+    return { inline, detached };
+  }, [threads, byPath]);
+
   const annotationsByPath = useMemo(() => {
     const map = new Map<string, DiffLineAnnotation<Note>[]>();
     const add = (path: string, annotation: DiffLineAnnotation<Note>) => {
@@ -144,7 +158,7 @@ export function DiffView({
       map.set(path, list);
     };
     const outdated = new Map<string, Thread[]>();
-    for (const thread of threads) {
+    for (const thread of inline) {
       const { position } = thread;
       if (position) {
         add(thread.path, { side: position.endSide, lineNumber: position.endLine, metadata: { kind: "thread", thread } });
@@ -162,7 +176,7 @@ export function DiffView({
       add(draft.path, { side: range.endSide, lineNumber: range.endLine, metadata: { kind: "draft", key, range } });
     }
     return map;
-  }, [threads, draftKeys]);
+  }, [inline, draftKeys]);
 
   // The lines of open threads and drafts are marked in the gutter.
   const commentedRanges = useMemo(() => {
@@ -367,8 +381,8 @@ export function DiffView({
       return scrollDiff(0);
     }
     const thread = threads.find((t) => t.id === id);
-    // Threads on files this diff doesn't show are listed above it.
-    if (!thread || !byPath.has(thread.path)) return scrollDiff(0);
+    // Threads that can't sit in their file are listed above the diff.
+    if (!thread || detached.some((d) => d.thread.id === id)) return scrollDiff(0);
     if (thread.position) return revealInDiff(thread.path, thread.position.endSide, thread.position.endLine);
     // Outdated: shown above the file's first hunk.
     pinActivePath(thread.path);
@@ -483,27 +497,9 @@ export function DiffView({
     [worktree, base, byPath, closeDraft],
   );
 
-  // Above the diff: the conversation on the whole branch, then threads on files that no longer
-  // differ, which can't sit in it.
-  const orphans = useMemo(() => threads.filter((t) => !byPath.has(t.path)), [threads, byPath]);
   const renderViewHeader = useCallback(
-    () => (
-      <>
-        <Conversation worktree={worktree} threads={generalThreads} />
-        {orphans.length > 0 && (
-          <section className="pt-3 font-sans">
-            <h2 className="flex items-center gap-1.5 px-1 text-[12px] font-medium text-fg-subtle">
-              <MessageSquare className="size-3.5" />
-              Comments on files without changes in this view
-            </h2>
-            {orphans.map((thread) => (
-              <ThreadCard key={thread.id} thread={thread} note={<DetachedNote thread={thread} reason="Not in diff" />} />
-            ))}
-          </section>
-        )}
-      </>
-    ),
-    [worktree, generalThreads, orphans],
+    () => <BranchComments worktree={worktree} generalThreads={generalThreads} detached={detached} />,
+    [worktree, generalThreads, detached],
   );
 
   const rootRef = useRef<HTMLDivElement>(null);

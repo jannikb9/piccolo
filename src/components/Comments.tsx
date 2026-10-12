@@ -528,6 +528,37 @@ export function Conversation({ worktree, threads }: { worktree: Worktree; thread
   );
 }
 
+/**
+ * What sits above the diff, or under "No changes" when there's no diff: the conversation, then the
+ * threads that can't sit in a file, each with why.
+ */
+export function BranchComments({
+  worktree,
+  generalThreads,
+  detached,
+}: {
+  worktree: Worktree;
+  generalThreads: GeneralThread[];
+  detached: { thread: Thread; reason: string }[];
+}) {
+  return (
+    <>
+      <Conversation worktree={worktree} threads={generalThreads} />
+      {detached.length > 0 && (
+        <section className="pt-3 font-sans">
+          <h2 className="flex items-center gap-1.5 px-1 text-[12px] font-medium text-fg-subtle">
+            <MessageSquare className="size-3.5" />
+            Comments outside the diff
+          </h2>
+          {detached.map(({ thread, reason }) => (
+            <ThreadCard key={thread.id} thread={thread} note={<DetachedNote thread={thread} reason={reason} />} />
+          ))}
+        </section>
+      )}
+    </>
+  );
+}
+
 /** A new general comment, in the Comments panel: a prompt to start one, then the form. */
 export function GeneralComposer({ worktree, draftKey }: { worktree: Worktree; draftKey: string }) {
   const draft = useStore((s) => s.generalDrafts[draftKey]);

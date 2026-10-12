@@ -478,6 +478,19 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       updatedAt: minutesAgo(3),
     },
     {
+      // Made while the file had this line; a later commit deleted the file.
+      id: 7,
+      path: "src/auth/legacy-cookie.ts",
+      range: lines(4, 4),
+      position: null,
+      resolved: false,
+      dismissed: false,
+      excerpt: excerpt(lines(4, 4)),
+      messages: [{ id: 7, author: "reviewer", body: "Is anything still reading this cookie?", attachments: [], createdAt: minutesAgo(55), editedAt: null, authorName: null, thumbsUp: false }],
+      createdAt: minutesAgo(55),
+      updatedAt: minutesAgo(55),
+    },
+    {
       id: 3,
       path: "src/api/client.ts",
       range: lines(21, 21),
@@ -491,6 +504,34 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
     },
   ],
 };
+
+// A branch with no changes left: its only file was added, commented on and deleted again.
+threads["~/projects/spoke-app/spoke-app"] = [
+  {
+    id: 8,
+    path: null,
+    range: null,
+    position: null,
+    resolved: false,
+    dismissed: false,
+    excerpt: [],
+    messages: [{ id: 8, author: "agent", body: "Nothing is left to review: the cookie parser was dropped in favour of the middleware.", attachments: [], createdAt: minutesAgo(10), editedAt: null, authorName: "codex", thumbsUp: false }],
+    createdAt: minutesAgo(10),
+    updatedAt: minutesAgo(10),
+  },
+  {
+    id: 9,
+    path: "src/auth/cookie-parser.ts",
+    range: lines(12, 13),
+    position: null,
+    resolved: false,
+    dismissed: false,
+    excerpt: excerpt(lines(12, 13)),
+    messages: [{ id: 9, author: "reviewer", body: "This swallows malformed cookies silently.", attachments: [], createdAt: minutesAgo(70), editedAt: null, authorName: null, thumbsUp: false }],
+    createdAt: minutesAgo(70),
+    updatedAt: minutesAgo(70),
+  },
+];
 
 const findThread = (id: number) => Object.values(threads).flat().find((t) => t.id === id);
 

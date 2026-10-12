@@ -9,7 +9,7 @@ import { authorLabel, AuthorAvatar, GeneralComposer } from "./Comments";
 type AnyThread = Thread | GeneralThread;
 
 /** Threads under one heading: the general ones, or those on one file. */
-type Group = { key: string; path: string | null; inDiff: boolean; threads: AnyThread[] };
+type Group = { key: string; path: string | null; inDiff: boolean; deleted: boolean; threads: AnyThread[] };
 
 /** "L24", "L24–26"; lines the branch removed are marked "−". */
 function lineLabel(range: LineRange): string {
@@ -48,14 +48,15 @@ export function CommentList({
     const line = (t: Thread) => (t.position ?? t.range).endLine;
     const groups: Group[] = [];
     const general = shown(generalThreads);
-    if (general.length > 0) groups.push({ key: "general", path: null, inDiff: true, threads: general });
+    if (general.length > 0) groups.push({ key: "general", path: null, inDiff: true, deleted: false, threads: general });
     for (const file of files) {
       const list = byPath.get(file.path);
       if (!list) continue;
-      groups.push({ key: file.path, path: file.path, inDiff: true, threads: list.sort((a, b) => line(a) - line(b)) });
+      const sorted = list.sort((a, b) => line(a) - line(b));
+      groups.push({ key: file.path, path: file.path, inDiff: true, deleted: file.status === "deleted", threads: sorted });
       byPath.delete(file.path);
     }
-    for (const [path, list] of byPath) groups.push({ key: path, path, inDiff: false, threads: list });
+    for (const [path, list] of byPath) groups.push({ key: path, path, inDiff: false, deleted: false, threads: list });
     return groups;
   }, [generalThreads, threads, files, showResolved]);
 
@@ -136,7 +137,7 @@ function GroupSection({
         <ul>
           {group.threads.map((thread) => (
             <li key={thread.id}>
-              <ThreadRow thread={thread} inDiff={group.inDiff} onSelect={() => onSelect(thread.id)} />
+              <ThreadRow thread={thread} inDiff={group.inDiff} deleted={group.deleted} onSelect={() => onSelect(thread.id)} />
             </li>
           ))}
         </ul>
@@ -145,7 +146,18 @@ function GroupSection({
   );
 }
 
-function ThreadRow({ thread, inDiff, onSelect }: { thread: AnyThread; inDiff: boolean; onSelect: () => void }) {
+function ThreadRow({
+  thread,
+  inDiff,
+  deleted,
+  onSelect,
+}: {
+  thread: AnyThread;
+  inDiff: boolean;
+  /** The thread's file is deleted in this view. */
+  deleted: boolean;
+  onSelect: () => void;
+}) {
   const first = thread.messages[0];
   const last = thread.messages[thread.messages.length - 1];
   const replies = thread.messages.length - 1;
@@ -158,7 +170,7 @@ function ThreadRow({ thread, inDiff, onSelect }: { thread: AnyThread; inDiff: bo
       : thread.path !== null && !inDiff
         ? { label: "Not in diff", className: "text-mod" }
         : thread.path !== null && !thread.position
-          ? { label: "Outdated", className: "text-mod" }
+          ? { label: deleted ? "File deleted" : "Outdated", className: "text-mod" }
           : null;
 
   return (

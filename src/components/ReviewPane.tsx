@@ -18,6 +18,7 @@ import { cn, scopeKey, totals } from "../lib/utils";
 import { useStore } from "../store";
 import type { ChangedFile, DiffLayout, DiffPatch, DiffScope, GeneralThread, Repo, Thread, Worktree } from "../types";
 import { CommitPicker } from "./CommitPicker";
+import { BranchComments } from "./Comments";
 import { DiffView, type DiffViewHandle } from "./DiffView";
 import { AddressButton, AgentsButton, ReviewButton } from "./SessionList";
 import { CheckBox, DiffCount, Skeleton, Tooltip, useJustDone } from "./ui";
@@ -47,6 +48,7 @@ export function ReviewPane({
   viewRef: Ref<DiffViewHandle>;
 }) {
   const query = filesQuery.isError ? filesQuery : patchQuery;
+  const hasComments = threads.length > 0 || generalThreads.length > 0;
   const mainRef = useRef<HTMLElement>(null);
   const setNarrowDiff = useStore((s) => s.setNarrowDiff);
   // Measured before the first paint, so a narrow pane never shows a split diff first.
@@ -83,19 +85,35 @@ export function ReviewPane({
             <span className="selectable font-mono break-words">{String(query.error)}</span>
           </CenteredMessage>
         ) : files.length === 0 ? (
-          <CenteredMessage icon={<GitCompareArrows className="size-5" />} title="No changes">
-            {typeof scope === "object" ? (
-              "This commit doesn't change any files."
-            ) : repo.defaultBranch && !(scope === "uncommitted") ? (
-              <>
-                <span className="font-mono">{worktree.branch ?? worktree.head}</span> has no differences from{" "}
-                <span className="font-mono">{repo.defaultBranch}</span>
-                {scope === "committed" && worktree.dirty && " in its commits"}.
-              </>
-            ) : (
-              "There are no uncommitted changes in this worktree."
+          // Nothing to show a diff of, but comments (on files since deleted, say) must stay readable.
+          <div className="h-full overflow-auto">
+            <CenteredMessage
+              icon={<GitCompareArrows className="size-5" />}
+              title="No changes"
+              fill={!hasComments}
+            >
+              {typeof scope === "object" ? (
+                "This commit doesn't change any files."
+              ) : repo.defaultBranch && !(scope === "uncommitted") ? (
+                <>
+                  <span className="font-mono">{worktree.branch ?? worktree.head}</span> has no differences from{" "}
+                  <span className="font-mono">{repo.defaultBranch}</span>
+                  {scope === "committed" && worktree.dirty && " in its commits"}.
+                </>
+              ) : (
+                "There are no uncommitted changes in this worktree."
+              )}
+            </CenteredMessage>
+            {hasComments && (
+              <div className="px-4 pb-10">
+                <BranchComments
+                  worktree={worktree}
+                  generalThreads={generalThreads}
+                  detached={threads.map((thread) => ({ thread, reason: "Not in diff" }))}
+                />
+              </div>
             )}
-          </CenteredMessage>
+          </div>
         ) : (
           // Remounted per worktree and scope so each starts at the top.
           <DiffView
@@ -320,14 +338,17 @@ function CenteredMessage({
   title,
   children,
   action,
+  fill = true,
 }: {
   icon: ReactNode;
   title: string;
   children?: ReactNode;
   action?: ReactNode;
+  /** Fill the pane (and centre in it) instead of taking only the room it needs. */
+  fill?: boolean;
 }) {
   return (
-    <div className="grid h-full place-items-center p-8">
+    <div className={cn("grid place-items-center p-8", fill && "h-full")}>
       <div className="flex max-w-sm flex-col items-center text-center">
         <div className="mb-4 grid size-10 place-items-center rounded-xl border border-border bg-bg-raised text-fg-subtle">
           {icon}
