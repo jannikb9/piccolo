@@ -5,6 +5,11 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.0.4 — 2026-10-12
+
+- **Comments on deleted files stay visible**: a comment on a file the branch deleted, or on one the diff doesn't show, is listed above the diff with the conversation, and also under "No changes" when nothing differs at all.
+- **Request changes waits for something new**: once it has sent the comments to an agent it stays disabled until you add a comment or reply, or stop the request with the × in the agents panel, which makes its comments sendable again.
+
 ## 1.0.3 — 2026-10-12
 
 - **The diff follows the agent**: changes an agent makes to files, and commits it makes, show up in Piccolo as they happen, including in the commit picker, instead of after reloading.
