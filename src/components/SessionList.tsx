@@ -502,37 +502,35 @@ export function ReviewButton({ worktree }: { worktree: Worktree }) {
 }
 
 /**
- * "Request changes N": sends the comments the author hasn't seen to it, to address, from the reviewer or
- * from reviewing agents; disabled, saying why, while there are none. Without an author it copies a
- * prompt for every open comment, to paste into any agent. Its menu sends them to any other connected
- * session instead, or copies the prompt.
+ * "Request changes N": sends the open comments to an agent, to address; only disabled while there
+ * are none. The author, the session building the branch, is what a click sends to; without one the
+ * whole button is a menu of the connected sessions (a reviewer can be asked to make its own
+ * suggestions) and a copied prompt for any agent. An agent asked becomes the author.
  */
 export function AddressButton({ worktree }: { worktree: Worktree }) {
-  const { activity, current, author } = useAgents(worktree);
+  const { activity, current, author, requestOf } = useAgents(worktree);
   const send = useSendComments(worktree);
   const copy = useCopyPrompt(worktree);
   const [copied, markCopied] = useJustDone();
   const busy = send.isPending || copy.isPending;
   const copyPrompt = () => copy.mutate("implement", { onSuccess: markCopied });
-  const unseen = (session: AgentSession) => activity.unseen[session.id] ?? [];
+  const toSend = (session: AgentSession) => activity.toSend[session.id] ?? activity.open;
+  // Sent comments again, because they're still open.
+  const again = (session: AgentSession) =>
+    (activity.unseen[session.id] ?? []).length === 0 &&
+    activity.requests.some((r) => r.kind === "implement" && r.sessionId === session.id);
 
-  const threads = author ? unseen(author) : activity.open;
-  // An agent given a copied prompt becomes the author once it takes the comments on.
-  const starting = activity.requests.some((r) => r.kind === "implement" && isUnderway(r) && !r.sessionId);
+  const threads = author ? toSend(author) : activity.open;
   const others = current.filter((s) => s.reachable && s.id !== author?.id);
+  // A copied prompt becomes an agent's work once it takes it on, which can take a while, or never.
+  const starting = activity.requests.some((r) => r.kind === "implement" && isUnderway(r) && !r.sessionId);
+  const empty = activity.open.length === 0;
 
-  const waiting = !author && starting;
-  const empty = threads.length === 0 || waiting;
-
-  const tooltip = waiting
-    ? "Waiting for an agent to take the copied comments on"
-    : activity.open.length === 0
-      ? "No comments to address"
-      : author && threads.length === 0
-        ? `${sessionName(author)} has seen every comment`
-        : author
-          ? `Send ${plural(threads.length, "comment")} to ${sessionName(author)}`
-          : `Copy a prompt for ${plural(threads.length, "comment")}, to paste into any agent`;
+  const tooltip = empty
+    ? "No comments to address"
+    : author
+      ? `${again(author) ? "Send again to" : "Send to"} ${sessionName(author)}: ${plural(threads.length, "comment")}`
+      : `Ask an agent to address ${plural(threads.length, "comment")}`;
 
   return (
     <SplitButton
@@ -540,38 +538,33 @@ export function AddressButton({ worktree }: { worktree: Worktree }) {
         <span className="flex flex-col gap-0.5">
           <span>{tooltip}</span>
           {!empty && <span className="text-fg-subtle">{startedBy(threads, activity)}</span>}
+          {!empty && !author && starting && <span className="text-fg-subtle">A copied prompt hasn't been taken on yet</span>}
         </span>
       }
       disabled={busy || empty}
-      onClick={() => (author ? send.mutate(author.id) : copyPrompt())}
+      onClick={author ? () => send.mutate(author.id) : null}
       menuLabel="Send the comments elsewhere"
       menu={
-        (author || others.length > 0) && (
-          <>
-            {others.length > 0 && (
-              <>
-                <DropdownMenuPrimitive.Label className={menuLabel}>Send to a session</DropdownMenuPrimitive.Label>
-                {others.map((session) => {
-                  const count = unseen(session).length;
-                  return (
-                    <DropdownMenuPrimitive.Item
-                      key={session.id}
-                      disabled={count === 0}
-                      onSelect={() => send.mutate(session.id)}
-                      className={menuItem}
-                    >
-                      <AgentIcon name={session.agent} className="size-3.5" />
-                      <span className="min-w-0 flex-1 truncate text-fg">{sessionName(session)}</span>
-                      <ModelName session={session} />
-                      <span className="tabular text-[11px] text-fg-subtle">{count === 0 ? "Seen all" : count}</span>
-                    </DropdownMenuPrimitive.Item>
-                  );
-                })}
-              </>
-            )}
-            <CopyItem after={others.length > 0} onSelect={copyPrompt} />
-          </>
-        )
+        <>
+          {others.length > 0 && (
+            <>
+              <DropdownMenuPrimitive.Label className={menuLabel}>{author ? "Send to another session" : "Send to a session"}</DropdownMenuPrimitive.Label>
+              {others.map((session) => (
+                <DropdownMenuPrimitive.Item key={session.id} onSelect={() => send.mutate(session.id)} className={menuItem}>
+                  <AgentIcon name={session.agent} className="size-3.5" />
+                  <span className="min-w-0 flex-1 truncate text-fg">{sessionName(session)}</span>
+                  <ModelName session={session} />
+                  {requestOf(session)?.kind === "review" && <span className="text-[11px] text-fg-subtle">Reviewer</span>}
+                  <span className="tabular text-[11px] text-fg-subtle">
+                    {again(session) ? "Again · " : ""}
+                    {toSend(session).length}
+                  </span>
+                </DropdownMenuPrimitive.Item>
+              ))}
+            </>
+          )}
+          <CopyItem after={others.length > 0} onSelect={copyPrompt} />
+        </>
       }
     >
       <ButtonIcon agent={busy || empty ? undefined : author?.agent} bot={BuilderBot} copied={copied} />

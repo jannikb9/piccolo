@@ -558,6 +558,9 @@ pub(crate) fn sessions_of(store: &Store, path: &str) -> Result<Vec<Session>> {
 pub struct Activity {
     /// Open threads each session hasn't seen, by session id.
     pub unseen: HashMap<String, Vec<i64>>,
+    /// The open threads sending comments to each session brings (`Store::comments_to_send`), by
+    /// session id.
+    pub to_send: HashMap<String, Vec<i64>>,
     /// All open threads, which a copied prompt hands over.
     pub open: Vec<i64>,
     /// Who started each open thread: an agent's name, or `None` for the reviewer.
@@ -583,12 +586,14 @@ pub async fn session_activity(path: String) -> Result<Activity> {
     blocking(move || {
         let store = Store::open()?;
         let target = Target::of(Path::new(&path))?;
-        let mut unseen = HashMap::new();
+        let (mut unseen, mut to_send) = (HashMap::new(), HashMap::new());
         for session in sessions_of(&store, &path)? {
             unseen.insert(session.id.clone(), store.unseen(&target, Some(&session.id))?);
+            to_send.insert(session.id.clone(), store.comments_to_send(&target, Some(&session.id))?);
         }
         Ok(Activity {
             unseen,
+            to_send,
             open: store.unseen(&target, None)?,
             started_by: store.started_by(&target)?,
             written: store.written(&target)?,
@@ -845,7 +850,8 @@ mod tests {
             frame["message"]["content"].as_str().unwrap().to_string()
         };
 
-        // What it hasn't seen, as a request to address them; then nothing's left to send.
+        // What it hasn't seen, as a request to address them; asked again, they're all sent again,
+        // as long as they're open.
         let session = &sessions[0];
         let send = |store: &Store| store.ask(&target, Kind::Implement, session, None);
         let request = send(&store).unwrap();
@@ -853,7 +859,9 @@ mod tests {
         let text = received();
         assert!(text.contains(&format!("review comments from Piccolo to address: #{first}, #{second}")), "{text}");
         assert!(text.contains(&format!("piccolo -C {} guide --request {}", target.worktree, request.id)), "{text}");
-        assert!(send(&store).is_err());
+        let again = send(&store).unwrap();
+        assert_eq!(again.threads, [first, second]);
+        assert!(received().contains(&format!("#{first}, #{second}")));
 
         // Nothing is counted as seen when the session can't be reached.
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -863,7 +871,7 @@ mod tests {
         assert!(send(&store).is_err());
         assert_eq!(store.unseen(&target, Some("s1")).unwrap(), [first]);
         // The failed request isn't kept.
-        assert_eq!(crate::requests::list(&store, &target).unwrap().len(), 1);
+        assert_eq!(crate::requests::list(&store, &target).unwrap().len(), 2);
 
         std::fs::remove_dir_all(&root).unwrap();
     }

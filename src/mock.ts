@@ -503,7 +503,7 @@ const mockWorktree = "~/projects/spoke-app/auth-session";
 /**
  * The first worktree's sessions: Claude building it, Codex reviewing it right now, and an earlier
  * Claude review that ended. `localStorage["mock-sessions"]` = "0" starts without any, "author" with
- * only Claude building it.
+ * only Claude building it, "reviewer" with only the Codex review.
  */
 const mockSessionList: AgentSession[] = [
   {
@@ -593,6 +593,14 @@ const unseenBy = (worktreePath: string, session: string | null) =>
     )
     .map((t) => t.id);
 
+/** What sending comments to `session` brings: every open comment for one not asked to address any yet, else what's new, else all again. */
+function toSendTo(worktreePath: string, session: string) {
+  const open = unseenBy(worktreePath, null);
+  if (!mockRequests.some((r) => r.kind === "implement" && r.sessionId === session)) return open;
+  const added = unseenBy(worktreePath, session);
+  return added.length > 0 ? added : open;
+}
+
 /** Comments and replies each session wrote, by the agent names its mock messages are signed with. */
 function mockWritten(worktreePath: string): Record<string, number> {
   const written: Record<string, number> = {};
@@ -606,17 +614,20 @@ function mockWritten(worktreePath: string): Record<string, number> {
 export function mockSessions(paths: string[]): Promise<Record<string, AgentSession[]>> {
   const mockWorktree = mockState.sessionsWorktree;
   if (!paths.includes(mockWorktree) || localStorage.getItem("mock-sessions") === "0") return delay({});
-  return delay({ [mockWorktree]: structuredClone(onlyAuthor() ? mockSessionList.slice(0, 1) : mockSessionList) });
+  return delay({ [mockWorktree]: structuredClone(shownSessions()) });
 }
 
 const onlyAuthor = () => localStorage.getItem("mock-sessions") === "author";
+const shownSessions = () =>
+  onlyAuthor() ? mockSessionList.slice(0, 1) : localStorage.getItem("mock-sessions") === "reviewer" ? mockSessionList.slice(1, 2) : mockSessionList;
 
 export function mockSessionActivity(worktreePath: string): Promise<SessionActivity> {
   const mockWorktree = mockState.sessionsWorktree;
   const none = worktreePath !== mockWorktree || localStorage.getItem("mock-sessions") === "0";
-  const sessions = none ? [] : onlyAuthor() ? mockSessionList.slice(0, 1) : mockSessionList;
+  const sessions = none ? [] : shownSessions();
   return delay({
     unseen: Object.fromEntries(sessions.map((s) => [s.id, unseenBy(worktreePath, s.id)])),
+    toSend: Object.fromEntries(sessions.map((s) => [s.id, toSendTo(worktreePath, s.id)])),
     open: unseenBy(worktreePath, null),
     startedBy: Object.fromEntries(
       (threads[worktreePath] ?? [])
@@ -628,13 +639,13 @@ export function mockSessionActivity(worktreePath: string): Promise<SessionActivi
       worktreePath !== mockWorktree
         ? []
         : // Without sessions, only requests to new sessions that haven't started.
-          mockRequests.filter((r) => (none ? !r.sessionId : !onlyAuthor() || !r.sessionId || r.sessionId === "mock-1")),
+          mockRequests.filter((r) => (none ? !r.sessionId : !r.sessionId || shownSessions().some((s) => s.id === r.sessionId))),
     ),
   });
 }
 
 export function mockSendComments(worktreePath: string, session: string): Promise<ReviewRequest> {
-  const sent = unseenBy(worktreePath, session);
+  const sent = toSendTo(worktreePath, session);
   if (sent.length === 0) return Promise.reject("There are no comments to send");
   for (const id of sent) (seen[session] ??= {})[id] = Date.now();
   return mockAsk("implement", session, sent);

@@ -111,7 +111,7 @@ pub fn list(store: &Store, target: &Target) -> Result<Vec<Request>> {
 
 impl Store {
     /// Asks `session` for `kind` of work on `target`'s branch, at commit `head`, and hands it the
-    /// prompt. Comments to address are those the session hasn't seen, and count as seen once sent.
+    /// prompt. The comments to address are `comments_to_send`, which count as seen once sent.
     /// Nothing is recorded when the prompt can't be handed over.
     pub fn ask(&self, target: &Target, kind: Kind, session: &Session, head: Option<&str>) -> Result<Request> {
         let (request, text) = self.prepare(target, kind, &session.agent, Some(&session.id), head)?;
@@ -128,7 +128,7 @@ impl Store {
     fn prepare(&self, target: &Target, kind: Kind, agent: &str, session: Option<&str>, head: Option<&str>) -> Result<(Request, String)> {
         let threads = match kind {
             Kind::Review => Vec::new(),
-            Kind::Implement => self.unseen(target, session)?,
+            Kind::Implement => self.comments_to_send(target, session)?,
         };
         if kind == Kind::Implement && threads.is_empty() {
             return Err("There are no comments to send".into());
@@ -137,6 +137,26 @@ impl Store {
         let again = kind == Kind::Review && self.previous_review(target, agent, session, request.id)?.is_some();
         let text = prompt(&request, &target.worktree, again);
         Ok((request, text))
+    }
+
+    /// The open comments a request to address them brings `session` (every open one for any agent).
+    /// Asked for the first time, a session gets all of them, even those it wrote itself: a reviewer
+    /// can be asked to make the changes it suggested. One already at work on them gets what's new
+    /// since it saw them, or all of them again when nothing is: the reviewer decides whether
+    /// they've been addressed.
+    pub fn comments_to_send(&self, target: &Target, session: Option<&str>) -> Result<Vec<i64>> {
+        let open = self.unseen(target, None)?;
+        let Some(session) = session else { return Ok(open) };
+        let asked: bool = sql(self.conn.query_row(
+            &format!("SELECT COUNT(*) > 0 FROM review_requests WHERE kind = 'implement' AND session_id = ?4 AND {ON_BRANCH}"),
+            params![target.repo, target.branch, target.worktree, session],
+            |r| r.get(0),
+        ))?;
+        if !asked {
+            return Ok(open);
+        }
+        let new = self.unseen(target, Some(session))?;
+        Ok(if new.is_empty() { open } else { new })
     }
 
     /// Records a request for `kind` of work for whichever agent is given its prompt, and returns
@@ -472,6 +492,37 @@ mod tests {
         let never = store.add_request(&target, Kind::Review, "codex", Some("thread-1"), None, &[]).unwrap();
         store.stop_request(never.id).unwrap();
         assert!(store.request(never.id).is_err());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn comments_to_send_cover_what_a_session_was_not_asked_yet() {
+        let (root, wt, mut store) = fixture("requests-send");
+        let target = Target::of(&wt).unwrap();
+        let range = DiffRange::resolve(&wt, Some("main"), &Scope::All).unwrap();
+        let by_codex = By { session: Some("thread-1"), ..By::agent(Some("codex")) };
+        let mut comment = |by: By, line| {
+            let new = NewThread { by, path: "a.txt", old_path: None, range: additions(line, line), body: "Why?", images: &[] };
+            store.add_thread(&target, &wt, &range, new).unwrap()
+        };
+        let (suggested, mine) = (comment(by_codex, 3), comment(By::REVIEWER, 4));
+        let wait = || std::thread::sleep(std::time::Duration::from_millis(2));
+
+        // Any agent gets every open comment; a reviewer not yet asked to address them gets its own
+        // too, though it has seen them.
+        assert_eq!(store.comments_to_send(&target, None).unwrap(), [suggested, mine]);
+        assert_eq!(store.unseen(&target, Some("thread-1")).unwrap(), [mine]);
+        assert_eq!(store.comments_to_send(&target, Some("thread-1")).unwrap(), [suggested, mine]);
+
+        // Once asked, what it has seen isn't sent again unless nothing else is.
+        let asked = store.add_request(&target, Kind::Implement, "codex", Some("thread-1"), None, &[suggested, mine]).unwrap();
+        wait();
+        store.mark_seen("thread-1", &asked.threads).unwrap();
+        assert_eq!(store.comments_to_send(&target, Some("thread-1")).unwrap(), [suggested, mine]);
+        wait();
+        store.reply(mine, By::REVIEWER, "Still open", &[]).unwrap();
+        assert_eq!(store.comments_to_send(&target, Some("thread-1")).unwrap(), [mine]);
 
         std::fs::remove_dir_all(&root).unwrap();
     }

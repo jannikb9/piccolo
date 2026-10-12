@@ -205,6 +205,9 @@ export type ReviewRequest = {
 export type SessionActivity = {
   /** Open threads each session hasn't seen, by session id. */
   unseen: Record<string, number[]>;
+  /** The open threads sending comments to each session brings, by session id: all of them for one
+   * not asked to address comments yet, else what's new, else all of them again. */
+  toSend: Record<string, number[]>;
   /** All open threads, which a new session is given. */
   open: number[];
   /** Who started each open thread: an agent's name, or `null` for the reviewer. */

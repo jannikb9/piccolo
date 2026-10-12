@@ -172,7 +172,7 @@ export function useCopyPrompt(worktree: Worktree) {
   });
 }
 
-const NO_ACTIVITY: SessionActivity = { unseen: {}, open: [], startedBy: {}, written: {}, requests: [] };
+const NO_ACTIVITY: SessionActivity = { unseen: {}, toSend: {}, open: [], startedBy: {}, written: {}, requests: [] };
 
 /** What each of the worktree's sessions hasn't seen, and the reviews requested on it. */
 export function useSessionActivity(worktree: Worktree): SessionActivity {
