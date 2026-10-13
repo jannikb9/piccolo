@@ -29,13 +29,11 @@ export type Worktree = {
   updatedAt: number;
 };
 
-export type WorktreeStats = {
-  ahead: number;
-  behind: number;
-  additions: number;
-  deletions: number;
-  /** Its commits are in the base branch (merged, squash-merged or rebased), so the worktree can go. */
-  merged: boolean;
+/** A branch's newest pull request on GitHub. */
+export type PullRequest = {
+  number: number;
+  state: "open" | "closed" | "merged";
+  url: string;
 };
 
 export type FileStatus = "added" | "modified" | "deleted" | "renamed";

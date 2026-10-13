@@ -3,7 +3,7 @@
 use crate::git::{self, ChangedFile, Commit, DiffOptions, DiffPatch, RemoteBranch, Result, Scope};
 use crate::watch::Watchers;
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 use std::thread;
 use tauri::{AppHandle, State};
@@ -76,17 +76,6 @@ pub struct WorktreeInfo {
     is_main: bool,
     dirty: bool,
     updated_at: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorktreeStats {
-    ahead: u32,
-    behind: u32,
-    additions: u32,
-    deletions: u32,
-    /// Its commits are in the base branch, so the worktree can go.
-    merged: bool,
 }
 
 fn folder_name(path: &str) -> String {
@@ -211,26 +200,10 @@ pub fn reorder_repos(app: AppHandle, repos: State<'_, Repos>, ids: Vec<String>) 
     repos.update(&app, |paths| *paths = reordered(paths, ids))
 }
 
+/// Whether the worktree's commits are in the base branch, so it can go.
 #[tauri::command]
-pub async fn worktree_stats(path: String, base: Option<String>) -> Result<WorktreeStats> {
-    blocking(move || {
-        let wt = PathBuf::from(&path);
-        let (ahead, behind) = match &base {
-            Some(base) => git::ahead_behind(&wt, base)?,
-            None => (0, 0),
-        };
-        let files = git::changed_files(&wt, base.as_deref(), Scope::All, DiffOptions::default())?;
-        // A branch without commits of its own is new, not merged.
-        let merged = ahead > 0 && base.as_deref().is_some_and(|base| git::is_merged(&wt, base));
-        Ok(WorktreeStats {
-            ahead,
-            behind,
-            merged,
-            additions: files.iter().map(|f| f.additions).sum(),
-            deletions: files.iter().map(|f| f.deletions).sum(),
-        })
-    })
-    .await
+pub async fn worktree_merged(path: String, base: Option<String>) -> Result<bool> {
+    blocking(move || Ok(base.is_some_and(|base| git::is_merged(Path::new(&path), &base)))).await
 }
 
 #[tauri::command]

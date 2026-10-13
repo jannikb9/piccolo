@@ -13,7 +13,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useLayoutEffect, useRef, type ReactNode, type Ref } from "react";
-import { useAddRepo, useWorktreeStats } from "../lib/queries";
+import { useAddRepo, useWorktreeMerged } from "../lib/queries";
 import { cn, scopeKey, totals } from "../lib/utils";
 import { useStore } from "../store";
 import type { ChangedFile, DiffLayout, DiffPatch, DiffScope, GeneralThread, Repo, Thread, Worktree } from "../types";
@@ -148,7 +148,7 @@ function Toolbar({
 }) {
   const { additions, deletions } = totals(files);
   const branch = worktree.branch ?? worktree.head;
-  const merged = !!useWorktreeStats(worktree, repo.defaultBranch).data?.merged;
+  const merged = useWorktreeMerged(worktree, repo.defaultBranch);
 
   return (
     <header

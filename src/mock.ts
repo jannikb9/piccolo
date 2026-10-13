@@ -15,6 +15,7 @@ import type {
   FileVersions,
   GeneralThread,
   LineRange,
+  PullRequest,
   RemoteBranch,
   Repo,
   ReviewRequest,
@@ -22,7 +23,6 @@ import type {
   SymbolHit,
   SymbolSearch,
   Thread,
-  WorktreeStats,
   WorktrunkStatus,
 } from "./types";
 
@@ -106,14 +106,15 @@ const files: Record<string, MockFile[]> = {
   "~/projects/infra/infra": [uncommitted({ path: "terraform/modules/db/main.tf", status: "modified", additions: 8, deletions: 3 })],
 };
 
-const aheadBehind: Record<string, [number, number]> = {
-  "~/projects/spoke-app/auth-session": [3, 0],
-  "~/projects/spoke-app/billing": [7, 2],
-  "~/projects/spoke-app/nav": [1, 12],
-};
-
 /** Worktrees whose branch was merged into the base branch. */
 const merged = new Set(["~/projects/spoke-app/nav"]);
+
+/** Branches' pull requests on GitHub. */
+const pullRequests: Record<string, PullRequest> = {
+  "feat/auth-session-refresh": { number: 412, state: "open", url: "https://github.com/spoke/spoke-app/pull/412" },
+  "agent/migrate-logger": { number: 398, state: "closed", url: "https://github.com/spoke/spoke-app/pull/398" },
+  "fix/nav-overflow": { number: 377, state: "merged", url: "https://github.com/spoke/spoke-app/pull/377" },
+};
 
 const delay = <T>(value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), 150));
 
@@ -159,16 +160,12 @@ export function mockChangedFiles(worktreePath: string, scope: DiffScope): Promis
   return delay(inScope(worktreePath, scope).map(({ committed: _, ...f }) => f));
 }
 
-export function mockWorktreeStats(worktreePath: string): Promise<WorktreeStats> {
-  const all = files[worktreePath] ?? [];
-  const [ahead, behind] = aheadBehind[worktreePath] ?? [0, 0];
-  return delay({
-    ahead,
-    behind,
-    additions: all.reduce((n, f) => n + f.additions, 0),
-    deletions: all.reduce((n, f) => n + f.deletions, 0),
-    merged: merged.has(worktreePath),
-  });
+export function mockWorktreeMerged(worktreePath: string): Promise<boolean> {
+  return delay(merged.has(worktreePath));
+}
+
+export function mockPullRequests(branches: string[]): Promise<Record<string, PullRequest>> {
+  return delay(Object.fromEntries(branches.flatMap((b) => (pullRequests[b] ? [[b, pullRequests[b]]] : []))));
 }
 
 // --- Synthetic file contents and patches -------------------------------------------------------
@@ -605,8 +602,8 @@ const seen: Record<string, Record<number, number>> = { "mock-1": { 1: minutesAgo
 export const mockState = {
   repos: mockRepos,
   files,
-  aheadBehind,
   merged,
+  pullRequests,
   commitLog,
   threads,
   sessions: mockSessionList,

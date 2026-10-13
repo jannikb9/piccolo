@@ -27,7 +27,8 @@ export const queryClient = new QueryClient({
 
 export const keys = {
   repos: ["repos"] as const,
-  stats: (path: string, base: string | null) => ["stats", path, base] as const,
+  merged: (path: string, base: string | null) => ["merged", path, base] as const,
+  pulls: (repoId: string, branches: string[]) => ["pulls", repoId, branches] as const,
   commits: (path: string, base: string | null) => ["commits", path, base] as const,
   files: (path: string, base: string | null, scope: DiffScope, options: DiffOptions) =>
     ["files", path, base, scope, options] as const,
@@ -55,11 +56,31 @@ export function useRepos() {
   return useQuery({ queryKey: keys.repos, queryFn: api.listRepos });
 }
 
-export function useWorktreeStats(worktree: Worktree, base: string | null) {
-  return useQuery({
-    queryKey: keys.stats(worktree.path, base),
-    queryFn: () => api.worktreeStats(worktree.path, base),
-  });
+/** Whether the worktree's commits are in `base`, so it can go. */
+export function useWorktreeMerged(worktree: Worktree, base: string | null) {
+  return !!useQuery({
+    queryKey: keys.merged(worktree.path, base),
+    queryFn: () => api.worktreeMerged(worktree.path, base),
+  }).data;
+}
+
+/**
+ * The GitHub pull requests of the repository's worktree branches, by branch. Asking GitHub takes
+ * a network request, so they're read again only every few minutes, not on each change.
+ */
+export function usePullRequests(repo: Repo) {
+  // The base branch's own pull requests aren't of interest.
+  const base = repo.defaultBranch?.replace(/^origin\//, "");
+  const branches = [...new Set(repo.worktrees.flatMap((w) => (w.branch && w.branch !== base ? [w.branch] : [])))].sort();
+  return (
+    useQuery({
+      queryKey: keys.pulls(repo.id, branches),
+      queryFn: () => api.pullRequests(repo.path, branches),
+      enabled: branches.length > 0,
+      staleTime: 5 * 60_000,
+      retry: false,
+    }).data ?? {}
+  );
 }
 
 /** The branch's own commits, newest first. */
@@ -425,7 +446,7 @@ export function useLiveGitData() {
     const offFocus = onWindowFocusChanged((focused) => focusManager.setFocused(focused));
     const offRepo = onRepoChanged(() => {
       client.invalidateQueries({ queryKey: keys.repos });
-      client.invalidateQueries({ queryKey: ["stats"] });
+      client.invalidateQueries({ queryKey: ["merged"] });
       client.invalidateQueries({ queryKey: ["commits"] });
       client.invalidateQueries({ queryKey: ["files"] });
       client.invalidateQueries({ queryKey: ["patch"] });

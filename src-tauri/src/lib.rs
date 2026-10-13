@@ -5,6 +5,7 @@ mod imports;
 mod menu;
 mod navigate;
 mod programs;
+mod pulls;
 mod repos;
 mod requests;
 mod sessions;
@@ -44,7 +45,8 @@ pub fn run() {
             repos::add_repo,
             repos::remove_repo,
             repos::reorder_repos,
-            repos::worktree_stats,
+            repos::worktree_merged,
+            pulls::pull_requests,
             repos::changed_files,
             repos::diff_patch,
             repos::commits,

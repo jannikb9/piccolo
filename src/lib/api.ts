@@ -33,8 +33,9 @@ import {
   mockRepos,
   mockSetDismissed,
   mockSetResolved,
+  mockPullRequests,
   mockThreads,
-  mockWorktreeStats,
+  mockWorktreeMerged,
 } from "../mock";
 import type { ImageUpload } from "./images";
 import type {
@@ -49,13 +50,13 @@ import type {
   FileVersions,
   GeneralThread,
   LineRange,
+  PullRequest,
   RemoteBranch,
   Repo,
   ReviewRequest,
   SessionActivity,
   SymbolSearch,
   Thread,
-  WorktreeStats,
   WorktrunkStatus,
 } from "../types";
 
@@ -74,8 +75,13 @@ export const api = {
   /** Saves the sidebar order of repositories. */
   reorderRepos: (ids: string[]): Promise<void> => (isTauri ? invoke("reorder_repos", { ids }) : mockReorderRepos(ids)),
 
-  worktreeStats: (path: string, base: string | null): Promise<WorktreeStats> =>
-    isTauri ? invoke("worktree_stats", { path, base }) : mockWorktreeStats(path),
+  /** Whether the worktree's commits are in `base` (merged, squash-merged or rebased), so it can go. */
+  worktreeMerged: (path: string, base: string | null): Promise<boolean> =>
+    isTauri ? invoke("worktree_merged", { path, base }) : mockWorktreeMerged(path),
+
+  /** The newest GitHub pull request of each of `branches`, by branch; none without the GitHub CLI. */
+  pullRequests: (repo: string, branches: string[]): Promise<Record<string, PullRequest>> =>
+    isTauri ? invoke("pull_requests", { repo, branches }) : mockPullRequests(branches),
 
   changedFiles: (path: string, base: string | null, scope: DiffScope, options: DiffOptions): Promise<ChangedFile[]> =>
     isTauri ? invoke("changed_files", { path, base, scope, options }) : mockChangedFiles(path, scope),

@@ -21,6 +21,7 @@ import {
   GitBranch,
   GitBranchPlus,
   GitMerge,
+  GitPullRequestClosed,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -35,15 +36,16 @@ import {
   useRemoveRepo,
   useReorderRepos,
   useRepos,
+  usePullRequests,
   useSessions,
-  useWorktreeStats,
+  useWorktreeMerged,
 } from "../lib/queries";
 import { agentLabel, cn, timeAgo } from "../lib/utils";
 import { sortWorktrees, useDiffOptions, useStore } from "../store";
-import type { Repo, Worktree } from "../types";
+import type { PullRequest, Repo, Worktree } from "../types";
 import { AgentIcon } from "./AgentIcon";
 import { BranchPicker } from "./BranchPicker";
-import { ContextMenu, DiffCount, DropdownMenu, IconButton, Skeleton, Tooltip, type MenuItem } from "./ui";
+import { ContextMenu, DropdownMenu, IconButton, Skeleton, Tooltip, type MenuItem } from "./ui";
 
 /** Shows or hides the worktree sidebar. */
 export function SidebarToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
@@ -152,6 +154,7 @@ function RepoSection({ repo, selectedId, shortcuts }: { repo: Repo; selectedId: 
   const collapsed = useStore((s) => !!s.collapsedRepos[repo.id]);
   const toggleRepo = useStore((s) => s.toggleRepo);
   const removeRepo = useRemoveRepo();
+  const pulls = usePullRequests(repo);
   const [pickingBranch, setPickingBranch] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: repo.id });
 
@@ -213,6 +216,7 @@ function RepoSection({ repo, selectedId, shortcuts }: { repo: Repo; selectedId: 
                 <WorktreeRow
                   worktree={wt}
                   base={repo.defaultBranch}
+                  pull={wt.branch ? pulls[wt.branch] : undefined}
                   selected={wt.id === selectedId}
                   shortcut={shortcuts.get(wt.id)}
                 />
@@ -229,18 +233,20 @@ function RepoSection({ repo, selectedId, shortcuts }: { repo: Repo; selectedId: 
 function WorktreeRow({
   worktree: wt,
   base,
+  pull,
   selected,
   shortcut,
 }: {
   worktree: Worktree;
   base: string | null;
+  pull?: PullRequest;
   selected: boolean;
   shortcut?: number;
 }) {
   const selectWorktree = useStore((s) => s.selectWorktree);
   const chosenScope = useStore((s) => s.scopes[wt.id]);
   const diffOptions = useDiffOptions();
-  const stats = useWorktreeStats(wt, base);
+  const merged = useWorktreeMerged(wt, base);
   // Only running sessions: the toolbar's agents popover lists the rest.
   const sessions = useSessions(wt).filter((s) => s.running);
   const deleteWorktree = useDeleteWorktree();
@@ -266,7 +272,7 @@ function WorktreeRow({
             label: "Delete worktree",
             icon: <Trash2 className="size-3.5 text-fg-subtle" />,
             shortcut: "D",
-            onSelect: () => deleteWorktree.mutate({ worktree: wt, merged: !!stats.data?.merged }),
+            onSelect: () => deleteWorktree.mutate({ worktree: wt, merged }),
           },
         ]),
   ];
@@ -281,6 +287,11 @@ function WorktreeRow({
               <span className="font-mono">{wt.path}</span>
               {shortcut && <kbd className="font-sans text-fg-subtle">⌘{shortcut}</kbd>}
             </span>
+            {pull && (
+              <span className="text-fg-muted">
+                Pull request #{pull.number} {pull.state}
+              </span>
+            )}
             {sessions.map((s) => (
               <span key={s.id} className="flex max-w-80 items-center gap-1.5">
                 <AgentIcon name={s.agent} className="size-3.5" />
@@ -302,8 +313,10 @@ function WorktreeRow({
               selected ? "bg-bg-active" : "hover:bg-bg-hover",
             )}
           >
-            {stats.data?.merged ? (
+            {merged || pull?.state === "merged" ? (
               <GitMerge className="size-3.5 text-merged" aria-label="Merged" />
+            ) : pull?.state === "closed" ? (
+              <GitPullRequestClosed className="size-3.5 text-del" aria-label="Pull request closed" />
             ) : (
               <GitBranch className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} />
             )}
@@ -326,19 +339,7 @@ function WorktreeRow({
             </span>
             <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-fg-subtle">
               <span className="truncate">{wt.isMain ? "root" : wt.name}</span>
-              {stats.data && (stats.data.ahead > 0 || stats.data.behind > 0) && (
-                <span className="tabular shrink-0 text-fg-faint">
-                  {stats.data.ahead > 0 && `↑${stats.data.ahead}`}
-                  {stats.data.ahead > 0 && stats.data.behind > 0 && " "}
-                  {stats.data.behind > 0 && `↓${stats.data.behind}`}
-                </span>
-              )}
             </span>
-            {stats.isPending ? (
-              <Skeleton className="h-2.5 w-9 justify-self-end" />
-            ) : (
-              <DiffCount additions={stats.data?.additions ?? 0} deletions={stats.data?.deletions ?? 0} className="justify-end" />
-            )}
           </button>
         </ContextMenu>
       </Tooltip>

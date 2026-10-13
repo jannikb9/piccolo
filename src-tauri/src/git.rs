@@ -338,7 +338,12 @@ pub fn merge_base(wt: &Path, base: &str) -> Result<String> {
 /// Whether HEAD's changes are already in `base`, however they got there: merged, squash-merged or
 /// rebased. Merging HEAD into `base` would then leave `base` as it is. Changesets don't count:
 /// releasing consumes them on `base` after the merge, so merging again would bring them back.
+/// A branch without commits of its own is new, not merged.
 pub fn is_merged(wt: &Path, base: &str) -> bool {
+    let Ok(own) = git(wt, &["rev-list", "--max-count=1", "--end-of-options", &format!("{base}..HEAD")]) else { return false };
+    if own.trim().is_empty() {
+        return false;
+    }
     // Exits non-zero when the merge conflicts, which means the branch has something new.
     let Ok(out) = git(wt, &["merge-tree", "--write-tree", "--end-of-options", base, "HEAD"]) else { return false };
     let tree = out.lines().next().unwrap_or_default().trim();
@@ -393,15 +398,6 @@ fn git_remove_worktree(repo: &Path, path: &str, force: bool) -> Result<()> {
     }
     args.push(path);
     git(repo, &args).map(drop)
-}
-
-/// Commits (ahead, behind) of HEAD relative to `base`.
-pub fn ahead_behind(wt: &Path, base: &str) -> Result<(u32, u32)> {
-    let out = git(wt, &["rev-list", "--left-right", "--count", "--end-of-options", &format!("{base}...HEAD")])?;
-    let mut counts = out.split_whitespace().map(|n| n.parse().unwrap_or(0));
-    let behind = counts.next().unwrap_or(0);
-    let ahead = counts.next().unwrap_or(0);
-    Ok((ahead, behind))
 }
 
 /// A commit on the branch under review.
@@ -1020,7 +1016,6 @@ mod tests {
         let output = format!("--output={}", written.display());
         assert!(commits(&repo, Some(&output)).is_err());
         assert!(merge_base(&repo, &output).is_err());
-        assert!(ahead_behind(&repo, &output).is_err());
         assert!(!is_merged(&repo, &output));
         assert!(!root.join("written..HEAD").exists() && !written.exists());
 
@@ -1092,7 +1087,6 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[1].branch.as_deref(), Some("feat/x"));
         assert_eq!(default_branch(&repo).as_deref(), Some("main"));
-        assert_eq!(ahead_behind(&wt, "main").unwrap(), (1, 0));
         assert!(worktree_status(&wt).unwrap().dirty);
         assert!(!worktree_status(&repo).unwrap().dirty);
 
@@ -1223,6 +1217,8 @@ mod tests {
         run(&repo, &["add", "."]);
         run(&repo, &["commit", "-q", "-m", "init"]);
         run(&repo, &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()]);
+        // Nothing of its own yet.
+        assert!(!is_merged(&wt, "main"));
 
         // Two commits on the branch, one adding a changeset.
         fs::write(wt.join("a.txt"), "one\ntwo\n").unwrap();

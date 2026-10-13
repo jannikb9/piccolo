@@ -77,14 +77,13 @@ const repo: Repo = {
 
 // The mock's data is replaced in place: it keeps references to these objects.
 for (const list of [mockState.repos, mockState.sessions, mockState.requests]) list.length = 0;
-for (const record of [mockState.files, mockState.aheadBehind, mockState.commitLog, mockState.threads, mockState.sessionOfAgent, mockState.seen]) {
+for (const record of [mockState.files, mockState.pullRequests, mockState.commitLog, mockState.threads, mockState.sessionOfAgent, mockState.seen]) {
   for (const key of Object.keys(record)) delete (record as Record<string, unknown>)[key];
 }
 mockState.merged.clear();
 mockState.repos.push(repo);
 mockState.files[OTHER_WORKTREE] = [patchFile(OTHER_FILE.path, OTHER_FILE.main, OTHER_FILE.v1)];
 mockState.commitLog[OTHER_WORKTREE] = [["Flip the board when playing black", "You", 60 * 3]];
-mockState.aheadBehind[OTHER_WORKTREE] = [1, 0];
 mockState.sessionsWorktree = WORKTREE;
 mockState.sessionOfAgent.claude = "claude";
 mockState.sessionOfAgent.codex = "codex";
@@ -150,7 +149,6 @@ function setVersion(version: "v1" | "v2") {
   };
   mockState.commitLog[WORKTREE] =
     version === "v1" ? [[COMMITS.v1, "Claude", 2]] : [[COMMITS.v2, "Claude", 0], [COMMITS.v1, "Claude", 2]];
-  mockState.aheadBehind[WORKTREE] = [version === "v1" ? 1 : 2, 0];
   if (version === "v2") repo.worktrees.find((w) => w.id === WORKTREE)!.updatedAt = Date.now();
 }
 setVersion("v1");
