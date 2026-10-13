@@ -868,7 +868,7 @@ mod tests {
         let request = send(&store).unwrap();
         assert_eq!((request.kind, request.threads.clone(), request.session_id.as_deref()), (Kind::Implement, vec![first, second], Some("s1")));
         let text = received();
-        assert!(text.starts_with(&format!("Address 2 review comments from Piccolo on {} in a.txt: “x” and “x”.", target.label())), "{text}");
+        assert!(text.starts_with("X: address 2 review comments from Piccolo on feat/x."), "{text}");
         assert!(text.contains(&format!("piccolo -C {} guide --request {}", target.worktree, request.id)), "{text}");
         assert!(send(&store).is_err());
 
@@ -877,7 +877,7 @@ mod tests {
         store.reply(first, By::REVIEWER, "Not quite", &[]).unwrap();
         let again = send(&store).unwrap();
         assert_eq!(again.threads, [first]);
-        assert!(received().starts_with("Address a review comment from Piccolo"));
+        assert!(received().starts_with("X: address a review comment from Piccolo"));
 
         // Nothing is counted as seen when the session can't be reached.
         std::thread::sleep(std::time::Duration::from_millis(2));
