@@ -5,6 +5,13 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.0.5 — 2026-10-13
+
+- **A tidier sidebar**: worktrees no longer show commits ahead/behind or lines changed. A worktree whose GitHub pull request was closed shows a closed pull request icon, one that was merged the merged icon, and the tooltip names the pull request (needs the GitHub CLI, `gh`).
+- **No more "Too many open files"**: refreshing after creating a worktree runs far fewer git commands at once.
+- **An error instead of an empty window**: when part of the app fails to render, it shows what went wrong with Try again, Reload and Copy details, and the other panes keep working.
+- **Agent prompts start with a title**: a new agent session is named after the branch, like "Dispatch cmdk search", instead of a long first line.
+
 ## 1.0.4 — 2026-10-12
 
 - **Comments on deleted files stay visible**: a comment on a file the branch deleted, or on one the diff doesn't show, is listed above the diff with the conversation, and also under "No changes" when nothing differs at all.
