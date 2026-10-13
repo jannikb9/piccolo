@@ -21,6 +21,10 @@ export type Worktree = {
   name: string;
   /** `null` when HEAD is detached. */
   branch: string | null;
+  /** The name the user gave the work on it, if any (it follows the branch). */
+  title: string | null;
+  /** Its name made from the branch, e.g. "Dispatch cmdk search" for `codex/dispatch-cmdk-search`. */
+  autoTitle: string;
   head: string;
   isMain: boolean;
   /** Has uncommitted changes. */

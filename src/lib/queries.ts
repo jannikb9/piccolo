@@ -357,6 +357,27 @@ export function useRemoveRepo() {
   });
 }
 
+/** Names the work on a worktree; shows the new name right away, and the old one again if it fails. */
+export function useRenameWorktree() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ worktree, title }: { worktree: Worktree; title: string }) => api.renameWorktree(worktree.path, title),
+    onMutate: ({ worktree, title }) => {
+      const name = title.trim().split(/\s+/).join(" ");
+      client.setQueryData<Repo[]>(keys.repos, (repos) =>
+        repos?.map((r) => ({
+          ...r,
+          worktrees: r.worktrees.map((w) =>
+            w.id === worktree.id ? { ...w, title: name && name !== w.autoTitle ? name : null } : w,
+          ),
+        })),
+      );
+    },
+    onError: (error) => showError("Couldn't rename the worktree", String(error)),
+    onSettled: () => client.invalidateQueries({ queryKey: keys.repos }),
+  });
+}
+
 /**
  * Deletes a worktree's folder (keeping its branch) and selects the repository's main worktree.
  * Asks first, unless the branch is merged and nothing uncommitted would be lost.

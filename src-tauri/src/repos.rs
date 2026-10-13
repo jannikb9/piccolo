@@ -1,6 +1,8 @@
 //! The user's list of repositories and the Tauri commands the UI uses to read them.
 
+use crate::comments::{Store, Target};
 use crate::git::{self, ChangedFile, Commit, DiffOptions, DiffPatch, RemoteBranch, Result, Scope};
+use crate::titles::auto_title;
 use crate::watch::Watchers;
 use serde::Serialize;
 use std::path::Path;
@@ -72,6 +74,10 @@ pub struct WorktreeInfo {
     path: String,
     name: String,
     branch: Option<String>,
+    /// The name the user gave the work on it, if any.
+    title: Option<String>,
+    /// Its name made from the branch, shown unless the user gave it one.
+    auto_title: String,
     head: String,
     is_main: bool,
     dirty: bool,
@@ -111,6 +117,7 @@ fn load_repo(path: &str) -> RepoInfo {
         .enumerate()
         .filter(|(_, e)| !e.bare && !e.prunable)
         .collect();
+    let store = Store::open().ok();
     // `git status` is the slow part; run it for all worktrees at once.
     repo.worktrees = thread::scope(|s| {
         let handles: Vec<_> = usable
@@ -122,12 +129,15 @@ fn load_repo(path: &str) -> RepoInfo {
             .zip(handles)
             .map(|((index, e), handle)| {
                 let status = handle.join().ok().and_then(|r| r.ok());
+                let target = Target { repo: path.to_string(), branch: e.branch.clone(), worktree: e.path.clone() };
                 WorktreeInfo {
                     id: e.path.clone(),
                     repo_id: path.to_string(),
                     path: e.path.clone(),
                     name: folder_name(&e.path),
                     branch: e.branch.clone(),
+                    title: store.as_ref().and_then(|s| s.custom_title(&target).ok().flatten()),
+                    auto_title: auto_title(&target),
                     head: e.head.chars().take(7).collect(),
                     is_main: *index == 0,
                     dirty: status.as_ref().is_some_and(|s| s.dirty),

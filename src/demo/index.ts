@@ -4,7 +4,7 @@
 // the reviewer.
 import { structuredPatch } from "diff";
 import { queryClient } from "../lib/queries";
-import { mockState, type MockFile } from "../mock";
+import { autoTitle, mockState, type MockFile } from "../mock";
 import { useStore } from "../store";
 import type { CommentMessage, ExcerptRow, LineRange, Repo, ReviewRequest, Thread, Worktree } from "../types";
 import "./demo.css";
@@ -56,6 +56,8 @@ const worktree = (path: string, branch: string, minutes: number, isMain = false)
   path,
   name: path.split("/").pop()!,
   branch,
+  title: null,
+  autoTitle: autoTitle(branch),
   head: "4e1f0c2",
   isMain,
   dirty: false,

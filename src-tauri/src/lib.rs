@@ -9,6 +9,7 @@ mod pulls;
 mod repos;
 mod requests;
 mod sessions;
+mod titles;
 mod updates;
 mod watch;
 mod worktrunk;
@@ -54,6 +55,7 @@ pub fn run() {
             repos::fetch_remotes,
             repos::add_worktree,
             repos::remove_worktree,
+            titles::rename_worktree,
             repos::file_versions,
             comments::list_threads,
             comments::add_thread,

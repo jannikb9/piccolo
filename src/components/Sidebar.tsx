@@ -10,7 +10,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -24,6 +24,7 @@ import {
   GitPullRequestClosed,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Plus,
   Trash2,
   X,
@@ -33,6 +34,7 @@ import {
   resolveScope,
   useAddRepo,
   useDeleteWorktree,
+  useRenameWorktree,
   useRemoveRepo,
   useReorderRepos,
   useRepos,
@@ -250,6 +252,9 @@ function WorktreeRow({
   // Only running sessions: the toolbar's agents popover lists the rest.
   const sessions = useSessions(wt).filter((s) => s.running);
   const deleteWorktree = useDeleteWorktree();
+  const rename = useRenameWorktree();
+  const [renaming, setRenaming] = useState(false);
+  const branch = wt.branch ?? `detached @ ${wt.head}`;
   // Shared by right-click and the "⋮" button.
   const menu: MenuItem[] = [
     {
@@ -264,6 +269,12 @@ function WorktreeRow({
       shortcut: "C",
       onSelect: () => navigator.clipboard.writeText(wt.name),
     },
+    {
+      label: "Rename…",
+      icon: <Pencil className="size-3.5 text-fg-subtle" />,
+      shortcut: "R",
+      onSelect: () => setRenaming(true),
+    },
     // The main worktree is the repository itself.
     ...(wt.isMain
       ? []
@@ -276,6 +287,53 @@ function WorktreeRow({
           },
         ]),
   ];
+
+  const rowClass = (active: boolean) =>
+    cn(
+      "group grid w-full grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left transition-colors",
+      active ? "bg-bg-active" : "hover:bg-bg-hover",
+    );
+  const content = (
+    <>
+      {merged || pull?.state === "merged" ? (
+        <GitMerge className="size-3.5 text-merged" aria-label="Merged" />
+      ) : pull?.state === "closed" ? (
+        <GitPullRequestClosed className="size-3.5 text-del" aria-label="Pull request closed" />
+      ) : (
+        <GitBranch className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} />
+      )}
+      <span className="flex min-w-0 items-center gap-1.5">
+        {renaming ? (
+          <RenameField
+            worktree={wt}
+            onDone={(title) => {
+              setRenaming(false);
+              if (title !== undefined) rename.mutate({ worktree: wt, title });
+            }}
+          />
+        ) : (
+          <span className={cn("truncate text-[13px] font-medium", selected ? "text-fg" : "text-fg-muted group-hover:text-fg")}>
+            {wt.title ?? wt.autoTitle}
+          </span>
+        )}
+        {/* Agent sessions working on it, named in the tooltip. */}
+        {[...new Set(sessions.map((s) => s.agent))].map((agent) => (
+          <AgentIcon key={agent} name={agent} className="size-3 shrink-0" />
+        ))}
+      </span>
+      {/* The "⋮" button takes its place on hover and while its menu is open. */}
+      <span className="tabular text-[11px] text-fg-faint group-hover/row:invisible group-has-[[data-state=open]]/row:invisible">
+        {wt.updatedAt ? timeAgo(wt.updatedAt) : ""}
+      </span>
+
+      <span className="grid place-items-center">
+        {wt.dirty && <span className="size-1.5 rounded-full bg-mod" aria-label="Uncommitted changes" />}
+      </span>
+      <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-fg-subtle">
+        <span className="truncate">{wt.isMain ? `root · ${branch}` : branch}</span>
+      </span>
+    </>
+  );
 
   return (
     <div className="group/row relative">
@@ -302,56 +360,80 @@ function WorktreeRow({
           </span>
         }
       >
-        <ContextMenu items={menu}>
-          <button
-            type="button"
-            onClick={() => selectWorktree(wt.id)}
-            onPointerEnter={() => prefetchWorktree(wt, base, resolveScope(wt, base, chosenScope, undefined), diffOptions)}
-            aria-current={selected ? "page" : undefined}
-            className={cn(
-              "group grid w-full grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1.5 text-left transition-colors",
-              selected ? "bg-bg-active" : "hover:bg-bg-hover",
-            )}
-          >
-            {merged || pull?.state === "merged" ? (
-              <GitMerge className="size-3.5 text-merged" aria-label="Merged" />
-            ) : pull?.state === "closed" ? (
-              <GitPullRequestClosed className="size-3.5 text-del" aria-label="Pull request closed" />
-            ) : (
-              <GitBranch className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} />
-            )}
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className={cn("truncate text-[13px] font-medium", selected ? "text-fg" : "text-fg-muted group-hover:text-fg")}>
-                {wt.branch ?? `detached @ ${wt.head}`}
-              </span>
-              {/* Agent sessions working on it, named in the tooltip. */}
-              {[...new Set(sessions.map((s) => s.agent))].map((agent) => (
-                <AgentIcon key={agent} name={agent} className="size-3 shrink-0" />
-              ))}
-            </span>
-            {/* The "⋮" button takes its place on hover and while its menu is open. */}
-            <span className="tabular text-[11px] text-fg-faint group-hover/row:invisible group-has-[[data-state=open]]/row:invisible">
-              {wt.updatedAt ? timeAgo(wt.updatedAt) : ""}
-            </span>
-
-            <span className="grid place-items-center">
-              {wt.dirty && <span className="size-1.5 rounded-full bg-mod" aria-label="Uncommitted changes" />}
-            </span>
-            <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-fg-subtle">
-              <span className="truncate">{wt.isMain ? "root" : wt.name}</span>
-            </span>
-          </button>
-        </ContextMenu>
+        {renaming ? (
+          <div className={rowClass(true)}>{content}</div>
+        ) : (
+          <ContextMenu items={menu}>
+            <button
+              type="button"
+              onClick={() => selectWorktree(wt.id)}
+              onPointerEnter={() => prefetchWorktree(wt, base, resolveScope(wt, base, chosenScope, undefined), diffOptions)}
+              aria-current={selected ? "page" : undefined}
+              className={rowClass(selected)}
+            >
+              {content}
+            </button>
+          </ContextMenu>
+        )}
       </Tooltip>
-      <DropdownMenu items={menu}>
-        <IconButton
-          label="More"
-          className="absolute top-1.5 right-1.5 size-5 opacity-0 group-hover/row:opacity-100 data-[state=open]:bg-bg-hover data-[state=open]:opacity-100"
-        >
-          <EllipsisVertical className="size-3.5" />
-        </IconButton>
-      </DropdownMenu>
+      {!renaming && (
+        <DropdownMenu items={menu}>
+          <IconButton
+            label="More"
+            className="absolute top-1.5 right-1.5 size-5 opacity-0 group-hover/row:opacity-100 data-[state=open]:bg-bg-hover data-[state=open]:opacity-100"
+          >
+            <EllipsisVertical className="size-3.5" />
+          </IconButton>
+        </DropdownMenu>
+      )}
     </div>
+  );
+}
+
+/**
+ * Edits a worktree's name in place. Enter or leaving the field saves it, Escape keeps the old one;
+ * `onDone` gets the new name, or `undefined` when there's nothing to save. A blank name goes back
+ * to the one from the branch, shown as the placeholder.
+ */
+function RenameField({ worktree, onDone }: { worktree: Worktree; onDone: (title?: string) => void }) {
+  const current = worktree.title ?? worktree.autoTitle;
+  const [value, setValue] = useState(current);
+  const ref = useRef<HTMLInputElement>(null);
+  // Removing the field can blur it after Enter or Escape already finished.
+  const finished = useRef(false);
+  const finish = (title?: string) => {
+    if (finished.current) return;
+    finished.current = true;
+    onDone(title === undefined || title.trim() === current ? undefined : title);
+  };
+  // After the menu that opened it has given focus back to the row.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      ref.current?.focus();
+      ref.current?.select();
+    });
+    return () => clearTimeout(id);
+  }, []);
+  return (
+    <input
+      ref={ref}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          finish(value);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          finish();
+        }
+      }}
+      onBlur={() => finish(value)}
+      placeholder={worktree.autoTitle}
+      aria-label="Worktree name"
+      spellCheck={false}
+      className="-mx-1 min-w-0 flex-1 rounded-sm bg-bg px-1 text-[13px] font-medium text-fg outline-none ring-1 ring-border-strong placeholder:text-fg-faint"
+    />
   );
 }
 

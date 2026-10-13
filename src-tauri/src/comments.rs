@@ -7,7 +7,7 @@
 //! branch as a whole, like the text of a review on GitHub.
 
 use crate::git::{self, DiffLine, DiffRange, LineKind, Result, Scope};
-use crate::{requests, sessions};
+use crate::{requests, sessions, titles};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -302,6 +302,7 @@ impl Store {
         ))?;
         sql(conn.execute_batch(sessions::SCHEMA))?;
         sql(conn.execute_batch(requests::SCHEMA))?;
+        sql(conn.execute_batch(titles::SCHEMA))?;
         let has_column = |table: &str, column: &str| -> Result<bool> {
             sql(conn.query_row(
                 "SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",

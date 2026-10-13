@@ -22,6 +22,7 @@ import {
   mockFileVersions,
   mockFindSymbol,
   mockRemoteBranches,
+  mockRenameWorktree,
   mockReorderRepos,
   mockReply,
   mockCopyPrompt,
@@ -122,6 +123,10 @@ export const api = {
   /** Deletes a linked worktree's folder; its branch stays. `force` discards uncommitted changes. */
   removeWorktree: (repo: string, path: string, force: boolean): Promise<void> =>
     isTauri ? invoke("remove_worktree", { repo, path, force }) : Promise.resolve(),
+
+  /** Names the work on the worktree at `path`; a blank name goes back to the one from its branch. */
+  renameWorktree: (path: string, title: string): Promise<void> =>
+    isTauri ? invoke("rename_worktree", { path, title }) : mockRenameWorktree(path, title),
 
   /** Resolves to the new thread's id. */
   addThread: (args: {

@@ -28,12 +28,20 @@ import type {
 
 const minutesAgo = (m: number) => Date.now() - m * 60_000;
 
+/** As `titles::auto_title`: the branch's last part, in words, capitalised. */
+export const autoTitle = (branch: string) => {
+  const words = (branch.split("/").pop() ?? branch).split(/[-_]+/).filter(Boolean).join(" ");
+  return words ? words[0].toUpperCase() + words.slice(1) : branch;
+};
+
 const worktree = (repoId: string, name: string, branch: string, fields: { dirty?: boolean; minutes: number; isMain?: boolean }) => ({
   id: `${repoId}/${name}`,
   repoId,
   path: `${repoId}/${name}`,
   name,
   branch,
+  title: null as string | null,
+  autoTitle: autoTitle(branch),
   head: "a41c9e2",
   isMain: fields.isMain ?? false,
   dirty: fields.dirty ?? false,
@@ -895,6 +903,14 @@ export function mockAddWorktree(repoId: string, branch: string): Promise<string>
   const wt = worktree(repoId, `${repo.name}.${branch.replace(/\//g, "-")}`, branch, { minutes: 0 });
   repo.worktrees.push(wt);
   return new Promise((resolve) => setTimeout(() => resolve(wt.path), 800));
+}
+
+export function mockRenameWorktree(path: string, title: string): Promise<void> {
+  const name = title.trim().split(/\s+/).join(" ");
+  for (const wt of mockRepos.flatMap((r) => r.worktrees)) {
+    if (wt.path === path) wt.title = name && name !== wt.autoTitle ? name : null;
+  }
+  return delay(undefined);
 }
 
 /**

@@ -136,7 +136,7 @@ impl Store {
         }
         let request = self.add_request(target, kind, agent, session, head, &threads)?;
         let again = kind == Kind::Review && self.previous_review(target, agent, session, request.id)?.is_some();
-        let text = prompt(&request, &title(target), &target.label(), &target.worktree, again);
+        let text = prompt(&request, &self.title(target)?, &target.label(), &target.worktree, again);
         Ok((request, text))
     }
 
@@ -336,23 +336,6 @@ impl Store {
     }
 }
 
-/// The work on `target` named like a title, after its branch without prefixes like `codex/`, or
-/// with a detached HEAD after its worktree folder without the repository's name: `Dispatch cmdk
-/// search` for `codex/dispatch-cmdk-search` or the folder `web-apps.dispatch-cmdk-search`.
-fn title(target: &Target) -> String {
-    let folder = |path: &str| Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let name = match &target.branch {
-        Some(branch) => branch.rsplit('/').next().unwrap_or(branch).to_string(),
-        None => {
-            let worktree = folder(&target.worktree);
-            worktree.strip_prefix(&format!("{}.", folder(&target.repo))).map_or(worktree.clone(), str::to_string)
-        }
-    };
-    let words = name.split(['-', '_']).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
-    let mut chars = words.chars();
-    chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or(name)
-}
-
 /// The prompt that hands `request` on `branch`, in the worktree at `worktree`, to an agent. It
 /// opens with `title`, since agents name a new session after its first message.
 fn prompt(request: &Request, title: &str, branch: &str, worktree: &str, again: bool) -> String {
@@ -523,16 +506,6 @@ mod tests {
         assert!(store.request(never.id).is_err());
 
         std::fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn titles_the_work_after_the_branch_or_worktree() {
-        let target = |branch: Option<&str>, worktree: &str| Target { repo: "/src/web-apps".into(), branch: branch.map(str::to_string), worktree: worktree.into() };
-        assert_eq!(title(&target(Some("codex/dispatch-cmdk-search"), "/src/x")), "Dispatch cmdk search");
-        assert_eq!(title(&target(Some("fix_login--redirect"), "/src/x")), "Fix login redirect");
-        assert_eq!(title(&target(Some("main"), "/src/web-apps")), "Main");
-        assert_eq!(title(&target(None, "/src/web-apps.dispatch-cmdk-search")), "Dispatch cmdk search");
-        assert_eq!(title(&target(Some("feat/---"), "/src/x")), "---");
     }
 
     #[test]
