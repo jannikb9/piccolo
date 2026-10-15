@@ -1,6 +1,6 @@
 //! The user's list of repositories and the Tauri commands the UI uses to read them.
 
-use crate::comments::{Store, Target};
+use crate::comments::{self, Store, Target};
 use crate::git::{self, ChangedFile, Commit, DiffOptions, DiffPatch, RemoteBranch, Result, Scope};
 use crate::titles::auto_title;
 use crate::watch::Watchers;
@@ -227,8 +227,19 @@ pub async fn changed_files(
 }
 
 #[tauri::command]
-pub async fn diff_patch(path: String, base: Option<String>, scope: Scope, options: DiffOptions) -> Result<DiffPatch> {
-    blocking(move || git::diff_patch(Path::new(&path), base.as_deref(), scope, options)).await
+/// `reveal`: resolved threads whose lines the diff shows too.
+pub async fn diff_patch(
+    path: String,
+    base: Option<String>,
+    scope: Scope,
+    options: DiffOptions,
+    reveal: Vec<i64>,
+) -> Result<DiffPatch> {
+    blocking(move || {
+        let wt = Path::new(&path);
+        git::diff_patch(wt, base.as_deref(), scope, options, |range| comments::thread_lines(wt, range, &reveal))
+    })
+    .await
 }
 
 /// The branch's own commits, newest first.

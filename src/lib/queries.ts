@@ -32,8 +32,8 @@ export const keys = {
   commits: (path: string, base: string | null) => ["commits", path, base] as const,
   files: (path: string, base: string | null, scope: DiffScope, options: DiffOptions) =>
     ["files", path, base, scope, options] as const,
-  patch: (path: string, base: string | null, scope: DiffScope, options: DiffOptions) =>
-    ["patch", path, base, scope, options] as const,
+  patch: (path: string, base: string | null, scope: DiffScope, options: DiffOptions, reveal: number[]) =>
+    ["patch", path, base, scope, options, reveal] as const,
   /** `revision` identifies the diff; threads are re-positioned whenever it changes. */
   threads: (path: string, base: string | null, scope: DiffScope, revision: number) =>
     ["threads", path, base, scope, revision] as const,
@@ -136,10 +136,13 @@ export function useChangedFiles(worktree: Worktree | undefined, base: string | n
   });
 }
 
+const NONE: number[] = [];
+
 export function useDiffPatch(worktree: Worktree | undefined, base: string | null, scope: DiffScope, options: DiffOptions) {
+  const reveal = useStore((s) => (worktree ? s.revealedThreads[worktree.id] : undefined)) ?? NONE;
   return useQuery({
-    queryKey: keys.patch(worktree?.path ?? "", base, scope, options),
-    queryFn: () => api.diffPatch(worktree!.path, base, scope, options),
+    queryKey: keys.patch(worktree?.path ?? "", base, scope, options, reveal),
+    queryFn: () => api.diffPatch(worktree!.path, base, scope, options, reveal),
     enabled: !!worktree,
     placeholderData: sameWorktree(worktree?.path),
   });
@@ -326,9 +329,10 @@ export function prefetchWorktree(worktree: Worktree, base: string | null, scope:
     queryKey: keys.files(worktree.path, base, scope, options),
     queryFn: () => api.changedFiles(worktree.path, base, scope, options),
   });
+  const reveal = useStore.getState().revealedThreads[worktree.id] ?? NONE;
   queryClient.prefetchQuery({
-    queryKey: keys.patch(worktree.path, base, scope, options),
-    queryFn: () => api.diffPatch(worktree.path, base, scope, options),
+    queryKey: keys.patch(worktree.path, base, scope, options, reveal),
+    queryFn: () => api.diffPatch(worktree.path, base, scope, options, reveal),
   });
 }
 

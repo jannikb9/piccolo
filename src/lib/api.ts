@@ -87,8 +87,9 @@ export const api = {
   changedFiles: (path: string, base: string | null, scope: DiffScope, options: DiffOptions): Promise<ChangedFile[]> =>
     isTauri ? invoke("changed_files", { path, base, scope, options }) : mockChangedFiles(path, scope),
 
-  diffPatch: (path: string, base: string | null, scope: DiffScope, options: DiffOptions): Promise<DiffPatch> =>
-    isTauri ? invoke("diff_patch", { path, base, scope, options }) : mockDiffPatch(path, scope),
+  /** Open threads' lines are in the patch even where nothing changed, and those of `reveal` too. */
+  diffPatch: (path: string, base: string | null, scope: DiffScope, options: DiffOptions, reveal: number[]): Promise<DiffPatch> =>
+    isTauri ? invoke("diff_patch", { path, base, scope, options, reveal }) : mockDiffPatch(path, scope),
 
   /** The branch's own commits (not in `base`), newest first. */
   commits: (path: string, base: string | null): Promise<Commit[]> =>

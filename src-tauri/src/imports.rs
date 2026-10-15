@@ -49,9 +49,9 @@ pub fn filter_patch(wt: &Path, range: &DiffRange, patch: &str) -> Result<String>
 }
 
 /// One file's entry in a patch: its header lines, then each hunk's lines (header first).
-struct FilePatch<'a> {
-    header: Vec<&'a str>,
-    hunks: Vec<Vec<&'a str>>,
+pub(crate) struct FilePatch<'a> {
+    pub header: Vec<&'a str>,
+    pub hunks: Vec<Vec<&'a str>>,
 }
 
 impl<'a> FilePatch<'a> {
@@ -59,7 +59,7 @@ impl<'a> FilePatch<'a> {
     /// (added and deleted files). `None` overall for files without hunks (binary, pure renames)
     /// and for paths git had to quote.
     #[allow(clippy::type_complexity)]
-    fn paths(&self) -> Option<(Option<&'a str>, Option<&'a str>)> {
+    pub fn paths(&self) -> Option<(Option<&'a str>, Option<&'a str>)> {
         if self.hunks.is_empty() {
             return None;
         }
@@ -75,7 +75,7 @@ impl<'a> FilePatch<'a> {
     }
 }
 
-fn split_files(patch: &str) -> Vec<FilePatch<'_>> {
+pub(crate) fn split_files(patch: &str) -> Vec<FilePatch<'_>> {
     let mut files: Vec<FilePatch> = Vec::new();
     for line in patch.split_inclusive('\n') {
         if line.starts_with("diff --git ") || files.is_empty() {

@@ -12,14 +12,43 @@ export function hashString(value: string): number {
   return hash >>> 0;
 }
 
-/** Parses a multi-file patch into per-file diffs keyed by (new) path. */
-export function parsePatch(patch: string): Map<string, FileDiffMetadata> {
+/** The part of the patch each diff was parsed from. */
+const sources = new WeakMap<FileDiffMetadata, string>();
+
+/**
+ * Parses a multi-file patch into per-file diffs keyed by (new) path. A file whose part of the
+ * patch is the same as in `previous` keeps its diff from there: the library expands context into
+ * that object, so what the reviewer expanded stays. (The `index` line names both versions'
+ * blobs, so the same text means the same file contents.)
+ */
+export function parsePatch(patch: string, previous?: Map<string, FileDiffMetadata>): Map<string, FileDiffMetadata> {
+  const bySource = new Map([...(previous?.values() ?? [])].map((diff) => [sources.get(diff), diff]));
   const byPath = new Map<string, FileDiffMetadata>();
-  // The cache key prefix lets the highlighter reuse work until the patch changes.
-  for (const parsed of parsePatchFiles(patch, `patch-${hashString(patch).toString(36)}`)) {
-    for (const file of parsed.files) byPath.set(file.name, file);
+  for (const source of patch.split(/^(?=diff --git )/m)) {
+    if (!source.startsWith("diff --git ")) continue;
+    const kept = bySource.get(source);
+    if (kept) {
+      byPath.set(kept.name, kept);
+      continue;
+    }
+    // The cache key prefix lets the highlighter reuse work until the file's patch changes.
+    for (const parsed of parsePatchFiles(source, `patch-${hashString(source).toString(36)}`)) {
+      for (const file of parsed.files) {
+        sources.set(file, source);
+        byPath.set(file.name, file);
+      }
+    }
   }
   return byPath;
+}
+
+/** Whether a hunk of `diff` holds `line` of the `side` version. */
+export function inHunks(diff: FileDiffMetadata, side: "additions" | "deletions", line: number): boolean {
+  return diff.hunks.some((hunk) =>
+    side === "additions"
+      ? line >= hunk.additionStart && line < hunk.additionStart + hunk.additionCount
+      : line >= hunk.deletionStart && line < hunk.deletionStart + hunk.deletionCount,
+  );
 }
 
 /** An empty diff for files without a textual patch (binary or too large). */

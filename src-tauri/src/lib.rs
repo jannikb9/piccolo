@@ -1,5 +1,6 @@
 pub mod cli;
 mod comments;
+mod context;
 mod git;
 mod imports;
 mod menu;

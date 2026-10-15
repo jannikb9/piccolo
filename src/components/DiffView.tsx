@@ -14,8 +14,8 @@ import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
 import { unsafeCSS, viewStyle } from "../lib/codeViewStyle";
 import { markCommentedLines } from "../lib/commentedLines";
-import { emptyDiff, hashString, isCollapsedByDefault, parsePatch } from "../lib/diff";
-import { useAddThread, useDiffScope } from "../lib/queries";
+import { emptyDiff, hashString, inHunks, isCollapsedByDefault, parsePatch } from "../lib/diff";
+import { queryClient, useAddThread, useDiffScope } from "../lib/queries";
 import {
   clearMatches,
   FIND_LAYER,
@@ -131,8 +131,10 @@ export function DiffView({
     [viewRef],
   );
 
-  // Parsed once per patch: the library hydrates these objects in place when context is expanded.
-  const fileDiffs = useMemo(() => parsePatch(diff.patch), [diff.patch]);
+  // Parsed once per patch: the library hydrates these objects in place when context is expanded,
+  // so files whose patch stays the same keep their objects.
+  const previousDiffs = useRef<Map<string, FileDiffMetadata>>(undefined);
+  const fileDiffs = useMemo(() => (previousDiffs.current = parsePatch(diff.patch, previousDiffs.current)), [diff.patch]);
   const patchVersion = useMemo(() => hashString(diff.patch), [diff.patch]);
   const byPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
 
@@ -208,10 +210,10 @@ export function DiffView({
           annotations,
           collapsed,
           // Any change to what the item shows must change its version.
-          version: hashString(`${patchVersion}:${collapsed}:${isViewed}:${annotationSignature(annotations)}`),
+          version: hashString(`${fileDiff?.cacheKey}:${collapsed}:${isViewed}:${annotationSignature(annotations)}`),
         };
       }),
-    [files, fileDiffs, collapsedOverrides, viewed, patchVersion, annotationsByPath],
+    [files, fileDiffs, collapsedOverrides, viewed, annotationsByPath],
   );
 
   // Clicking or dragging the gutter "+" (or a selection's "+") opens a comment on those lines.
@@ -318,10 +320,19 @@ export function DiffView({
   useEffect(() => {
     for (const host of containerRef.current?.querySelectorAll("diffs-container") ?? []) markCommented.current(host);
   }, [commentedRanges]);
+  // A thread picked while its lines were folded away (see `showThread`): first the diff is asked
+  // for them, then it's shown once its file has rendered them (scrolling to a line goes by the
+  // file's layout, which only then has it).
+  const waitingFor = useRef<{ threadId: number; fileDiff?: FileDiffMetadata } | null>(null);
   const onPostRender = useCallback(
-    (node: HTMLElement, _instance: unknown, phase: PostRenderPhase) => {
+    (node: HTMLElement, _instance: unknown, phase: PostRenderPhase, context?: { item: CodeViewItem<Note> }) => {
       if (phase !== "unmount") markCommented.current(node);
       schedulePaint();
+      const waiting = waitingFor.current;
+      if (phase !== "unmount" && waiting?.fileDiff && context?.item.type === "diff" && context.item.fileDiff === waiting.fileDiff) {
+        waitingFor.current = null;
+        requestAnimationFrame(() => useStore.getState().revealThread(waiting.threadId));
+      }
     },
     [schedulePaint],
   );
@@ -370,8 +381,24 @@ export function DiffView({
     [],
   );
 
+  /** Whether the diff has the line: in a hunk, or (new side only) expanded by the reviewer. */
+  const isShown = useCallback(
+    (path: string, side: Side, line: number) => {
+      const fileDiff = fileDiffs.get(path);
+      if (!fileDiff) return false;
+      if (inHunks(fileDiff, side, line)) return true;
+      // Nothing was expanded before the file was loaded whole (and the library takes every line
+      // of a partial diff as shown).
+      if (fileDiff.isPartial || side !== "additions") return false;
+      const rendered = localRef.current?.getInstance()?.getRenderedItems().find((item) => item.id === path);
+      return rendered?.type === "diff" && rendered.instance.isLineRenderable(line);
+    },
+    [fileDiffs],
+  );
+
   // A thread picked in the comment list: scroll to where it shows. Picks from before this view
-  // opened (another worktree or scope) are left alone.
+  // opened (another worktree or scope) are left alone. Lines folded away (a resolved thread's)
+  // are asked of the diff first (see `waitingFor`).
   const openedAt = useRef(Date.now());
   const reveal = useStore((s) => s.reveal);
   const showThread = useRef<(id: number) => void>(() => {});
@@ -383,7 +410,13 @@ export function DiffView({
     const thread = threads.find((t) => t.id === id);
     // Threads that can't sit in their file are listed above the diff.
     if (!thread || detached.some((d) => d.thread.id === id)) return scrollDiff(0);
-    if (thread.position) return revealInDiff(thread.path, thread.position.endSide, thread.position.endLine);
+    const { position } = thread;
+    const asked = useStore.getState().revealedThreads[worktree.id]?.includes(id);
+    if (position && !asked && !isShown(thread.path, position.endSide, position.endLine)) {
+      waitingFor.current = { threadId: id };
+      return useStore.getState().showThreadLines(worktree.id, id);
+    }
+    if (position) return revealInDiff(thread.path, position.endSide, position.endLine);
     // Outdated: shown above the file's first hunk.
     pinActivePath(thread.path);
     const scroll = () => localRef.current?.scrollTo({ type: "item", id: thread.path, align: "start", behavior: "instant" });
@@ -397,6 +430,32 @@ export function DiffView({
   useEffect(() => {
     if (reveal && reveal.at > openedAt.current) showThread.current(reveal.threadId);
   }, [reveal]);
+  useEffect(() => {
+    const waiting = waitingFor.current;
+    const thread = threads.find((t) => t.id === waiting?.threadId);
+    const fileDiff = thread && fileDiffs.get(thread.path);
+    if (!waiting || waiting.fileDiff || !thread?.position || !fileDiff) return;
+    if (!inHunks(fileDiff, thread.position.endSide, thread.position.endLine)) return;
+    waiting.fileDiff = fileDiff;
+    // Rendering the file brings in its new lines.
+    pinActivePath(thread.path);
+    if (itemsRef.current.find((item) => item.id === thread.path)?.collapsed) setCollapsed(worktree.id, thread.path, false);
+    localRef.current?.scrollTo({ type: "item", id: thread.path, align: "start", behavior: "instant" });
+  }, [fileDiffs, threads, pinActivePath, setCollapsed, worktree.id]);
+
+  // Agents may comment on lines outside the diff, which then has to be read again to show them
+  // (once per diff, should it still not have them).
+  const askedFor = useRef(new Set<string>());
+  useEffect(() => {
+    const missing = inline.filter(
+      ({ position, resolved, path, messages }) =>
+        position && !resolved && messages[0]?.author === "agent" && !isShown(path, position.endSide, position.endLine),
+    );
+    const key = `${patchVersion}:${missing.map((t) => t.id).join(",")}`;
+    if (missing.length === 0 || askedFor.current.has(key)) return;
+    askedFor.current.add(key);
+    queryClient.invalidateQueries({ queryKey: ["patch", worktree.path] });
+  }, [inline, patchVersion, isShown, worktree.path]);
 
   const pool = useWorkerPool();
   const loadDiffFiles = useCallback(

@@ -1,6 +1,7 @@
 //! Thin wrapper around the `git` CLI. Shelling out (rather than using libgit2) keeps behaviour
 //! identical to the user's terminal: same config, attributes, hooks-free reads, and worktree semantics.
 
+use crate::context::{self, Keep};
 use crate::imports;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -620,20 +621,26 @@ pub struct DiffPatch {
     pub patch: String,
 }
 
-pub fn diff_patch(wt: &Path, base: Option<&str>, scope: Scope, options: DiffOptions) -> Result<DiffPatch> {
+/// `keep` names the lines to show besides the changes, for the range compared (see context.rs).
+pub fn diff_patch(
+    wt: &Path,
+    base: Option<&str>,
+    scope: Scope,
+    options: DiffOptions,
+    keep: impl FnOnce(&DiffRange) -> Keep,
+) -> Result<DiffPatch> {
     let range = DiffRange::resolve(wt, base, &scope)?;
-    let mut patch = git(wt, &patch_args(&range, options))?;
+    let mut raw = git(wt, &patch_args(&range, options))?;
 
     if range.includes_untracked() {
         for path in untracked_files(wt)? {
             if let Some(contents) = read_text(&wt.join(&path)) {
-                patch.push_str(&new_file_patch(&path, &contents));
+                raw.push_str(&new_file_patch(&path, &contents));
             }
         }
     }
-    if options.hide_imports {
-        patch = imports::filter_patch(wt, &range, &patch)?;
-    }
+    let shown = if options.hide_imports { imports::filter_patch(wt, &range, &raw)? } else { raw.clone() };
+    let patch = context::keep_lines(wt, &range, &raw, &shown, &keep(&range))?;
     Ok(DiffPatch { range, patch })
 }
 
@@ -930,6 +937,10 @@ fn count_lines(path: &Path) -> (u32, bool) {
 mod tests {
     use super::*;
 
+    fn no_keep(_: &DiffRange) -> Keep {
+        Keep::new()
+    }
+
     #[test]
     fn parses_worktree_list() {
         let out = "worktree /repo\0HEAD aaa\0branch refs/heads/main\0\0\
@@ -1106,7 +1117,7 @@ mod tests {
         assert_eq!(uncommitted.len(), 2);
 
         // Patch covers tracked changes and the untracked file; revs identify both sides.
-        let diff = diff_patch(&wt, Some("main"), Scope::All, DiffOptions::default()).unwrap();
+        let diff = diff_patch(&wt, Some("main"), Scope::All, DiffOptions::default(), no_keep).unwrap();
         assert!(diff.patch.contains("diff --git a/a.txt b/a.txt"));
         assert!(diff.patch.contains("rename from old.txt"));
         assert!(diff.patch.contains("+++ b/untracked.md\n@@ -0,0 +1,2 @@\n+hello\n+world\n\\ No newline at end of file\n"));
@@ -1134,7 +1145,7 @@ mod tests {
         let files = changed_files(&wt, Some("main"), Scope::Uncommitted, hide).unwrap();
         let (app, util) = (find(&files, "app.ts").unwrap(), find(&files, "util.ts").unwrap());
         assert_eq!((app.additions, app.deletions, util.additions), (2, 1, 1));
-        let patch = diff_patch(&wt, Some("main"), Scope::Uncommitted, hide).unwrap().patch;
+        let patch = diff_patch(&wt, Some("main"), Scope::Uncommitted, hide, no_keep).unwrap().patch;
         assert!(!patch.contains("+  b,") && patch.contains("+run(b);") && !patch.contains("util.ts"), "{patch}");
         let shown = changed_files(&wt, Some("main"), Scope::Uncommitted, DiffOptions::default()).unwrap();
         assert_eq!((find(&shown, "app.ts").unwrap().additions, find(&shown, "util.ts").unwrap().additions), (2, 1));
@@ -1156,7 +1167,7 @@ mod tests {
         };
         assert_eq!(only(&log[0].sha), vec!["app.ts", "util.ts"]);
         assert_eq!(only(&log[1].short_sha), vec!["new.txt"]);
-        let diff = diff_patch(&wt, Some("main"), Scope::Commit(log[1].sha.clone()), DiffOptions::default()).unwrap();
+        let diff = diff_patch(&wt, Some("main"), Scope::Commit(log[1].sha.clone()), DiffOptions::default(), no_keep).unwrap();
         assert_eq!(diff.range.new_rev.as_deref(), Some(log[1].sha.as_str()));
         assert!(diff.patch.contains("rename from old.txt") && !diff.patch.contains("untracked.md"));
         // The repository's first commit is compared with the empty tree.
@@ -1267,5 +1278,41 @@ mod tests {
                 ("new.ts".into(), FileStatus::Renamed, Some("old.ts".into())),
             ]
         );
+    }
+
+    /// Commented lines stay in the patch as context, also around hidden import changes.
+    #[test]
+    fn keeps_commented_lines_in_the_patch() {
+        use crate::comments::{LineRange, Side};
+        let repo = std::env::temp_dir().join(format!("review-git-keep-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&repo);
+        fs::create_dir_all(&repo).unwrap();
+        let run = |args: &[&str]| git(&repo, args).unwrap();
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "user.email", "t@example.com"]);
+        run(&["config", "user.name", "Test"]);
+        // `run(n)` is on line n + 3, and n + 4 after the import.
+        let body: String = (1..=40).map(|n| format!("run({n});\n")).collect();
+        fs::write(repo.join("app.ts"), format!("import {{\n  a,\n}} from \"x\";\n{body}")).unwrap();
+        run(&["add", "app.ts"]);
+        run(&["commit", "-q", "-m", "app"]);
+        fs::write(repo.join("app.ts"), format!("import {{\n  a,\n  b,\n}} from \"x\";\n{}", body.replace("run(30);", "run(b);"))).unwrap();
+
+        let at = |side, line| LineRange { start_side: side, start_line: line, end_side: side, end_line: line };
+        // `run(15)`, apart from the change, and `run(23)` on the old side, which runs into it.
+        let keep = |_: &DiffRange| Keep::from([("app.ts".to_string(), vec![at(Side::Additions, 19), at(Side::Deletions, 26)])]);
+        let hide = DiffOptions { hide_imports: true, ..Default::default() };
+        let patch = diff_patch(&repo, None, Scope::Uncommitted, hide, keep).unwrap().patch;
+        let headers: Vec<&str> = patch.lines().filter(|l| l.starts_with("@@")).map(|l| &l[..l.rfind("@@").unwrap() + 2]).collect();
+        assert_eq!(headers, ["@@ -15,7 +16,7 @@", "@@ -23,14 +24,14 @@"], "{patch}");
+        assert!(patch.contains("@@\n run(12);\n") && patch.contains(" run(26);\n run(27);\n") && !patch.contains("  b,"), "{patch}");
+
+        // With every change shown, git takes the patch back out of the worktree as it is: the added
+        // lines are the files'. (`--recount`, as git refuses hunks without changes otherwise.)
+        let patch = diff_patch(&repo, None, Scope::Uncommitted, DiffOptions::default(), keep).unwrap().patch;
+        assert_eq!(patch.matches("\n@@ ").count(), 3, "{patch}");
+        fs::write(repo.join("keep.patch"), &patch).unwrap();
+        run(&["apply", "--check", "--reverse", "--recount", "keep.patch"]);
+        fs::remove_dir_all(&repo).unwrap();
     }
 }

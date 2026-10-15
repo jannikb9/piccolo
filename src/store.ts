@@ -64,6 +64,8 @@ type State = {
   fileTab: FileTab;
   /** The thread last picked in the comment list, for the diff to scroll to; `at` tells picks apart. */
   reveal: { threadId: number; at: number } | null;
+  /** Resolved threads picked while their lines were folded away, by worktree: the diff shows them. */
+  revealedThreads: Record<string, number[]>;
   /** Pasted screenshots of drafts, by draft key (see `replyKey` for replies). */
   draftImages: Record<string, DraftImage[]>;
 
@@ -93,6 +95,7 @@ type State = {
   toggleConversation: (worktreeId: string) => void;
   setFileTab: (tab: FileTab) => void;
   revealThread: (threadId: number) => void;
+  showThreadLines: (worktreeId: string, threadId: number) => void;
   addDraftImages: (key: string, images: DraftImage[]) => void;
   removeDraftImage: (key: string, id: string) => void;
 };
@@ -128,6 +131,7 @@ export const useStore = create<State>()(
       conversationCollapsed: {},
       fileTab: "files",
       reveal: null,
+      revealedThreads: {},
       draftImages: {},
 
       selectWorktree: (id) => set({ selectedWorktreeId: id, activePath: null }),
@@ -203,6 +207,11 @@ export const useStore = create<State>()(
         })),
       setFileTab: (fileTab) => set({ fileTab }),
       revealThread: (threadId) => set({ reveal: { threadId, at: Date.now() } }),
+      showThreadLines: (worktreeId, threadId) =>
+        set((s) => {
+          const ids = s.revealedThreads[worktreeId] ?? [];
+          return ids.includes(threadId) ? s : { revealedThreads: { ...s.revealedThreads, [worktreeId]: [...ids, threadId] } };
+        }),
       addDraftImages: (key, images) =>
         set((s) => ({ draftImages: { ...s.draftImages, [key]: [...(s.draftImages[key] ?? []), ...images] } })),
       removeDraftImage: (key, id) =>

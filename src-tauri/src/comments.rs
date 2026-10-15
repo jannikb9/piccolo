@@ -7,6 +7,7 @@
 //! branch as a whole, like the text of a review on GitHub.
 
 use crate::git::{self, DiffLine, DiffRange, LineKind, Result, Scope};
+use crate::context::Keep;
 use crate::{requests, sessions, titles};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -791,6 +792,23 @@ pub fn locate_in_view(threads: &mut [Thread], wt: &Path, range: &DiffRange) {
             .or_insert_with(|| git::file_contents(wt, rev.as_deref(), &path).ok().flatten());
         thread.position = contents.as_deref().and_then(|c| relocate(thread, c));
     }
+}
+
+/// Where the open threads, and the resolved ones in `reveal`, are in the diff `range`, which keeps
+/// showing their lines.
+pub fn thread_lines(wt: &Path, range: &DiffRange, reveal: &[i64]) -> Keep {
+    let Ok(mut threads) = Target::of(wt).and_then(|target| Store::open()?.threads(&target, !reveal.is_empty())) else {
+        return Keep::new();
+    };
+    threads.retain(|thread| !thread.resolved || reveal.contains(&thread.id));
+    locate_in_view(&mut threads, wt, range);
+    let mut keep = Keep::new();
+    for thread in threads {
+        if let (Some(path), Some(position)) = (thread.path, thread.position) {
+            keep.entry(path).or_default().push(position);
+        }
+    }
+    keep
 }
 
 /// Updates positions of threads on added or unchanged lines against the files on disk, which is
