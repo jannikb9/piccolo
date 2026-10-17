@@ -1,9 +1,10 @@
 import { CheckCircle2, ChevronRight, EyeOff, MessageSquare, MessageSquarePlus, Pencil, RotateCcw, ThumbsUp, Trash2, User } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { showError } from "../lib/api";
 import { markdownPreview } from "../lib/markdown";
 import { clipboardImages, prepareImage, type DraftImage } from "../lib/images";
 import { useAddGeneralThread, useDeleteComment, useEditComment, useReplyThread, useSetThreadDismissed, useSetThreadResolved, useSetThumbsUp } from "../lib/queries";
+import { hasUnread, useMarkReadOnScreen } from "../lib/unread";
 import { agentLabel, cn, timeAgo } from "../lib/utils";
 import { editKey, replyKey, useStore } from "../store";
 import type { CommentMessage, ExcerptRow, GeneralThread, LineRange, Thread, Worktree } from "../types";
@@ -213,6 +214,7 @@ export function ThreadCard({ thread, note }: { thread: Thread | GeneralThread; n
           )}
           <span className="shrink-0 font-medium">{thread.dismissed ? "Dismissed" : "Resolved"}</span>
           <span className="min-w-0 flex-1 truncate">{markdownPreview(first?.body ?? "") || (first?.attachments.length ? "Image" : "")}</span>
+          {hasUnread(thread) && <NewLabel />}
           <span className="tabular shrink-0 text-fg-faint">
             {thread.messages.length > 1 && `${thread.messages.length} comments`}
           </span>
@@ -289,12 +291,27 @@ export function AuthorAvatar({ message }: { message: CommentMessage }) {
   );
 }
 
+/** Marks an agent's message you haven't seen before. */
+function NewLabel() {
+  return <span className="shrink-0 rounded-full bg-accent-soft px-1.5 text-[11px] leading-[18px] font-medium text-accent">New</span>;
+}
+
 function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: boolean }) {
   const isAgent = message.author === "agent";
   const editing = useStore((s) => s.editDrafts[message.id] !== undefined);
   const setEditDraft = useStore((s) => s.setEditDraft);
+  const ref = useRef<HTMLDivElement>(null);
+  useMarkReadOnScreen(ref, message);
+  // Read once it's been on screen, but still marked while it stays there.
+  const [isNew] = useState(message.unread);
   return (
-    <div className="group border-border-subtle px-3 py-2.5 [&+&]:border-t">
+    <div
+      ref={ref}
+      className={cn(
+        "group relative border-border-subtle px-3 py-2.5 [&+&]:border-t",
+        isNew && "before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-accent",
+      )}
+    >
       <div className="flex h-5 items-center gap-2 text-[12px]">
         <AuthorAvatar message={message} />
         <span className="font-medium text-fg">{authorLabel(message)}</span>
@@ -306,6 +323,7 @@ function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: bo
             <span className="text-fg-faint">edited</span>
           </Tooltip>
         )}
+        {isNew && <NewLabel />}
         <span className="ml-auto flex items-center gap-0.5">
           {/* Only your own comments; an agent's answer stays as it wrote it. */}
           {!isAgent && !editing && (
@@ -330,6 +348,18 @@ function MessageRow({ message, isFirst }: { message: CommentMessage; isFirst: bo
       )}
       <MessageImages attachments={message.attachments} />
       {isAgent && !editing && <ThumbsUpButton message={message} />}
+      {!isAgent && !editing && <LikedBy names={message.likedBy} />}
+    </div>
+  );
+}
+
+/** Agents that agreed with your comment and had nothing to add. */
+function LikedBy({ names }: { names: string[] }) {
+  if (names.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex h-6 items-center gap-1.5 pl-7 text-[12px] text-fg-subtle">
+      <ThumbsUp className="size-3.5 fill-current text-accent" />
+      {names.map(agentLabel).join(", ")}
     </div>
   );
 }

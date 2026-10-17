@@ -64,6 +64,7 @@ pub fn run() {
             comments::reply_thread,
             comments::edit_comment,
             comments::set_thumbs_up,
+            comments::mark_comments_read,
             comments::set_thread_resolved,
             comments::set_thread_dismissed,
             comments::delete_comment,

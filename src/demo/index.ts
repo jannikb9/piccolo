@@ -135,6 +135,8 @@ const message = (authorName: string, body: string): CommentMessage => ({
   createdAt: Date.now(),
   editedAt: null,
   thumbsUp: false,
+  likedBy: [],
+  unread: false,
 });
 
 const threads = () => (mockState.threads[WORKTREE] ??= []);

@@ -121,6 +121,10 @@ export type CommentMessage = {
   editedAt: number | null;
   /** The reviewer gave an agent's message a thumbs up. */
   thumbsUp: boolean;
+  /** Agents (by name) that gave the reviewer's message a thumbs up. */
+  likedBy: string[];
+  /** An agent's message you haven't seen yet: it counts as read once it's been on screen. */
+  unread: boolean;
 };
 
 /** A comment on some lines and its replies. Stored per branch; agents answer via the `piccolo` CLI. */

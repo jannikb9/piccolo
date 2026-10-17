@@ -18,6 +18,7 @@ import {
   mockDiffPatch,
   mockEditComment,
   mockSetThumbsUp,
+  mockMarkRead,
   mockFileText,
   mockFileVersions,
   mockFindSymbol,
@@ -156,6 +157,10 @@ export const api = {
   /** Gives an agent's message a thumbs up, or takes it back. */
   setThumbsUp: (id: number, thumbsUp: boolean): Promise<void> =>
     isTauri ? invoke("set_thumbs_up", { id, thumbsUp }) : mockSetThumbsUp(id, thumbsUp),
+
+  /** Agents' messages you've now seen. */
+  markCommentsRead: (ids: number[]): Promise<void> =>
+    isTauri ? invoke("mark_comments_read", { ids }) : mockMarkRead(ids),
 
   /** An attached image as base64. */
   attachmentData: (id: number): Promise<string> =>

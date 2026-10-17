@@ -1,6 +1,7 @@
 import { ChevronRight, MessageSquare } from "lucide-react";
 import { useMemo, useState } from "react";
 import { markdownPreview } from "../lib/markdown";
+import { hasUnread } from "../lib/unread";
 import { cn, splitPath } from "../lib/utils";
 import { panelCommentKey, useStore } from "../store";
 import type { ChangedFile, GeneralThread, LineRange, Thread, Worktree } from "../types";
@@ -42,7 +43,8 @@ export function CommentList({
   const resolvedCount = generalThreads.filter((t) => t.resolved).length + threads.filter((t) => t.resolved).length;
 
   const groups = useMemo(() => {
-    const shown = <T extends AnyThread>(list: T[]) => list.filter((t) => showResolved || !t.resolved);
+    // Closed threads with something new stay listed until it's read.
+    const shown = <T extends AnyThread>(list: T[]) => list.filter((t) => showResolved || !t.resolved || hasUnread(t));
     const byPath = new Map<string, Thread[]>();
     for (const thread of shown(threads)) byPath.set(thread.path, [...(byPath.get(thread.path) ?? []), thread]);
     const line = (t: Thread) => (t.position ?? t.range).endLine;
@@ -163,6 +165,7 @@ function ThreadRow({
   const replies = thread.messages.length - 1;
   const preview = markdownPreview(first?.body ?? "") || (first?.attachments.length ? "Image" : "");
   const range = thread.path === null ? null : (thread.position ?? thread.range);
+  const unread = thread.messages.filter((m) => m.unread).length;
   const status = thread.dismissed
     ? { label: "Dismissed", className: "text-fg-faint" }
     : thread.resolved
@@ -178,10 +181,11 @@ function ThreadRow({
       type="button"
       onClick={onSelect}
       className={cn(
-        "flex w-full flex-col gap-1 rounded-md py-1.5 pr-2 pl-7 text-left hover:bg-bg-hover",
-        thread.resolved && "opacity-60 hover:opacity-100",
+        "relative flex w-full flex-col gap-1 rounded-md py-1.5 pr-2 pl-7 text-left hover:bg-bg-hover",
+        thread.resolved && !unread && "opacity-60 hover:opacity-100",
       )}
     >
+      {unread > 0 && <span aria-label="New" className="absolute top-[13px] left-3.5 size-1.5 rounded-full bg-accent" />}
       <span className="flex w-full items-center gap-1.5 text-[11.5px]">
         {first && <AuthorAvatar message={first} />}
         <span className="truncate font-medium text-fg-muted">{first ? authorLabel(first) : ""}</span>
@@ -192,6 +196,7 @@ function ThreadRow({
       {replies > 0 && last && (
         <span className="text-[11px] text-fg-faint">
           {replies === 1 ? "1 reply" : `${replies} replies`} · last by {authorLabel(last)}
+          {unread > 0 && <span className="font-medium text-accent"> · {unread} new</span>}
         </span>
       )}
     </button>

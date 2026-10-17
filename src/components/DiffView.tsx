@@ -8,7 +8,7 @@ import {
   type SelectedLineRange,
 } from "@pierre/diffs";
 import { CodeView, useWorkerPool, type CodeViewHandle, type CodeViewReactOptions } from "@pierre/diffs/react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, MessageSquare, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
@@ -29,6 +29,7 @@ import {
   paintMatches,
   type SearchMatch,
 } from "../lib/search";
+import { hasUnread, markRead, unreadMessages } from "../lib/unread";
 import { cn, splitPath } from "../lib/utils";
 import { useDiffLayout, useStore } from "../store";
 import type { ChangedFile, DiffPatch, GeneralThread, LineRange, Side, Thread, Worktree } from "../types";
@@ -62,7 +63,7 @@ function toLineRange(selection: SelectedLineRange): LineRange {
 /** Changes whenever an annotation would render differently, to bump the item's version. */
 function annotationSignature(annotations: DiffLineAnnotation<Note>[]): string {
   const thread = (t: Thread) =>
-    `${t.id}.${t.updatedAt}.${t.resolved ? 1 : 0}.${t.messages.map((m) => `${m.id}:${m.editedAt ?? 0}:${m.thumbsUp ? 1 : 0}`).join(",")}`;
+    `${t.id}.${t.updatedAt}.${t.resolved ? 1 : 0}.${t.messages.map((m) => `${m.id}:${m.editedAt ?? 0}:${m.thumbsUp ? 1 : 0}:${m.likedBy.join("+")}`).join(",")}`;
   return annotations
     .map(({ side, lineNumber, metadata: note }) => {
       const detail =
@@ -151,6 +152,15 @@ export function DiffView({
     }
     return { inline, detached };
   }, [threads, byPath]);
+
+  // Threads in the order they show, top to bottom: general ones and those above the diff, then
+  // each file's by line (outdated ones sit above the file's first hunk).
+  const inOrder = useMemo(() => {
+    const fileIndex = new Map(files.map((f, i) => [f.path, i]));
+    const line = (t: Thread) => t.position?.endLine ?? 0;
+    const sorted = [...inline].sort((a, b) => fileIndex.get(a.path)! - fileIndex.get(b.path)! || line(a) - line(b));
+    return [...generalThreads, ...detached.map((d) => d.thread), ...sorted];
+  }, [files, inline, detached, generalThreads]);
 
   const annotationsByPath = useMemo(() => {
     const map = new Map<string, DiffLineAnnotation<Note>[]>();
@@ -588,6 +598,7 @@ export function DiffView({
           className="h-full overflow-auto px-4"
           style={viewStyle}
         />
+      <NewComments threads={inOrder} />
       <CodeNavigation
         rootRef={rootRef}
         scrollerRef={containerRef}
@@ -599,6 +610,32 @@ export function DiffView({
         scrollDiff={scrollDiff}
         highlight={setJumpedTo}
       />
+    </div>
+  );
+}
+
+/** "3 new comments" from agents, floating over the diff: it goes to the topmost one. */
+function NewComments({ threads }: { threads: (Thread | GeneralThread)[] }) {
+  const revealThread = useStore((s) => s.revealThread);
+  const unread = unreadMessages(threads);
+  const first = threads.find(hasUnread);
+  if (!first) return null;
+  return (
+    <div className="absolute bottom-5 left-1/2 z-20 flex h-8 -translate-x-1/2 items-center overflow-hidden rounded-full bg-accent text-[12.5px] font-medium text-accent-fg shadow-lg shadow-black/30">
+      <button type="button" onClick={() => revealThread(first.id)} className="flex h-full items-center gap-1.5 pr-2 pl-3 hover:bg-white/10">
+        <MessageSquare className="size-3.5" />
+        {unread.length === 1 ? "1 new comment" : `${unread.length} new comments`}
+      </button>
+      <Tooltip label="Mark all as read">
+        <button
+          type="button"
+          aria-label="Mark all as read"
+          onClick={() => markRead(unread.map((m) => m.id))}
+          className="grid h-full place-items-center border-l border-white/20 pr-2.5 pl-2 hover:bg-white/10"
+        >
+          <X className="size-3.5" />
+        </button>
+      </Tooltip>
     </div>
   );
 }

@@ -141,6 +141,10 @@ pub struct Message {
     pub edited_at: Option<i64>,
     /// The reviewer gave an agent's message a thumbs up.
     pub thumbs_up: bool,
+    /// Agents that gave the reviewer's message a thumbs up, by name.
+    pub liked_by: Vec<String>,
+    /// An agent's message the reviewer hasn't read yet (see [`Store::mark_read`]).
+    pub unread: bool,
 }
 
 /// A PNG to attach to a new message.
@@ -316,6 +320,7 @@ impl Store {
             ("messages", "edited_at", "INTEGER"),
             ("messages", "author_name", "TEXT"),
             ("messages", "thumbs_up", "INTEGER NOT NULL DEFAULT 0"),
+            ("messages", "liked_by", "TEXT"),
             ("messages", "session_id", "TEXT"),
             ("threads", "dismissed", "INTEGER NOT NULL DEFAULT 0"),
             ("session_worktrees", "agent", "TEXT"),
@@ -325,6 +330,13 @@ impl Store {
             if !has_column(table, column)? {
                 sql(conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"), []))?;
             }
+        }
+        // When the reviewer read an agent's message. Those already there count as read.
+        if !has_column("messages", "read_at")? {
+            sql(conn.execute_batch(
+                "ALTER TABLE messages ADD COLUMN read_at INTEGER;
+                 UPDATE messages SET read_at = created_at WHERE author = 'agent';",
+            ))?;
         }
         // Gone with sending comments as a batch, and submitting reviews: what each session has
         // seen (sessions.rs) and review requests (requests.rs) took their place.
@@ -372,11 +384,14 @@ impl Store {
         }
         // Ids are integers, so inlining them is safe.
         let mut stmt = sql(self.conn.prepare(&format!(
-            "SELECT id, thread_id, author, body, created_at, edited_at, author_name, thumbs_up FROM messages WHERE thread_id IN ({}) ORDER BY id",
+            "SELECT id, thread_id, author, body, created_at, edited_at, author_name, thumbs_up, liked_by,
+                    author = 'agent' AND read_at IS NULL
+             FROM messages WHERE thread_id IN ({}) ORDER BY id",
             ids.join(",")
         )))?;
         let rows = sql(stmt.query_map([], |row| {
             let author: String = row.get(2)?;
+            let liked_by: Option<String> = row.get(8)?;
             Ok((
                 row.get::<_, i64>(1)?,
                 Message {
@@ -388,6 +403,8 @@ impl Store {
                     created_at: row.get(4)?,
                     edited_at: row.get(5)?,
                     thumbs_up: row.get(7)?,
+                    liked_by: liked_by.unwrap_or_default().split_whitespace().map(str::to_string).collect(),
+                    unread: row.get(9)?,
                 },
             ))
         }))?;
@@ -503,6 +520,24 @@ impl Store {
         let message = insert_message(&tx, thread_id, by, body, now)?;
         save_images(&tx, &self.images_dir, message, images)?;
         sql(tx.execute("UPDATE threads SET updated_at = ?2 WHERE id = ?1", params![thread_id, now]))?;
+        // Replying, the reviewer has read what came before.
+        if by.author == Author::Reviewer {
+            sql(tx.execute(
+                "UPDATE messages SET read_at = ?2 WHERE thread_id = ?1 AND author = 'agent' AND read_at IS NULL",
+                params![thread_id, now],
+            ))?;
+        }
+        sql(tx.commit())
+    }
+
+    /// Marks agents' messages as read by the reviewer: they've been on screen. Ids that are gone
+    /// or already read are skipped.
+    pub fn mark_read(&mut self, message_ids: &[i64]) -> Result<()> {
+        let now = now_ms();
+        let tx = sql(self.conn.transaction())?;
+        for id in message_ids {
+            sql(tx.execute("UPDATE messages SET read_at = ?2 WHERE id = ?1 AND read_at IS NULL", params![id, now]))?;
+        }
         sql(tx.commit())
     }
 
@@ -538,6 +573,30 @@ impl Store {
         ))?;
         if changed == 0 {
             return Err(format!("No agent message #{message_id}"));
+        }
+        Ok(())
+    }
+
+    /// Has the agent `name` give the reviewer's latest message in a thread a thumbs up: it agrees
+    /// and has nothing to add. Doing it twice changes nothing, and like the reviewer's, it
+    /// doesn't touch `updated_at`.
+    pub fn agent_thumbs_up(&self, thread_id: i64, name: &str) -> Result<()> {
+        self.thread(thread_id)?;
+        let latest: Option<(i64, Option<String>)> = sql(self
+            .conn
+            .query_row(
+                "SELECT id, liked_by FROM messages WHERE thread_id = ?1 AND author = 'reviewer' ORDER BY id DESC LIMIT 1",
+                [thread_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional())?;
+        let Some((message_id, liked_by)) = latest else {
+            return Err(format!("#{thread_id} has nothing from the reviewer to give a thumbs up"));
+        };
+        let mut names: Vec<String> = liked_by.unwrap_or_default().split_whitespace().map(str::to_string).collect();
+        if !names.iter().any(|n| n == name) {
+            names.push(name.to_string());
+            sql(self.conn.execute("UPDATE messages SET liked_by = ?2 WHERE id = ?1", params![message_id, names.join(" ")]))?;
         }
         Ok(())
     }
@@ -912,6 +971,11 @@ pub async fn set_thumbs_up(id: i64, thumbs_up: bool) -> Result<()> {
 }
 
 #[tauri::command]
+pub async fn mark_comments_read(ids: Vec<i64>) -> Result<()> {
+    blocking(move || Store::open()?.mark_read(&ids)).await
+}
+
+#[tauri::command]
 pub async fn set_thread_resolved(id: i64, resolved: bool) -> Result<()> {
     blocking(move || Store::open()?.set_resolved(id, resolved)).await
 }
@@ -1093,6 +1157,34 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn tracks_which_agent_messages_the_reviewer_read() {
+        let (root, wt, mut store) = fixture("read");
+        let target = Target::of(&wt).unwrap();
+        let unread = |store: &Store, id| store.thread(id).unwrap().messages.iter().map(|m| m.unread).collect::<Vec<_>>();
+
+        // Agents' messages are new to the reviewer, the reviewer's own never are.
+        let mine = store.add_general_thread(&target, By::REVIEWER, "Why?", &[]).unwrap();
+        store.reply(mine, By::agent(Some("claude")), "Because", &[]).unwrap();
+        store.reply(mine, By::agent(Some("codex")), "Agreed", &[]).unwrap();
+        let theirs = store.add_general_thread(&target, By::agent(Some("codex")), "Split this", &[]).unwrap();
+        assert_eq!(unread(&store, mine), [false, true, true]);
+        assert_eq!(unread(&store, theirs), [true]);
+
+        // Seen on screen, one by one; resolved threads keep theirs until then.
+        let because = store.thread(mine).unwrap().messages[1].id;
+        store.mark_read(&[because, 9999]).unwrap();
+        assert_eq!(unread(&store, mine), [false, false, true]);
+        store.set_resolved(theirs, true).unwrap();
+        assert_eq!(unread(&store, theirs), [true]);
+
+        // Replying reads the whole thread.
+        store.reply(mine, By::REVIEWER, "Thanks", &[]).unwrap();
+        assert_eq!(unread(&store, mine), [false, false, false, false]);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn stores_pasted_images_as_files() {
         let (root, wt, mut store) = fixture("images");
         let target = Target::of(&wt).unwrap();
@@ -1136,6 +1228,15 @@ pub(crate) mod tests {
         store.set_thumbs_up(agent, false).unwrap();
         assert!(!store.thread(id).unwrap().messages.last().unwrap().thumbs_up);
         assert!(store.set_thumbs_up(thread.messages[0].id, true).is_err());
+
+        // An agent can give the reviewer's latest message a thumbs up, once per agent.
+        store.agent_thumbs_up(id, "codex").unwrap();
+        store.agent_thumbs_up(id, "codex").unwrap();
+        store.agent_thumbs_up(id, "claude").unwrap();
+        let liked = store.thread(id).unwrap();
+        assert_eq!(liked.messages[1].liked_by, ["codex", "claude"]);
+        assert!(liked.messages[0].liked_by.is_empty() && liked.messages.last().unwrap().liked_by.is_empty());
+        assert!(store.agent_thumbs_up(9999, "codex").is_err());
         store.delete_message(agent).unwrap();
 
         // Deleting a reply removes its files; deleting the thread removes the rest.

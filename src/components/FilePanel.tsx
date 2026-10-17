@@ -1,6 +1,7 @@
 import { Check, ChevronRight, Files, Folder, FolderOpen, MessageSquare, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { COLLAPSED_BY_DEFAULT, type FileSection } from "../lib/sections";
+import { hasUnread, unreadMessages } from "../lib/unread";
 import { cn, totals, type TreeNode } from "../lib/utils";
 import { useStore, type FileTab } from "../store";
 import type { ChangedFile, GeneralThread, Thread, Worktree } from "../types";
@@ -44,6 +45,8 @@ export function FilePanel({
   const tab = useStore((s) => s.fileTab);
   const setTab = useStore((s) => s.setFileTab);
   const openComments = threads.filter((t) => !t.resolved).length + generalThreads.filter((t) => !t.resolved).length;
+  const unread = unreadMessages([...generalThreads, ...threads]).length;
+  const unreadPaths = new Set(threads.filter(hasUnread).map((t) => t.path));
   const files: ChangedFile[] = sections.flatMap((s) => s.files);
 
   return (
@@ -59,7 +62,7 @@ export function FilePanel({
         {/* A size container, so the tabs drop their labels for icons when there's no room for them. */}
         <div role="tablist" aria-label="Show" className="@container flex min-w-0 flex-1 items-center gap-0.5">
           <TabButton tab="files" current={tab} onSelect={setTab} label="Files" icon={Files} count={fileCount} />
-          <TabButton tab="comments" current={tab} onSelect={setTab} label="Comments" icon={MessageSquare} count={openComments} />
+          <TabButton tab="comments" current={tab} onSelect={setTab} label="Comments" icon={MessageSquare} count={openComments} unread={unread} />
         </div>
         {sidebarCollapsed && <SidebarToggle collapsed onToggle={onToggleSidebar} />}
       </header>
@@ -86,6 +89,7 @@ export function FilePanel({
               className={cn(i > 0 && "mt-2")}
               worktreeId={worktreeId}
               commentCounts={commentCounts}
+              unreadPaths={unreadPaths}
               onSelect={onSelect}
             />
           ))
@@ -102,6 +106,7 @@ function TabButton({
   label,
   icon: Icon,
   count,
+  unread = 0,
 }: {
   tab: FileTab;
   current: FileTab;
@@ -109,6 +114,8 @@ function TabButton({
   label: string;
   icon: LucideIcon;
   count: number;
+  /** New messages from agents, marked with a dot. */
+  unread?: number;
 }) {
   const active = tab === current;
   return (
@@ -134,6 +141,13 @@ function TabButton({
       >
         {count}
       </span>
+      {unread > 0 && (
+        <span
+          aria-label={unread === 1 ? "1 new comment" : `${unread} new comments`}
+          title={unread === 1 ? "1 new comment" : `${unread} new comments`}
+          className="size-1.5 shrink-0 rounded-full bg-accent"
+        />
+      )}
     </button>
   );
 }
@@ -176,6 +190,8 @@ type RowProps = {
   depth: number;
   worktreeId: string;
   commentCounts: Map<string, number>;
+  /** Files with comments that have something new from an agent. */
+  unreadPaths: Set<string>;
   onSelect: (path: string) => void;
 };
 
@@ -220,9 +236,11 @@ function FileRow({
   depth,
   worktreeId,
   commentCounts,
+  unreadPaths,
   onSelect,
 }: RowProps & { node: Extract<TreeNode, { type: "file" }> }) {
   const comments = commentCounts.get(node.path) ?? 0;
+  const unread = unreadPaths.has(node.path);
   const viewed = useStore((s) => !!s.viewed[worktreeId]?.[node.path]);
   const active = useStore((s) => s.activePath === node.path);
   const ref = useRef<HTMLButtonElement>(null);
@@ -249,7 +267,10 @@ function FileRow({
       <StatusLetter status={file.status} />
       <span className={cn("truncate", viewed && !active && "text-fg-subtle")}>{node.name}</span>
       {comments > 0 && (
-        <span className="tabular ml-auto flex shrink-0 items-center gap-0.5 text-[11px] text-fg-subtle" aria-label={`${comments} open comments`}>
+        <span
+          className={cn("tabular ml-auto flex shrink-0 items-center gap-0.5 text-[11px]", unread ? "font-medium text-accent" : "text-fg-subtle")}
+          aria-label={`${comments} open comments${unread ? ", with something new" : ""}`}
+        >
           <MessageSquare className="size-3" />
           {comments}
         </span>

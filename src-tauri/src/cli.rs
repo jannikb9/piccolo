@@ -18,6 +18,8 @@ Usage:
                                      Open comments on this branch (--all includes resolved ones),
                                      or only the ones whose ids are given
   piccolo reply <id> <message>       Reply to a comment
+  piccolo thumbs-up <id>             Give the reviewer's latest message in a comment a thumbs up:
+                                     you agree and have nothing to add
   piccolo comment <file>:<line>[-<end>] [--removed] <message>
                                      Comment on lines of a file as it is now (--removed: lines the
                                      branch removed, numbered as in the base version)
@@ -49,7 +51,7 @@ Comments are shown in Piccolo and belong to the branch checked out in the curren
 pub fn run_if_command() -> Option<i32> {
     let (worktree, args) = take_worktree_option(std::env::args().skip(1).collect());
     let command = args.first().map(String::as_str).unwrap_or_default();
-    if !matches!(command, "comments" | "reply" | "comment" | "done" | "resolve" | "reopen" | "guide" | "help" | "--help" | "-h") {
+    if !matches!(command, "comments" | "reply" | "thumbs-up" | "comment" | "done" | "resolve" | "reopen" | "guide" | "help" | "--help" | "-h") {
         // `-C` only belongs to the command line; without a command it's the app being launched.
         worktree.as_ref()?;
         eprintln!("piccolo: missing command\n\n{HELP}");
@@ -161,6 +163,14 @@ fn run(command: &str, args: &[String], folder: &Folder, caller: Option<&Caller>)
             let name = agent_name(args.value("--as"))?;
             Store::open()?.reply(id, By { author: Author::Agent, name: name.as_deref(), session }, &body, &[])?;
             println!("Replied to #{id}.");
+            Ok(())
+        }
+        "thumbs-up" => {
+            let args = Args::parse(args, &["--as"])?;
+            let id = thread_id(&args.positional)?;
+            let name = agent_name(args.value("--as"))?.ok_or("say who you are: --as <your name>")?;
+            Store::open()?.agent_thumbs_up(id, &name)?;
+            println!("Gave the reviewer's comment on #{id} a thumbs up.");
             Ok(())
         }
         "comment" => {
@@ -459,7 +469,10 @@ fn guide(target: &Target, via: &str, review: Option<&Review>) -> Result<String> 
 You're reviewing the changes on {branch} in {worktree}, {compared}. Your comments appear in Piccolo next to the diff as you post them, where the developer reads them and other agents pick them up. Don't change any files: review only.{again}
 
 1. See what changed: `{diff}` shows everything, uncommitted work included, and `{git} status --short` lists new files as untracked (??); read those whole. Read the surrounding code where the diff alone doesn't tell you enough.
-2. Read what's been said already: `piccolo{via} comments --all`. Don't raise a point again, whether it's open, resolved or dismissed (the developer decided that one needs no action); to add to a thread, `piccolo{via} reply --as <your name> <id> \"...\"`.
+2. Read what's been said already: `piccolo{via} comments --all`. The Reviewer's comments are the developer's own review; other agents' are marked with their name. Don't raise a point again, whether it's open, resolved or dismissed (the developer decided that one needs no action). Join the open threads where you have something to give, and leave the rest alone:
+   - A question you can answer from the code: `piccolo{via} reply --as <your name> <id> \"...\"` with the answer and where you found it.
+   - A point you agree with and have nothing to add: `piccolo{via} thumbs-up --as <your name> <id>`, instead of a reply that only says so.
+   - A point you agree with and can add to, or disagree with: reply with what you found, and why. Check the claim against the code before taking a side, and say so when it holds only partly.
 3. Comment on the lines each issue is about. Paths are relative to {relative_to}, and line numbers are those of the file as it is now:
    - `piccolo{via} comment --as <your name> <file>:<line> \"...\"`
    - `piccolo{via} comment --as <your name> <file>:<start>-<end> \"...\"`
@@ -468,7 +481,7 @@ You're reviewing the changes on {branch} in {worktree}, {compared}. Your comment
    For a long message, pass `-` instead and write it to stdin.
 4. What's worth a comment: bugs, missed cases, risky or surprising behaviour, unclear names or structure, tests that don't check what they claim. One issue per comment: say what's wrong and why, and suggest a fix. No praise, and no nits a formatter or linter would catch.
 5. When you've finished, run `piccolo{via} done --as <your name>{request}`. It tells the developer you're done, so run it once, at the end, even when you found nothing to comment on. Don't post a summary that repeats your comments.
-6. Finish with one line in the chat: how many comments you left, and the most important one.
+6. Finish with one line in the chat: how many comments you left, which threads you joined, and the most important point.
 
 Sign everything with `--as` and your name (e.g. `--as codex`), so the developer sees who wrote what.
 ",
@@ -547,6 +560,9 @@ fn format_threads(target: &Target, threads: &[Thread], include_resolved: bool, v
             out.push_str(&format!("\n**{who}{edited}:**{gap}{body}\n"));
             if message.thumbs_up {
                 out.push_str("The reviewer gave this a thumbs up.\n");
+            }
+            for name in &message.liked_by {
+                out.push_str(&format!("{} gave this a thumbs up.\n", author_label(Author::Agent, Some(name))));
             }
             for image in &message.attachments {
                 out.push_str(&format!("Attached image ({}×{}): {}\n", image.width, image.height, image.path));
@@ -698,6 +714,14 @@ mod tests {
         let out = format_threads(&Target::of(&wt).unwrap(), &threads, false, "");
         assert!(out.contains("**Codex:** Why?"), "{out}");
 
+        // An agent's thumbs up on the reviewer's comment is listed under it.
+        add_comment(&mut store, &wt, "a.txt:5", Side::Additions, "Is this needed?", By::REVIEWER).unwrap();
+        let mine = store.threads(&Target::of(&wt).unwrap(), false).unwrap().iter().find(|t| t.messages[0].author == Author::Reviewer).unwrap().id;
+        store.agent_thumbs_up(mine, "claude").unwrap();
+        let threads = store.threads(&Target::of(&wt).unwrap(), false).unwrap();
+        let out = format_threads(&Target::of(&wt).unwrap(), &threads, false, "");
+        assert!(out.contains("**Reviewer:** Is this needed?\nClaude gave this a thumbs up.\n"), "{out}");
+
         // Lines that aren't there, and paths outside the worktree.
         let error = comment(&mut store, &wt, "a.txt:40", Side::Additions).unwrap_err();
         assert_eq!(error, "a.txt has no line 40 (any more)");
@@ -741,6 +765,8 @@ mod tests {
         assert!(in_worktree.contains("`git status --short`"), "{in_worktree}");
         assert!(in_worktree.contains("`piccolo comment --as <your name> --general"), "{in_worktree}");
         assert!(in_worktree.contains("`piccolo done --as <your name>`"), "{in_worktree}");
+        assert!(in_worktree.contains("`piccolo thumbs-up --as <your name> <id>`"), "{in_worktree}");
+        assert!(in_worktree.contains("`piccolo reply --as <your name> <id>"), "{in_worktree}");
         assert!(!in_worktree.contains("reviewed this branch before"), "{in_worktree}");
 
         // Named from elsewhere, every suggested command names the worktree.
@@ -750,6 +776,7 @@ mod tests {
         assert!(from_elsewhere.contains(&format!("`git{via} status --short`")), "{from_elsewhere}");
         assert!(from_elsewhere.contains("relative to the worktree"), "{from_elsewhere}");
         assert!(from_elsewhere.contains(&format!("`piccolo{via} done --as <your name>`")), "{from_elsewhere}");
+        assert!(from_elsewhere.contains(&format!("`piccolo{via} thumbs-up --as <your name> <id>`")), "{from_elsewhere}");
 
         // A requested review says how to finish it, and a second one where to look first.
         let again = guide(&target, "", Some(&Review { id: 7, since: Some("0123456789abcdef".into()) })).unwrap();

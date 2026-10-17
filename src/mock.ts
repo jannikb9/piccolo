@@ -409,6 +409,8 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           editedAt: null,
           authorName: "codex",
           thumbsUp: false,
+          likedBy: [],
+          unread: true,
         },
       ],
       createdAt: minutesAgo(4),
@@ -432,6 +434,8 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           editedAt: null,
           authorName: null,
           thumbsUp: false,
+          likedBy: [],
+          unread: false,
         },
         {
           id: 2,
@@ -442,6 +446,8 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           editedAt: null,
           authorName: "claude",
           thumbsUp: false,
+          likedBy: [],
+          unread: true,
         },
       ],
       createdAt: minutesAgo(42),
@@ -455,7 +461,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: false,
       dismissed: false,
       excerpt: excerpt(lines(29, 29)),
-      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null, thumbsUp: false }],
+      messages: [{ id: 3, author: "reviewer", body: "sessionId or id? The column is still called sid.",  attachments: [], createdAt: minutesAgo(40), editedAt: null, authorName: null, thumbsUp: false, likedBy: [], unread: false }],
       createdAt: minutesAgo(40),
       updatedAt: minutesAgo(40),
     },
@@ -477,6 +483,8 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
           editedAt: null,
           authorName: "codex",
           thumbsUp: false,
+          likedBy: [],
+          unread: true,
         },
       ],
       createdAt: minutesAgo(3),
@@ -491,7 +499,7 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: false,
       dismissed: false,
       excerpt: excerpt(lines(4, 4)),
-      messages: [{ id: 7, author: "reviewer", body: "Is anything still reading this cookie?", attachments: [], createdAt: minutesAgo(55), editedAt: null, authorName: null, thumbsUp: false }],
+      messages: [{ id: 7, author: "reviewer", body: "Is anything still reading this cookie?", attachments: [], createdAt: minutesAgo(55), editedAt: null, authorName: null, thumbsUp: false, likedBy: ["codex", "claude"], unread: false }],
       createdAt: minutesAgo(55),
       updatedAt: minutesAgo(55),
     },
@@ -503,7 +511,10 @@ const threads: Record<string, (Thread | GeneralThread)[]> = {
       resolved: true,
       dismissed: false,
       excerpt: excerpt(lines(21, 21)),
-      messages: [{ id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null, thumbsUp: false }],
+      messages: [
+        { id: 4, author: "reviewer", body: "Nit: the token variable name.",  attachments: [], createdAt: minutesAgo(90), editedAt: null, authorName: null, thumbsUp: false, likedBy: [], unread: false },
+        { id: 10, author: "agent", body: "Renamed it to `accessToken` and resolved this.", attachments: [], createdAt: minutesAgo(2), editedAt: null, authorName: "claude", thumbsUp: false, likedBy: [], unread: true },
+      ],
       createdAt: minutesAgo(90),
       updatedAt: minutesAgo(30),
     },
@@ -520,7 +531,7 @@ threads["~/projects/spoke-app/spoke-app"] = [
     resolved: false,
     dismissed: false,
     excerpt: [],
-    messages: [{ id: 8, author: "agent", body: "Nothing is left to review: the cookie parser was dropped in favour of the middleware.", attachments: [], createdAt: minutesAgo(10), editedAt: null, authorName: "codex", thumbsUp: false }],
+    messages: [{ id: 8, author: "agent", body: "Nothing is left to review: the cookie parser was dropped in favour of the middleware.", attachments: [], createdAt: minutesAgo(10), editedAt: null, authorName: "codex", thumbsUp: false, likedBy: [], unread: false }],
     createdAt: minutesAgo(10),
     updatedAt: minutesAgo(10),
   },
@@ -532,7 +543,7 @@ threads["~/projects/spoke-app/spoke-app"] = [
     resolved: false,
     dismissed: false,
     excerpt: excerpt(lines(12, 13)),
-    messages: [{ id: 9, author: "reviewer", body: "This swallows malformed cookies silently.", attachments: [], createdAt: minutesAgo(70), editedAt: null, authorName: null, thumbsUp: false }],
+    messages: [{ id: 9, author: "reviewer", body: "This swallows malformed cookies silently.", attachments: [], createdAt: minutesAgo(70), editedAt: null, authorName: null, thumbsUp: false, likedBy: [], unread: false }],
     createdAt: minutesAgo(70),
     updatedAt: minutesAgo(70),
   },
@@ -775,7 +786,7 @@ export function mockAddThread(
     resolved: false,
     dismissed: false,
     excerpt: excerpt(range),
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, thumbsUp: false }],
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, thumbsUp: false, likedBy: [], unread: false }],
     createdAt: now,
     updatedAt: now,
   });
@@ -795,7 +806,7 @@ export function mockAddGeneralThread(worktreePath: string, body: string, images:
     resolved: false,
     dismissed: false,
     excerpt: [],
-    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, thumbsUp: false }],
+    messages: [{ id: nextId++, author: "reviewer", body: body.trim(), attachments: mockAttachments(images), createdAt: now, editedAt: null, authorName: null, thumbsUp: false, likedBy: [], unread: false }],
     createdAt: now,
     updatedAt: now,
   });
@@ -804,6 +815,7 @@ export function mockAddGeneralThread(worktreePath: string, body: string, images:
 
 export function mockReply(id: number, body: string, images: ImageUpload[]): Promise<void> {
   const thread = findThread(id);
+  for (const message of thread?.messages ?? []) message.unread = false;
   thread?.messages.push({
     id: nextId++,
     author: "reviewer",
@@ -813,6 +825,8 @@ export function mockReply(id: number, body: string, images: ImageUpload[]): Prom
     editedAt: null,
     authorName: null,
     thumbsUp: false,
+    likedBy: [],
+    unread: false,
   });
   return delay(undefined);
 }
@@ -826,6 +840,13 @@ export function mockEditComment(messageId: number, body: string, images: ImageUp
     message.body = body.trim();
     message.attachments.push(...mockAttachments(images));
     message.editedAt = thread.updatedAt = Date.now();
+  }
+  return delay(undefined);
+}
+
+export function mockMarkRead(messageIds: number[]): Promise<void> {
+  for (const message of Object.values(threads).flat().flatMap((t) => t.messages)) {
+    if (messageIds.includes(message.id)) message.unread = false;
   }
   return delay(undefined);
 }
