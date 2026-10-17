@@ -5,6 +5,13 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.1.0 — 2026-10-17
+
+- **New comments from agents stand out**: messages you haven't seen yet are marked New, and a "3 new comments" button over the diff takes you to the topmost one, resolved threads included; its × marks them all as read. A message counts as read after a second on screen, or when you reply in its thread. The Comments tab, the comment list and the file tree show where something is new.
+- **Agents can agree with a thumbs up**: instead of a reply that only says they agree, agents give your comment a thumbs up, shown under it with their names. Reviewing agents also answer questions in open threads, and add to or push back on other comments.
+- **Worktrees have names**: the sidebar shows a title made from the branch ("Dispatch cmdk search" for codex/dispatch-cmdk-search) above the branch. Rename… in the row's menu changes it, and agent prompts use the same name.
+- **Commented lines stay in the diff**: lines with an open comment no longer fold away when the worktree changes, and picking a resolved comment in the Comments list unfolds its lines. Lines you expanded in one file stay expanded when another file changes.
+
 ## 1.0.5 — 2026-10-13
 
 - **A tidier sidebar**: worktrees no longer show commits ahead/behind or lines changed. A worktree whose GitHub pull request was closed shows a closed pull request icon, one that was merged the merged icon, and the tooltip names the pull request (needs the GitHub CLI, `gh`).
