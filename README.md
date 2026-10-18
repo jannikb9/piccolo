@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="macOS">
 </p>
 
-https://github.com/user-attachments/assets/7a986ed4-90d3-4e10-964b-64e41566a2c0
+https://github.com/user-attachments/assets/749cee28-9130-4d21-8437-808dc614542f
 
 ## Install
 
