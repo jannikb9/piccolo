@@ -291,8 +291,8 @@ export function AuthorAvatar({ message }: { message: CommentMessage }) {
   );
 }
 
-/** Marks an agent's message you haven't seen before. */
-function NewLabel() {
+/** Marks something you haven't seen before: an agent's message, commits since you requested changes. */
+export function NewLabel() {
   return <span className="shrink-0 rounded-full bg-accent-soft px-1.5 text-[11px] leading-[18px] font-medium text-accent">New</span>;
 }
 

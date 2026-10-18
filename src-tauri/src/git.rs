@@ -307,6 +307,9 @@ pub enum Scope {
     Uncommitted,
     /// What one commit changed, compared with its (first) parent. Sent as `{ "commit": "<sha>" }`.
     Commit(String),
+    /// What the commits since the given one changed, such as those an agent made after it was asked
+    /// to address comments. Sent as `{ "since": "<sha>" }`.
+    Since(String),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -452,6 +455,10 @@ impl DiffRange {
             return Self::of_commit(wt, rev);
         }
         let head = git(wt, &["rev-parse", "HEAD"])?.trim().to_string();
+        if let Scope::Since(rev) = scope {
+            let since = git(wt, &["rev-parse", "--verify", "--end-of-options", &format!("{rev}^{{commit}}")])?;
+            return Ok(Self { old_rev: since.trim().to_string(), new_rev: Some(head) });
+        }
         let fork_point = match base {
             Some(base) => merge_base(wt, base)?,
             None => head.clone(),
@@ -460,7 +467,7 @@ impl DiffRange {
             Scope::All => Self { old_rev: fork_point, new_rev: None },
             Scope::Committed => Self { old_rev: fork_point, new_rev: Some(head) },
             Scope::Uncommitted => Self { old_rev: head, new_rev: None },
-            Scope::Commit(_) => unreachable!(),
+            Scope::Commit(_) | Scope::Since(_) => unreachable!(),
         })
     }
 
@@ -1173,6 +1180,10 @@ mod tests {
         // The repository's first commit is compared with the empty tree.
         let root_commit = git(&wt, &["rev-list", "--max-parents=0", "HEAD"]).unwrap();
         assert_eq!(only(root_commit.trim()), vec!["a.txt", "old.txt"]);
+        // The commits since one, without uncommitted changes.
+        let since = changed_files(&wt, Some("main"), Scope::Since(log[1].sha.clone()), DiffOptions::default()).unwrap();
+        assert_eq!(since.into_iter().map(|f| f.path).collect::<Vec<_>>(), vec!["app.ts", "util.ts"]);
+        assert!(changed_files(&wt, Some("main"), Scope::Since(log[0].sha.clone()), DiffOptions::default()).unwrap().is_empty());
         assert!(commits(&wt, None).unwrap().is_empty());
 
         fs::remove_dir_all(&root).unwrap();

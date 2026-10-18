@@ -45,7 +45,8 @@ export function modelLabel(model: string) {
 }
 
 /** A string that identifies a scope, e.g. for React keys. */
-export const scopeKey = (scope: DiffScope) => (typeof scope === "string" ? scope : `commit:${scope.commit}`);
+export const scopeKey = (scope: DiffScope) =>
+  typeof scope === "string" ? scope : "commit" in scope ? `commit:${scope.commit}` : `since:${scope.since}`;
 
 export function splitPath(path: string): { dir: string; base: string } {
   const i = path.lastIndexOf("/");

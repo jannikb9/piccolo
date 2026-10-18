@@ -113,7 +113,8 @@ export function resolveScope(
   if (!chosen) return defaultScope(worktree, base);
   const applies =
     typeof chosen === "object"
-      ? !commits || commits.some((c) => c.sha === chosen.commit)
+      ? // The commit changes were requested at may be where the branch forked, so not one of its own.
+        "since" in chosen || !commits || commits.some((c) => c.sha === chosen.commit)
       : chosen === "committed"
         ? !!base
         : worktree.dirty;

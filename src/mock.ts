@@ -160,6 +160,10 @@ const inScope = (worktreePath: string, scope: DiffScope) => {
   if (typeof scope === "string") return all.filter((f) => scope === "all" || f.committed === (scope === "committed"));
   // Committed files are spread over the commits in turn.
   const commits = commitsOf(worktreePath);
+  if ("since" in scope) {
+    const since = commits.findIndex((c) => c.sha === scope.since);
+    return all.filter((f) => f.committed).filter((_, i) => since === -1 || i % commits.length < since);
+  }
   const index = commits.findIndex((c) => c.sha === scope.commit);
   return all.filter((f) => f.committed).filter((_, i) => i % commits.length === index);
 };
@@ -606,6 +610,8 @@ const mockSessionList: AgentSession[] = [
 
 const mockRequests: ReviewRequest[] = [
   { id: 2, kind: "review", agent: "codex", sessionId: "mock-codex", head: "a1b2c3d", threads: [], requestedAt: minutesAgo(6), startedAt: minutesAgo(5), finishedAt: null, comments: 2 },
+  // Claude committed twice since.
+  { id: 3, kind: "implement", agent: "claude", sessionId: "mock-1", head: commitsOf(mockWorktree)[2].sha, threads: [2], requestedAt: minutesAgo(40), startedAt: minutesAgo(39), finishedAt: minutesAgo(3), comments: 1 },
   { id: 1, kind: "review", agent: "claude", sessionId: "mock-old", head: "9f8e7d6", threads: [], requestedAt: minutesAgo(150), startedAt: minutesAgo(149), finishedAt: minutesAgo(131), comments: 0 },
 ];
 

@@ -36,6 +36,8 @@ type State = {
   narrowDiff: boolean;
   /** worktreeId → the changes chosen in the commit picker; worktrees without one use `defaultScope`. */
   scopes: Record<string, DiffScope>;
+  /** worktreeId → the newest commit you've seen since requesting changes; newer ones are new to you. */
+  seenCommits: Record<string, string>;
   hideWhitespace: boolean;
   hideImports: boolean;
   codeTheme: CodeThemeId;
@@ -76,6 +78,7 @@ type State = {
   setNarrowDiff: (narrow: boolean) => void;
   /** `null` goes back to the worktree's default. */
   setScope: (worktreeId: string, scope: DiffScope | null) => void;
+  setSeenCommit: (worktreeId: string, sha: string) => void;
   toggleHideWhitespace: () => void;
   toggleHideImports: () => void;
   setCodeTheme: (theme: CodeThemeId) => void;
@@ -116,6 +119,7 @@ export const useStore = create<State>()(
       layout: "split",
       narrowDiff: false,
       scopes: {},
+      seenCommits: {},
       hideWhitespace: false,
       hideImports: false,
       codeTheme: "github",
@@ -139,6 +143,7 @@ export const useStore = create<State>()(
       setSectionCollapsed: (id, collapsed) => set((s) => ({ collapsedSections: { ...s.collapsedSections, [id]: collapsed } })),
       setLayout: (layout) => set({ layout }),
       setNarrowDiff: (narrowDiff) => set({ narrowDiff }),
+      setSeenCommit: (wt, sha) => set((s) => (s.seenCommits[wt] === sha ? s : { seenCommits: { ...s.seenCommits, [wt]: sha } })),
       setScope: (wt, scope) =>
         set((s) => {
           const { [wt]: _, ...rest } = s.scopes;
@@ -247,6 +252,7 @@ export const useStore = create<State>()(
         codeTheme: s.codeTheme,
         offerWorktrunk: s.offerWorktrunk,
         fileTab: s.fileTab,
+        seenCommits: s.seenCommits,
       }),
     },
   ),

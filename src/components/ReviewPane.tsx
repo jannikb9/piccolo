@@ -93,7 +93,7 @@ export function ReviewPane({
               fill={!hasComments}
             >
               {typeof scope === "object" ? (
-                "This commit doesn't change any files."
+                "since" in scope ? "No new commits since you requested changes." : "This commit doesn't change any files."
               ) : repo.defaultBranch && !(scope === "uncommitted") ? (
                 <>
                   <span className="font-mono">{worktree.branch ?? worktree.head}</span> has no differences from{" "}

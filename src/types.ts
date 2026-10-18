@@ -69,8 +69,9 @@ export type FileVersions = {
 
 /** Which of the branch's changes to show; chosen in the toolbar's commit picker. */
 export type ScopeMode = "all" | "committed" | "uncommitted";
-/** A scope mode, or what a single commit changed. */
-export type DiffScope = ScopeMode | { commit: string };
+/** A scope mode, what a single commit changed, or what the commits since one changed (those made
+ * after you requested changes). */
+export type DiffScope = ScopeMode | { commit: string } | { since: string };
 
 /** A commit on the branch under review (src-tauri/src/git.rs). */
 export type Commit = {

@@ -1,10 +1,12 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, GitCommitHorizontal } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useNewCommits } from "../lib/newCommits";
 import { defaultScope, useCommits } from "../lib/queries";
-import { cn, timeAgo } from "../lib/utils";
+import { agentLabel, cn, timeAgo } from "../lib/utils";
 import { useStore } from "../store";
 import type { DiffScope, ScopeMode, Worktree } from "../types";
+import { NewLabel } from "./Comments";
 import { IconButton } from "./ui";
 
 const LABELS: Record<ScopeMode, string> = {
@@ -12,26 +14,44 @@ const LABELS: Record<ScopeMode, string> = {
   committed: "All commits",
   uncommitted: "Uncommitted changes",
 };
+const SINCE_LABEL = "Since you requested changes";
 
 /**
  * Like GitHub's "Changes from all commits" menu: shows all of the branch's changes, only its
- * commits, or a single step of it: the uncommitted changes or one commit. While a step is shown,
- * buttons go to the previous (older) and next (newer) one.
+ * commits, the commits since you last requested changes, or a single step of it: the uncommitted
+ * changes or one commit. While a step is shown, buttons go to the previous (older) and next (newer) one.
  */
 export function CommitPicker({ worktree, base, scope }: { worktree: Worktree; base: string | null; scope: DiffScope }) {
   const setScope = useStore((s) => s.setScope);
   const commits = useCommits(worktree, base).data ?? [];
-  // Without commits, all changes are the uncommitted ones: nothing to pick.
-  if (commits.length === 0 && typeof scope === "string") return null;
+  const { request, sinceRequest, unseen, markSeen } = useNewCommits(worktree, base);
+  // Requesting changes again moves the view on to the commits since then.
+  const sinceHead = typeof scope === "object" && "since" in scope ? scope.since : null;
+  useEffect(() => {
+    if (sinceHead && request?.head && request.head !== sinceHead) setScope(worktree.id, { since: request.head });
+  }, [sinceHead, request?.head, worktree.id, setScope]);
+  // Shown, new commits aren't new any more, including those that come in while they're shown.
+  useEffect(() => {
+    if (sinceHead && unseen > 0) markSeen();
+  }, [sinceHead, unseen, markSeen]);
+  // Without commits, all changes are the uncommitted ones: nothing to pick, until an agent you
+  // asked for changes commits some.
+  if (commits.length === 0 && typeof scope === "string" && !request) return null;
 
-  const value = typeof scope === "string" ? scope : scope.commit;
+  const since = typeof scope === "object" && "since" in scope;
+  const value = typeof scope === "string" ? scope : "since" in scope ? "since" : scope.commit;
   // Newest first, so the previous step comes after the selected one.
   const steps = [...(worktree.dirty ? ["uncommitted"] : []), ...commits.map((c) => c.sha)];
   const index = steps.indexOf(value);
-  const commit = typeof scope === "object" ? commits.find((c) => c.sha === scope.commit) : undefined;
+  const commit = typeof scope === "object" && "commit" in scope ? commits.find((c) => c.sha === scope.commit) : undefined;
   // The default isn't stored, so the worktree keeps following it as it gets dirty or clean.
   const select = (value: string) => {
-    const next: DiffScope = value === "all" || value === "committed" || value === "uncommitted" ? (value as ScopeMode) : { commit: value };
+    const next: DiffScope =
+      value === "all" || value === "committed" || value === "uncommitted"
+        ? (value as ScopeMode)
+        : value === "since"
+          ? { since: request!.head! }
+          : { commit: value };
     setScope(worktree.id, next === defaultScope(worktree, base) ? null : next);
   };
 
@@ -51,7 +71,7 @@ export function CommitPicker({ worktree, base, scope }: { worktree: Worktree; ba
         <DropdownMenuPrimitive.Trigger
           className={cn(
             "flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium outline-none transition-colors",
-            index !== -1 ? "bg-accent-soft text-fg" : "text-fg-muted hover:bg-bg-hover hover:text-fg data-[state=open]:bg-bg-hover",
+            index !== -1 || since ? "bg-accent-soft text-fg" : "text-fg-muted hover:bg-bg-hover hover:text-fg data-[state=open]:bg-bg-hover",
           )}
         >
           <GitCommitHorizontal className="size-3.5 shrink-0 text-fg-subtle" />
@@ -60,11 +80,14 @@ export function CommitPicker({ worktree, base, scope }: { worktree: Worktree; ba
             <span title={`${commit.shortSha} ${commit.subject}`} className="max-w-32 truncate @5xl:max-w-44 @6xl:max-w-72">
               {commit.subject}
             </span>
-          ) : typeof scope === "object" ? (
+          ) : since ? (
+            <span className="truncate">{SINCE_LABEL}</span>
+          ) : typeof scope === "object" && "commit" in scope ? (
             <span className="tabular font-mono text-[11.5px]">{scope.commit.slice(0, 7)}</span>
-          ) : (
+          ) : typeof scope === "string" ? (
             <span className="shrink-0">{LABELS[scope]}</span>
-          )}
+          ) : null}
+          {unseen > 0 && !since && <NewLabel />}
           <ChevronDown className="size-3 shrink-0 text-fg-subtle" />
         </DropdownMenuPrimitive.Trigger>
         <DropdownMenuPrimitive.Portal>
@@ -76,6 +99,15 @@ export function CommitPicker({ worktree, base, scope }: { worktree: Worktree; ba
             <DropdownMenuPrimitive.RadioGroup value={value} onValueChange={select}>
               {worktree.dirty && <Item value="all" title={LABELS.all} />}
               <Item value="committed" title={LABELS.committed} />
+              {request && (
+                <Item
+                  value="since"
+                  title={SINCE_LABEL}
+                  detail={`${sinceRequest === 0 ? "No new commits yet" : sinceRequest === 1 ? "1 new commit" : `${sinceRequest} new commits`} · asked ${agentLabel(request.agent)}`}
+                  time={timeAgo(request.requestedAt)}
+                  isNew={unseen > 0}
+                />
+              )}
               <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px shrink-0 bg-border" />
               {worktree.dirty && <Item value="uncommitted" title={LABELS.uncommitted} detail="Working tree" />}
               {commits.map((c) => (
@@ -109,7 +141,7 @@ export function CommitPicker({ worktree, base, scope }: { worktree: Worktree; ba
   );
 }
 
-function Item({ value, title, detail, time }: { value: string; title: string; detail?: ReactNode; time?: string }) {
+function Item({ value, title, detail, time, isNew }: { value: string; title: string; detail?: ReactNode; time?: string; isNew?: boolean }) {
   return (
     <DropdownMenuPrimitive.RadioItem
       value={value}
@@ -118,8 +150,11 @@ function Item({ value, title, detail, time }: { value: string; title: string; de
       <DropdownMenuPrimitive.ItemIndicator>
         <Check className="size-3.5 text-accent" />
       </DropdownMenuPrimitive.ItemIndicator>
-      <span title={title} className="col-start-2 truncate font-medium text-fg">
-        {title}
+      <span className="col-start-2 flex min-w-0 items-center gap-1.5">
+        <span title={title} className="truncate font-medium text-fg">
+          {title}
+        </span>
+        {isNew && <NewLabel />}
       </span>
       {time && <span className="tabular text-[11px] text-fg-faint">{time}</span>}
       {detail && <span className="col-start-2 truncate text-[11.5px] text-fg-subtle">{detail}</span>}
