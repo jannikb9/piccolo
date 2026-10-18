@@ -716,13 +716,28 @@ export function mockSendComments(worktreePath: string, session: string): Promise
   return mockAsk("implement", session, sent);
 }
 
+/** As `sessions::shell_quote`, but leaving the placeholder paths' `~/` as it is. */
+const shellQuote = (value: string) => (/^[~\w/.+:@-]+$/.test(value) ? value : `'${value.split("'").join("'\\''")}'`);
+
+/** As `requests::prompt`: opens with the worktree's title, as agents name a new session after it. */
+function mockPrompt(worktreePath: string, request: ReviewRequest): string {
+  const wt = mockState.repos.flatMap((r) => r.worktrees).find((w) => w.path === worktreePath);
+  const branch = wt?.branch ?? worktreePath.split("/").pop()!;
+  const title = wt?.title ?? wt?.autoTitle ?? branch;
+  const again = mockRequests.some((r) => r.id !== request.id && r.kind === "review" && r.agent === request.agent && r.finishedAt !== null);
+  const n = request.threads.length;
+  const task =
+    request.kind === "review"
+      ? `review the changes on ${branch} for Piccolo${again ? " again, now that it has changed" : ""}`
+      : `address ${n === 1 ? "a review comment" : `${n} review comments`} from Piccolo on ${branch}`;
+  const guide = `Run \`piccolo -C ${shellQuote(worktreePath)} guide --request ${request.id}\` and follow the steps it prints.`;
+  return `${title}: ${task}. The worktree is ${worktreePath}. ${guide}`;
+}
+
 export function mockCopyPrompt(worktreePath: string, kind: ReviewRequest["kind"]): Promise<string> {
   const sent = kind === "implement" ? unseenBy(worktreePath, null) : [];
   if (kind === "implement" && sent.length === 0) return Promise.reject("There are no comments to send");
-  return mockAsk(kind, null, sent).then(
-    (r) =>
-      `Mock: ${kind === "review" ? "review the changes for Piccolo." : `address ${sent.length === 1 ? "a review comment" : `${sent.length} review comments`} from Piccolo.`} The worktree is ${worktreePath}. Run \`piccolo -C ${worktreePath} guide --request ${r.id}\` and follow the steps it prints.`,
-  );
+  return mockAsk(kind, null, sent).then((r) => mockPrompt(worktreePath, r));
 }
 
 export function mockRequestReview(_worktreePath: string, session: string): Promise<ReviewRequest> {
