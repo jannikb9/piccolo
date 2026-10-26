@@ -253,12 +253,25 @@ export function ThreadCard({ thread, note }: { thread: Thread | GeneralThread; n
         ) : (
           <>
             <Tooltip label="Disregard this comment, but keep it so agents don't raise it again">
-              <Button onClick={() => setDismissed.mutate({ id: thread.id, dismissed: true })} disabled={setDismissed.isPending}>
+              <Button
+                onClick={() => {
+                  setDismissed.mutate({ id: thread.id, dismissed: true });
+                  setExpanded(false);
+                }}
+                disabled={setDismissed.isPending}
+              >
                 <EyeOff className="size-3.5" />
                 Dismiss
               </Button>
             </Tooltip>
-            <Button onClick={() => setResolved.mutate({ id: thread.id, resolved: true })} disabled={setResolved.isPending}>
+            {/* Collapses it, even when it was opened by picking it in the comment list. */}
+            <Button
+              onClick={() => {
+                setResolved.mutate({ id: thread.id, resolved: true });
+                setExpanded(false);
+              }}
+              disabled={setResolved.isPending}
+            >
               <CheckCircle2 className="size-3.5" />
               Resolve
             </Button>
