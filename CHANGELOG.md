@@ -5,6 +5,11 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.3.0 — 2026-10-26
+
+- **Push branches from Piccolo**: a Push button beside the commit picker pushes the branch and counts the commits not on the remote yet. A branch that was never pushed gets a branch of the same name there. The worktree menu in the sidebar can push too.
+- **Resolved comments collapse**: resolving or dismissing a comment you jumped to, such as an outdated one, now folds it away.
+
 ## 1.2.0 — 2026-10-26
 
 - **See what an agent changed after you requested changes**: the commit picker has a "Since you requested changes" view with only the commits made since, and marks new commits with a New label.
