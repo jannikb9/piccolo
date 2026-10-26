@@ -28,6 +28,8 @@ Usage:
   piccolo done [--request <id>] [--implement]
                                      Say you've finished reviewing the branch (--implement:
                                      addressing comments on it)
+  piccolo connect                    Tell Piccolo this session works on the worktree, so it lists the
+                                     session there (any command does this; this one only does that)
   piccolo resolve <id>               Mark a comment resolved
   piccolo reopen <id>                Reopen a resolved comment
   piccolo guide [--request <id>]     How to review this branch as an agent (--request: what
@@ -51,7 +53,7 @@ Comments are shown in Piccolo and belong to the branch checked out in the curren
 pub fn run_if_command() -> Option<i32> {
     let (worktree, args) = take_worktree_option(std::env::args().skip(1).collect());
     let command = args.first().map(String::as_str).unwrap_or_default();
-    if !matches!(command, "comments" | "reply" | "thumbs-up" | "comment" | "done" | "resolve" | "reopen" | "guide" | "help" | "--help" | "-h") {
+    if !matches!(command, "comments" | "reply" | "thumbs-up" | "comment" | "done" | "connect" | "resolve" | "reopen" | "guide" | "help" | "--help" | "-h") {
         // `-C` only belongs to the command line; without a command it's the app being launched.
         worktree.as_ref()?;
         eprintln!("piccolo: missing command\n\n{HELP}");
@@ -211,6 +213,17 @@ fn run(command: &str, args: &[String], folder: &Folder, caller: Option<&Caller>)
             match done.kind {
                 Kind::Review => println!("Finished your review of {} with {}.", target.label(), count("comment", "comments")),
                 Kind::Implement => println!("Finished addressing the comments on {}, with {}.", target.label(), count("reply", "replies")),
+            }
+            Ok(())
+        }
+        "connect" => {
+            // `run_if_command` has already recorded the session on this worktree.
+            if !args.is_empty() {
+                return Err("`connect` takes no arguments".into());
+            }
+            match caller {
+                Some(_) => println!("Connected this session to {}.", folder.target()?.label()),
+                None => println!("Not inside an agent session, so there is nothing to connect."),
             }
             Ok(())
         }

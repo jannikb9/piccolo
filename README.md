@@ -64,3 +64,13 @@ Piccolo aims to provide a smoother workflow, allowing you to collaborate with yo
 **Native:** Piccolo sends review and change requests straight to the running session.
 
 **Via copy prompt:** Piccolo copies a prompt to paste into a session. The agent reads and answers comments with the `piccolo` command, so any agent that can run shell commands works, including ones not listed here.
+
+### Agents that create worktrees
+
+An agent running outside a worktree (say, in the folder above your repositories) shows up in Piccolo's sessions list once it has run any `piccolo` command on that worktree. To connect it as soon as it creates one with [Worktrunk](https://worktrunk.dev), add a hook to `~/.config/worktrunk/config.toml`:
+
+```toml
+post-switch = "piccolo -C '{{ worktree_path }}' connect"
+```
+
+`piccolo connect` does nothing except tell Piccolo which session works on the worktree, and does nothing when run outside an agent session.
