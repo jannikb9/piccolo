@@ -5,6 +5,11 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.2.0 — 2026-10-26
+
+- **See what an agent changed after you requested changes**: the commit picker has a "Since you requested changes" view with only the commits made since, and marks new commits with a New label.
+- **Connect agents that create worktrees**: `piccolo connect` tells Piccolo which worktree an agent session works on, so the session is listed there. With Worktrunk, a `post-switch` hook can run it for you (see the README).
+
 ## 1.1.0 — 2026-10-17
 
 - **New comments from agents stand out**: messages you haven't seen yet are marked New, and a "3 new comments" button over the diff takes you to the topmost one, resolved threads included; its × marks them all as read. A message counts as read after a second on screen, or when you reply in its thread. The Comments tab, the comment list and the file tree show where something is new.
