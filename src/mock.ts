@@ -125,9 +125,10 @@ const merged = new Set(["~/projects/spoke-app/nav"]);
 
 /** Branches' pull requests on GitHub. */
 const pullRequests: Record<string, PullRequest> = {
-  "feat/auth-session-refresh": { number: 412, state: "open", url: "https://github.com/spoke/spoke-app/pull/412" },
-  "agent/migrate-logger": { number: 398, state: "closed", url: "https://github.com/spoke/spoke-app/pull/398" },
-  "fix/nav-overflow": { number: 377, state: "merged", url: "https://github.com/spoke/spoke-app/pull/377" },
+  "feat/auth-session-refresh": { number: 412, state: "open", url: "https://github.com/spoke/spoke-app/pull/412", draft: false, approved: true },
+  "agent/refactor-billing-webhooks": { number: 405, state: "open", url: "https://github.com/spoke/spoke-app/pull/405", draft: true, approved: false },
+  "agent/migrate-logger": { number: 398, state: "open", url: "https://github.com/spoke/spoke-app/pull/398", draft: false, approved: false },
+  "fix/nav-overflow": { number: 377, state: "merged", url: "https://github.com/spoke/spoke-app/pull/377", draft: false, approved: true },
 };
 
 const delay = <T>(value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), 150));

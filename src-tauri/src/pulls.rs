@@ -14,6 +14,10 @@ pub struct PullRequest {
     pub number: u64,
     pub state: PullState,
     pub url: String,
+    /// Not ready for review yet.
+    pub draft: bool,
+    /// Approved by its reviewers, and no one's latest review asks for changes.
+    pub approved: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -60,7 +64,7 @@ fn query(branches: usize) -> String {
         .map(|i| {
             format!(
                 " b{i}: pullRequests(headRefName: $b{i}, first: 5, orderBy: {{field: CREATED_AT, direction: DESC}}) \
-                 {{ nodes {{ number state url isCrossRepository }} }}"
+                 {{ nodes {{ number state url isDraft isCrossRepository reviewDecision latestReviews(first: 20) {{ nodes {{ state }} }} }} }}"
             )
         })
         .collect();
@@ -73,7 +77,36 @@ struct Node {
     number: u64,
     state: PullState,
     url: String,
+    is_draft: bool,
     is_cross_repository: bool,
+    /// `None` where the repository doesn't require reviews.
+    review_decision: Option<String>,
+    latest_reviews: Option<Reviews>,
+}
+
+#[derive(Deserialize)]
+struct Reviews {
+    nodes: Vec<Review>,
+}
+
+#[derive(Deserialize)]
+struct Review {
+    state: String,
+}
+
+impl Node {
+    /// GitHub's review decision; without one (reviews aren't required), each reviewer's latest
+    /// review: an approval, and nobody asking for changes.
+    fn approved(&self) -> bool {
+        match self.review_decision.as_deref() {
+            Some(decision) => decision == "APPROVED",
+            None => {
+                let states = self.latest_reviews.iter().flat_map(|r| &r.nodes).map(|r| r.state.as_str());
+                let states: Vec<&str> = states.collect();
+                states.contains(&"APPROVED") && !states.contains(&"CHANGES_REQUESTED")
+            }
+        }
+    }
 }
 
 /// Pull requests from forks don't count: theirs is another branch of the same name (a fork's
@@ -85,7 +118,9 @@ fn parse(out: &str, branches: &[String]) -> Result<HashMap<String, PullRequest>>
     for (i, branch) in branches.iter().enumerate() {
         let nodes: Vec<Node> = serde_json::from_value(repository[format!("b{i}")]["nodes"].clone()).unwrap_or_default();
         if let Some(node) = nodes.into_iter().find(|n| !n.is_cross_repository) {
-            pulls.insert(branch.clone(), PullRequest { number: node.number, state: node.state, url: node.url });
+            let approved = node.approved();
+            let pull = PullRequest { number: node.number, state: node.state, url: node.url, draft: node.is_draft, approved };
+            pulls.insert(branch.clone(), pull);
         }
     }
     Ok(pulls)
@@ -105,14 +140,31 @@ mod tests {
     #[test]
     fn takes_the_newest_pull_request_not_from_a_fork() {
         let out = r#"{"data":{"repository":{
-            "b0":{"nodes":[{"number":9,"state":"OPEN","url":"u9","isCrossRepository":true},{"number":7,"state":"CLOSED","url":"u7","isCrossRepository":false}]},
+            "b0":{"nodes":[{"number":9,"state":"OPEN","url":"u9","isDraft":false,"isCrossRepository":true},{"number":7,"state":"CLOSED","url":"u7","isDraft":true,"isCrossRepository":false}]},
             "b1":{"nodes":[]},
-            "b2":{"nodes":[{"number":3,"state":"MERGED","url":"u3","isCrossRepository":false}]}}}}"#;
+            "b2":{"nodes":[{"number":3,"state":"MERGED","url":"u3","isDraft":false,"isCrossRepository":false}]}}}}"#;
         let branches = ["feat/a", "feat/b", "feat/c"].map(String::from);
         let pulls = parse(out, &branches).unwrap();
         assert_eq!(pulls.len(), 2);
-        assert_eq!(pulls["feat/a"], PullRequest { number: 7, state: PullState::Closed, url: "u7".into() });
+        assert_eq!(pulls["feat/a"], PullRequest { number: 7, state: PullState::Closed, url: "u7".into(), draft: true, approved: false });
         assert_eq!(pulls["feat/c"].state, PullState::Merged);
         assert_eq!(serde_json::to_string(&PullState::Closed).unwrap(), "\"closed\"");
+    }
+
+    #[test]
+    fn reads_approval() {
+        let pull = |review: &str| format!(r#"{{"number":1,"state":"OPEN","url":"u","isDraft":false,"isCrossRepository":false,{review}}}"#);
+        let out = format!(
+            r#"{{"data":{{"repository":{{"b0":{{"nodes":[{}]}},"b1":{{"nodes":[{}]}},"b2":{{"nodes":[{}]}},"b3":{{"nodes":[{}]}}}}}}}}"#,
+            pull(r#""reviewDecision":"APPROVED","latestReviews":{"nodes":[]}"#),
+            pull(r#""reviewDecision":"REVIEW_REQUIRED","latestReviews":{"nodes":[{"state":"APPROVED"}]}"#),
+            // Reviews not required: the reviewers' latest reviews decide.
+            pull(r#""reviewDecision":null,"latestReviews":{"nodes":[{"state":"COMMENTED"},{"state":"APPROVED"}]}"#),
+            pull(r#""reviewDecision":null,"latestReviews":{"nodes":[{"state":"APPROVED"},{"state":"CHANGES_REQUESTED"}]}"#),
+        );
+        let branches = ["a", "b", "c", "d"].map(String::from);
+        let pulls = parse(&out, &branches).unwrap();
+        let approved: Vec<bool> = branches.iter().map(|b| pulls[b].approved).collect();
+        assert_eq!(approved, [true, false, true, false]);
     }
 }

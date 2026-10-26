@@ -21,7 +21,9 @@ import {
   GitBranch,
   GitBranchPlus,
   GitMerge,
+  GitPullRequest,
   GitPullRequestClosed,
+  GitPullRequestDraft,
   LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -319,6 +321,12 @@ function WorktreeRow({
         <GitMerge className="size-3.5 text-merged" aria-label="Merged" />
       ) : pull?.state === "closed" ? (
         <GitPullRequestClosed className="size-3.5 text-del" aria-label="Pull request closed" />
+      ) : pull?.draft ? (
+        <GitPullRequestDraft className="size-3.5 text-fg-subtle" aria-label="Draft pull request" />
+      ) : pull?.approved ? (
+        <GitPullRequest className="size-3.5 text-add" aria-label="Pull request approved" />
+      ) : pull ? (
+        <GitPullRequest className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} aria-label="Pull request ready for review" />
       ) : (
         <GitBranch className={cn("size-3.5", selected ? "text-fg-muted" : "text-fg-subtle")} />
       )}
@@ -372,7 +380,8 @@ function WorktreeRow({
             </span>
             {pull && (
               <span className="text-fg-muted">
-                Pull request #{pull.number} {pull.state}
+                Pull request #{pull.number}{" "}
+                {pull.state !== "open" ? pull.state : pull.draft ? "draft" : pull.approved ? "approved" : "ready for review"}
               </span>
             )}
             {sessions.map((s) => (

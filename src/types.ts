@@ -40,6 +40,10 @@ export type PullRequest = {
   number: number;
   state: "open" | "closed" | "merged";
   url: string;
+  /** Not ready for review yet. */
+  draft: boolean;
+  /** Approved by its reviewers, and no one's latest review asks for changes. */
+  approved: boolean;
 };
 
 export type FileStatus = "added" | "modified" | "deleted" | "renamed";
