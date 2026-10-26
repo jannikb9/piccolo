@@ -5,6 +5,12 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.3.1 — 2026-10-26
+
+- **Smoother on 120 Hz displays**: Piccolo now draws at your display's refresh rate instead of 60 frames a second, so typing and scrolling feel as smooth as in other apps.
+- **Code blocks in comments**: type ``` on a line of its own and press Enter to start a code block, also after a line break, and ``` again on its last line to end it.
+- **The cursor fits the text**: on a line after a line break, the cursor in a comment is no longer taller than the text.
+
 ## 1.3.0 — 2026-10-26
 
 - **Push branches from Piccolo**: a Push button beside the commit picker pushes the branch and counts the commits not on the remote yet. A branch that was never pushed gets a branch of the same name there. The worktree menu in the sidebar can push too.
