@@ -34,7 +34,12 @@ export const autoTitle = (branch: string) => {
   return words ? words[0].toUpperCase() + words.slice(1) : branch;
 };
 
-const worktree = (repoId: string, name: string, branch: string, fields: { dirty?: boolean; minutes: number; isMain?: boolean }) => ({
+const worktree = (
+  repoId: string,
+  name: string,
+  branch: string,
+  fields: { dirty?: boolean; minutes: number; isMain?: boolean; unpushed?: number | null },
+) => ({
   id: `${repoId}/${name}`,
   repoId,
   path: `${repoId}/${name}`,
@@ -45,6 +50,7 @@ const worktree = (repoId: string, name: string, branch: string, fields: { dirty?
   head: "a41c9e2",
   isMain: fields.isMain ?? false,
   dirty: fields.dirty ?? false,
+  unpushed: fields.unpushed === undefined ? 0 : fields.unpushed,
   updatedAt: minutesAgo(fields.minutes),
 });
 
@@ -57,10 +63,10 @@ export const mockRepos: Repo[] = [
     error: null,
     worktrees: [
       worktree("~/projects/spoke-app", "spoke-app", "main", { minutes: 60 * 50, isMain: true }),
-      worktree("~/projects/spoke-app", "auth-session", "feat/auth-session-refresh", { dirty: true, minutes: 2 }),
+      worktree("~/projects/spoke-app", "auth-session", "feat/auth-session-refresh", { dirty: true, minutes: 2, unpushed: 2 }),
       worktree("~/projects/spoke-app", "billing", "agent/refactor-billing-webhooks", { minutes: 38 }),
       worktree("~/projects/spoke-app", "nav", "fix/nav-overflow", { minutes: 60 * 26 }),
-      worktree("~/projects/spoke-app", "codemod", "agent/migrate-logger", { minutes: 60 * 3 }),
+      worktree("~/projects/spoke-app", "codemod", "agent/migrate-logger", { minutes: 60 * 3, unpushed: null }),
     ],
   },
   {
@@ -945,6 +951,14 @@ export function mockAddWorktree(repoId: string, branch: string): Promise<string>
   const wt = worktree(repoId, `${repo.name}.${branch.replace(/\//g, "-")}`, branch, { minutes: 0 });
   repo.worktrees.push(wt);
   return new Promise((resolve) => setTimeout(() => resolve(wt.path), 800));
+}
+
+/** Takes a moment, like a real push. */
+export function mockPushWorktree(path: string): Promise<void> {
+  for (const wt of mockRepos.flatMap((r) => r.worktrees)) {
+    if (wt.path === path) wt.unpushed = 0;
+  }
+  return new Promise((resolve) => setTimeout(resolve, 1500));
 }
 
 export function mockRenameWorktree(path: string, title: string): Promise<void> {

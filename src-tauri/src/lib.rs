@@ -56,6 +56,7 @@ pub fn run() {
             repos::fetch_remotes,
             repos::add_worktree,
             repos::remove_worktree,
+            repos::push_worktree,
             titles::rename_worktree,
             repos::file_versions,
             comments::list_threads,

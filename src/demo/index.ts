@@ -61,6 +61,7 @@ const worktree = (path: string, branch: string, minutes: number, isMain = false)
   head: "4e1f0c2",
   isMain,
   dirty: false,
+  unpushed: 0,
   updatedAt: minutesAgo(minutes),
 });
 

@@ -29,6 +29,8 @@ export type Worktree = {
   isMain: boolean;
   /** Has uncommitted changes. */
   dirty: boolean;
+  /** Commits its branch has that the remote branch doesn't; `null` while the branch isn't on the remote. */
+  unpushed: number | null;
   /** Last time anything in the worktree changed, epoch ms. */
   updatedAt: number;
 };

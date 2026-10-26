@@ -22,11 +22,13 @@ import {
   GitBranchPlus,
   GitMerge,
   GitPullRequestClosed,
+  LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
   Plus,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import {
@@ -39,6 +41,8 @@ import {
   useReorderRepos,
   useRepos,
   usePullRequests,
+  usePushing,
+  usePushWorktree,
   useSessions,
   useWorktreeMerged,
 } from "../lib/queries";
@@ -253,8 +257,12 @@ function WorktreeRow({
   const sessions = useSessions(wt).filter((s) => s.running);
   const deleteWorktree = useDeleteWorktree();
   const rename = useRenameWorktree();
+  const push = usePushWorktree();
+  const pushing = usePushing(wt);
   const [renaming, setRenaming] = useState(false);
   const branch = wt.branch ?? `detached @ ${wt.head}`;
+  // Nothing to push once it's merged: its remote branch may well be deleted by then.
+  const canPush = !!wt.branch && wt.unpushed !== 0 && !merged && pull?.state !== "merged" && !pushing;
   // Shared by right-click and the "⋮" button.
   const menu: MenuItem[] = [
     {
@@ -275,6 +283,16 @@ function WorktreeRow({
       shortcut: "R",
       onSelect: () => setRenaming(true),
     },
+    ...(canPush
+      ? [
+          {
+            label: wt.unpushed === null ? "Push branch" : `Push ${wt.unpushed} ${wt.unpushed === 1 ? "commit" : "commits"}`,
+            icon: <Upload className="size-3.5 text-fg-subtle" />,
+            shortcut: "P",
+            onSelect: () => push.mutate(wt),
+          },
+        ]
+      : []),
     // The main worktree is the repository itself.
     ...(wt.isMain
       ? []
@@ -295,7 +313,9 @@ function WorktreeRow({
     );
   const content = (
     <>
-      {merged || pull?.state === "merged" ? (
+      {pushing ? (
+        <LoaderCircle className="size-3.5 animate-spin text-fg-subtle" aria-label="Pushing" />
+      ) : merged || pull?.state === "merged" ? (
         <GitMerge className="size-3.5 text-merged" aria-label="Merged" />
       ) : pull?.state === "closed" ? (
         <GitPullRequestClosed className="size-3.5 text-del" aria-label="Pull request closed" />
@@ -331,6 +351,11 @@ function WorktreeRow({
       </span>
       <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-fg-subtle">
         <span className="truncate">{wt.isMain ? `root · ${branch}` : branch}</span>
+        {!!wt.unpushed && (
+          <span className="tabular shrink-0 text-fg-faint" aria-label={`${wt.unpushed} unpushed`}>
+            ↑{wt.unpushed}
+          </span>
+        )}
       </span>
     </>
   );

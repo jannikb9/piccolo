@@ -1,4 +1,4 @@
-import { focusManager, QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { focusManager, QueryClient, useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 import { useStore } from "../store";
 import type { DraftImage } from "./images";
@@ -381,6 +381,25 @@ export function useRenameWorktree() {
     onError: (error) => showError("Couldn't rename the worktree", String(error)),
     onSettled: () => client.invalidateQueries({ queryKey: keys.repos }),
   });
+}
+
+/** Pushes a worktree's branch. */
+export function usePushWorktree() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationKey: ["push"],
+    mutationFn: (worktree: Worktree) => api.pushWorktree(worktree.path),
+    onError: (error, worktree) => showError(`Couldn't push ${worktree.branch}`, String(error)),
+    onSettled: () => client.invalidateQueries({ queryKey: keys.repos }),
+  });
+}
+
+/** Whether the worktree's branch is being pushed, from the toolbar or the sidebar. */
+export function usePushing(worktree: Worktree) {
+  return useMutationState({
+    filters: { mutationKey: ["push"], status: "pending" },
+    select: (mutation) => (mutation.state.variables as Worktree).path,
+  }).includes(worktree.path);
 }
 
 /**

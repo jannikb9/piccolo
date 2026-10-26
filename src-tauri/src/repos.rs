@@ -81,6 +81,8 @@ pub struct WorktreeInfo {
     head: String,
     is_main: bool,
     dirty: bool,
+    /// Commits its branch has that the remote branch doesn't; `None` while the branch isn't on the remote.
+    unpushed: Option<u32>,
     updated_at: u64,
 }
 
@@ -122,13 +124,13 @@ fn load_repo(path: &str) -> RepoInfo {
     repo.worktrees = thread::scope(|s| {
         let handles: Vec<_> = usable
             .iter()
-            .map(|(_, e)| s.spawn(|| git::worktree_status(Path::new(&e.path))))
+            .map(|(_, e)| s.spawn(|| (git::worktree_status(Path::new(&e.path)), git::unpushed(Path::new(&e.path)))))
             .collect();
         usable
             .iter()
             .zip(handles)
             .map(|((index, e), handle)| {
-                let status = handle.join().ok().and_then(|r| r.ok());
+                let (status, unpushed) = handle.join().map_or((None, None), |(status, unpushed)| (status.ok(), unpushed));
                 let target = Target { repo: path.to_string(), branch: e.branch.clone(), worktree: e.path.clone() };
                 WorktreeInfo {
                     id: e.path.clone(),
@@ -141,6 +143,7 @@ fn load_repo(path: &str) -> RepoInfo {
                     head: e.head.chars().take(7).collect(),
                     is_main: *index == 0,
                     dirty: status.as_ref().is_some_and(|s| s.dirty),
+                    unpushed,
                     updated_at: status.map_or(0, |s| s.updated_at),
                 }
             })
@@ -257,6 +260,12 @@ pub async fn remote_branches(repo: String) -> Result<Vec<RemoteBranch>> {
 #[tauri::command]
 pub async fn fetch_remotes(repo: String) -> Result<()> {
     blocking(move || git::fetch(Path::new(&repo))).await
+}
+
+/// Pushes the worktree's branch, see [`git::push`].
+#[tauri::command]
+pub async fn push_worktree(path: String) -> Result<()> {
+    blocking(move || git::push(Path::new(&path))).await
 }
 
 /// Checks out a branch in a new worktree; resolves to the worktree's path, which is its id.

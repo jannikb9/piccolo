@@ -129,10 +129,49 @@ fn parse_remote_branches(out: &str) -> Vec<RemoteBranch> {
 
 /// Updates the remote branches from every remote, dropping ones deleted there.
 pub fn fetch(repo: &Path) -> Result<()> {
+    remote_git(repo, &["fetch", "--all", "--prune", "--quiet"])
+}
+
+/// Pushes the worktree's branch. One that isn't on the remote yet goes to a branch of the same
+/// name there, which becomes its upstream; otherwise `git push`, so the user's push config applies.
+pub fn push(wt: &Path) -> Result<()> {
+    let branch = git(wt, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map_err(|_| "HEAD is detached".to_string())?;
+    if unpushed(wt).is_some() {
+        return remote_git(wt, &["push", "--quiet"]);
+    }
+    let remote = push_remote(wt, branch.trim()).ok_or("The repository has no remote to push to")?;
+    remote_git(wt, &["push", "--quiet", "--set-upstream", "--end-of-options", &remote, "HEAD"])
+}
+
+/// How many commits the worktree's branch has that its remote branch doesn't; `None` while the
+/// branch isn't on the remote (never pushed, or deleted there) or HEAD is detached.
+pub fn unpushed(wt: &Path) -> Option<u32> {
+    git(wt, &["rev-list", "--count", "@{push}..HEAD"]).ok()?.trim().parse().ok()
+}
+
+/// Where `branch` is pushed to, as git would pick it, else `origin` or the only remote.
+fn push_remote(wt: &Path, branch: &str) -> Option<String> {
+    let config = |key: &str| git(wt, &["config", "--get", key]).ok().map(|s| s.trim().to_string());
+    // `branch.<name>.remote` is "." for a branch tracking another local branch.
+    let configured = [format!("branch.{branch}.pushRemote"), "remote.pushDefault".into(), format!("branch.{branch}.remote")]
+        .iter()
+        .find_map(|key| config(key).filter(|r| r != "."));
+    configured.or_else(|| {
+        let remotes = git(wt, &["remote"]).ok()?;
+        let remotes: Vec<&str> = remotes.lines().collect();
+        match remotes.as_slice() {
+            [only] => Some(only.to_string()),
+            _ => remotes.contains(&"origin").then(|| "origin".to_string()),
+        }
+    })
+}
+
+/// Runs a git command that talks to a remote.
+fn remote_git(cwd: &Path, args: &[&str]) -> Result<()> {
     let out = Command::new("git")
-        .current_dir(repo)
-        .args(["fetch", "--all", "--prune", "--quiet"])
-        // Credential helpers (e.g. `gh`) live on the user's PATH; never wait for a password prompt.
+        .current_dir(cwd)
+        .args(args)
+        // Credential helpers (e.g. `gh`) and hooks live on the user's PATH; never wait for a password prompt.
         .env("PATH", user_path())
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(std::process::Stdio::null())
@@ -1010,6 +1049,40 @@ mod tests {
         // Already checked out: nothing to do.
         git_add_worktree(&repo, "feat/rows", "origin/feat/rows").unwrap();
         assert_eq!(list_worktrees(&repo).unwrap().len(), 2);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A new branch goes to a same-named one on the remote and tracks it, even when it was
+    /// branched off (and tracks) the remote's main; later pushes go there too.
+    #[test]
+    fn pushes_branches() {
+        let root = std::env::temp_dir().join(format!("review-git-push-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let run = |cwd: &Path, args: &[&str]| git(cwd, args).unwrap();
+        run(&root, &["init", "-q", "--bare", "-b", "main", "remote.git"]);
+        run(&root, &["clone", "-q", "remote.git", "app"]);
+        let repo = root.join("app");
+        run(&repo, &["config", "user.email", "t@example.com"]);
+        run(&repo, &["config", "user.name", "Test"]);
+        run(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        run(&repo, &["push", "-q", "origin", "main"]);
+        run(&repo, &["checkout", "-q", "-b", "feat/rows", "--track", "origin/main"]);
+        run(&repo, &["commit", "-q", "--allow-empty", "-m", "Make rows clickable"]);
+        assert_eq!(unpushed(&repo), None);
+
+        push(&repo).unwrap();
+        assert_eq!(run(&repo, &["rev-parse", "--abbrev-ref", "@{upstream}"]).trim(), "origin/feat/rows");
+        assert_eq!(unpushed(&repo), Some(0));
+        run(&repo, &["commit", "-q", "--allow-empty", "-m", "Add hover"]);
+        assert_eq!(unpushed(&repo), Some(1));
+        push(&repo).unwrap();
+        assert_eq!(unpushed(&repo), Some(0));
+        assert_eq!(run(&root.join("remote.git"), &["log", "-1", "--format=%s", "feat/rows"]).trim(), "Add hover");
+
+        run(&repo, &["checkout", "-q", "--detach"]);
+        assert_eq!(unpushed(&repo), None);
+        assert!(push(&repo).is_err());
         let _ = fs::remove_dir_all(&root);
     }
 

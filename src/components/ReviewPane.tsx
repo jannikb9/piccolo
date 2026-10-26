@@ -20,6 +20,7 @@ import type { ChangedFile, DiffLayout, DiffPatch, DiffScope, GeneralThread, Repo
 import { CommitPicker } from "./CommitPicker";
 import { BranchComments } from "./Comments";
 import { DiffView, type DiffViewHandle } from "./DiffView";
+import { PushButton } from "./PushButton";
 import { AddressButton, AgentsButton, ReviewButton } from "./SessionList";
 import { CheckBox, DiffCount, Skeleton, Tooltip, useJustDone } from "./ui";
 
@@ -166,8 +167,9 @@ function Toolbar({
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        <CommitPicker worktree={worktree} base={repo.defaultBranch} scope={scope} />
         <DiffOptions />
+        <CommitPicker worktree={worktree} base={repo.defaultBranch} scope={scope} />
+        <PushButton repo={repo} worktree={worktree} />
         <ReviewButton worktree={worktree} />
         <AddressButton worktree={worktree} />
         <AgentsButton worktree={worktree} />
