@@ -338,6 +338,10 @@
     color: var(--fg-faint);
     pointer-events: none;
   }
+  /* A line break (see MarkdownEditor): each line after one starts a block of its own. */
+  .markdown.ProseMirror .hard-break {
+    display: block;
+  }
   .markdown.ProseMirror .selectedCell {
     background: var(--accent-soft);
   }

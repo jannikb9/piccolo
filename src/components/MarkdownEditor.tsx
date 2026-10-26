@@ -89,6 +89,73 @@ const TableShortcuts = Extension.create({
   },
 });
 
+/** "```" or "```ts" alone on a line: a code fence. */
+const FENCE = /^```([\w+#.-]*)$/;
+
+/**
+ * Code blocks as you type them in Markdown: Enter after an opening fence on a line of its own
+ * (also one after a ⇧↩ line break, which the built-in rule misses) starts a code block, and
+ * Enter after a closing fence on its last line leaves it.
+ */
+const CodeFences = Extension.create({
+  name: "codeFences",
+  addKeyboardShortcuts() {
+    return {
+      Enter: ({ editor }) => {
+        const { $from, empty } = editor.state.selection;
+        const block = $from.parent;
+        if (!empty || $from.parentOffset !== block.content.size) return false;
+        const { codeBlock, paragraph } = editor.schema.nodes;
+
+        if (block.type === codeBlock) {
+          const text = block.textContent;
+          const lineStart = text.lastIndexOf("\n") + 1;
+          if (text.slice(lineStart) !== "```") return false;
+          return editor
+            .chain()
+            .command(({ tr }) => {
+              // The fence goes, with the newline before it.
+              tr.delete($from.start() + Math.max(lineStart - 1, 0), $from.pos);
+              const after = tr.mapping.map($from.after());
+              // Into the paragraph after the block, or a new one.
+              const next = tr.doc.nodeAt(after);
+              if (next?.type !== paragraph || next.content.size > 0) tr.insert(after, paragraph.create());
+              tr.setSelection(TextSelection.create(tr.doc, after + 1));
+              return true;
+            })
+            .run();
+        }
+
+        if (block.type !== paragraph) return false;
+        // Where the line the cursor ends starts: after the paragraph's last line break.
+        let lineStart = 0;
+        block.forEach((child, offset) => {
+          if (child.type.name === "hardBreak") lineStart = offset + child.nodeSize;
+        });
+        const match = block.textBetween(lineStart, block.content.size).match(FENCE);
+        if (!match) return false;
+        const code = codeBlock.create({ language: match[1] || null });
+        return editor
+          .chain()
+          .command(({ tr }) => {
+            if (lineStart === 0) {
+              tr.replaceWith($from.before(), $from.after(), code);
+              tr.setSelection(TextSelection.create(tr.doc, $from.before() + 1));
+              return true;
+            }
+            // The fence and the line break before it leave the paragraph; the block follows it.
+            tr.delete($from.start() + lineStart - 1, $from.end());
+            const after = tr.mapping.map($from.after());
+            tr.insert(after, code);
+            tr.setSelection(TextSelection.create(tr.doc, after + 1));
+            return true;
+          })
+          .run();
+      },
+    };
+  },
+});
+
 /**
  * Pastes Markdown text as what it means, so a pasted list or table arrives formatted. Code
  * copied from an editor (VS Code, Cursor) becomes a code block; inside a code block, text stays
@@ -160,10 +227,21 @@ export function MarkdownEditor({
       // Headings show as a bold line, like in a posted comment, and "# " doesn't make one: a
       // comment isn't a document. Ones already in a comment still survive an edit.
       Heading.extend({ addInputRules: () => [] }),
-      // Newlines are line breaks (as on GitHub), so a break is a plain one, not "  \n".
-      HardBreak.extend({ renderMarkdown: () => "\n" }),
+      // Newlines are line breaks (as on GitHub), so a break is a plain one, not "  \n". On screen
+      // it's an empty block rather than a <br>: WebKit draws the caret on a line after a <br> as
+      // tall as the whole line spacing, but on the first line of a block only as tall as the text.
+      // Copied text keeps the <br>.
+      HardBreak.extend({
+        renderMarkdown: () => "\n",
+        addNodeView: () => () => {
+          const dom = document.createElement("span");
+          dom.className = "hard-break";
+          return { dom };
+        },
+      }),
       TableKit.configure({ table: { resizable: false } }),
       TableShortcuts,
+      CodeFences,
       Placeholder.configure({ placeholder }),
       Markdown.configure({ markedOptions: { gfm: true, breaks: true } }),
     ],

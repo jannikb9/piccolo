@@ -2758,6 +2758,7 @@ dependencies = [
  "libc",
  "notify",
  "notify-debouncer-mini",
+ "objc2",
  "regex",
  "rusqlite",
  "serde",

@@ -13,6 +13,7 @@ mod sessions;
 mod titles;
 mod updates;
 mod watch;
+mod webview;
 mod worktrunk;
 
 use repos::Repos;
@@ -30,6 +31,7 @@ pub fn run() {
         .manage(PendingUpdate::default())
         .setup(|app| {
             menu::install(app)?;
+            webview::render_at_display_rate(app);
             let handle = app.handle();
             let repos = Repos::load(handle);
             let watchers = Watchers::default();
