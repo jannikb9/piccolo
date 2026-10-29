@@ -254,7 +254,8 @@ function WorktreeRow({
   const selectWorktree = useStore((s) => s.selectWorktree);
   const chosenScope = useStore((s) => s.scopes[wt.id]);
   const diffOptions = useDiffOptions();
-  const merged = useWorktreeMerged(wt, base);
+  // Merged as far as git can tell, or its pull request was merged (a squash merge git can't see yet).
+  const merged = useWorktreeMerged(wt, base) || pull?.state === "merged";
   // Only running sessions: the toolbar's agents popover lists the rest.
   const sessions = useSessions(wt).filter((s) => s.running);
   const deleteWorktree = useDeleteWorktree();
@@ -264,7 +265,7 @@ function WorktreeRow({
   const [renaming, setRenaming] = useState(false);
   const branch = wt.branch ?? `detached @ ${wt.head}`;
   // Nothing to push once it's merged: its remote branch may well be deleted by then.
-  const canPush = !!wt.branch && wt.unpushed !== 0 && !merged && pull?.state !== "merged" && !pushing;
+  const canPush = !!wt.branch && wt.unpushed !== 0 && !merged && !pushing;
   // Shared by right-click and the "⋮" button.
   const menu: MenuItem[] = [
     {
@@ -317,7 +318,7 @@ function WorktreeRow({
     <>
       {pushing ? (
         <LoaderCircle className="size-3.5 animate-spin text-fg-subtle" aria-label="Pushing" />
-      ) : merged || pull?.state === "merged" ? (
+      ) : merged ? (
         <GitMerge className="size-3.5 text-merged" aria-label="Merged" />
       ) : pull?.state === "closed" ? (
         <GitPullRequestClosed className="size-3.5 text-del" aria-label="Pull request closed" />
