@@ -5,6 +5,12 @@ installed version when it offers an update, and the release's GitHub page shows 
 release needs a `## <version> — <date>` section before `scripts/release.sh` publishes it. Keep
 each entry on one line, as both show line breaks as they are.
 
+## 1.3.2 — 2026-10-30
+
+- **Pull request status in the sidebar**: open pull requests show GitHub's icons: a draft icon for drafts, the pull request icon once ready for review, in green once approved.
+- **Merged worktrees go without asking**: deleting a worktree whose pull request was merged no longer asks to confirm, also after a squash merge git can't see yet.
+- **Copy branch name**: the worktree menu in the sidebar copies the branch name, in place of "Switch to worktree".
+
 ## 1.3.1 — 2026-10-26
 
 - **Smoother on 120 Hz displays**: Piccolo now draws at your display's refresh rate instead of 60 frames a second, so typing and scrolling feel as smooth as in other apps.
