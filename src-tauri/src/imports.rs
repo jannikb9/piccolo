@@ -94,35 +94,34 @@ pub(crate) fn split_files(patch: &str) -> Vec<FilePatch<'_>> {
 }
 
 /// A line of a hunk, with the line numbers its side(s) are at when it comes up.
-struct Row<'a> {
-    text: &'a str,
-    old: usize,
-    new: usize,
-    hidden: bool,
+pub(crate) struct Row<'a> {
+    pub text: &'a str,
+    pub old: usize,
+    pub new: usize,
+    pub hidden: bool,
 }
 
 impl Row<'_> {
-    fn kind(&self) -> u8 {
+    pub fn kind(&self) -> u8 {
         self.text.as_bytes()[0]
     }
 
-    fn is_change(&self) -> bool {
+    pub fn is_change(&self) -> bool {
         matches!(self.kind(), b'+' | b'-')
     }
 }
 
-/// A hunk without its import changes: split into the pieces between them, each with a header
-/// for its own lines. Empty when nothing but imports (and unchanged lines) was left.
-/// `old` and `new` flag the import lines of each version of the file.
-fn without_imports(hunk: &[&str], old: &[bool], new: &[bool]) -> Vec<String> {
+/// The rows of a hunk (header first) and what follows its line numbers in the header, or `None`
+/// when the header doesn't parse.
+pub(crate) fn hunk_rows<'a>(hunk: &[&'a str]) -> Option<(Vec<Row<'a>>, &'a str)> {
     // `@@ -12,5 +12,7 @@ fn heading`
-    let Some((ranges, heading)) = hunk[0][2..].split_once("@@") else { return vec![hunk.concat()] };
+    let (ranges, heading) = hunk[0][2..].split_once("@@")?;
     let mut starts = ranges.split_whitespace().map(|range| {
         let (start, count) = range[1..].split_once(',').unwrap_or((&range[1..], "1"));
         Some((start.parse::<usize>().ok()?, count.parse::<usize>().ok()?))
     });
     let (Some(Some((mut o, old_count))), Some(Some((mut n, new_count)))) = (starts.next(), starts.next()) else {
-        return vec![hunk.concat()];
+        return None;
     };
     // An empty range starts after the line it names.
     if old_count == 0 {
@@ -131,7 +130,6 @@ fn without_imports(hunk: &[&str], old: &[bool], new: &[bool]) -> Vec<String> {
     if new_count == 0 {
         n += 1;
     }
-
     let mut rows: Vec<Row> = Vec::with_capacity(hunk.len());
     for &text in &hunk[1..] {
         rows.push(Row { text, old: o, new: n, hidden: false });
@@ -142,6 +140,32 @@ fn without_imports(hunk: &[&str], old: &[bool], new: &[bool]) -> Vec<String> {
             _ => {}
         }
     }
+    Some((rows, heading))
+}
+
+/// The pieces of a hunk between its hidden rows, each with a header for its own lines. Pieces
+/// left with only unchanged lines go too, unless `keep_unchanged`.
+pub(crate) fn pieces(rows: &[Row], heading: &str, keep_unchanged: bool) -> Vec<String> {
+    let mut pieces = Vec::new();
+    for piece in rows.chunk_by(|a, b| a.hidden == b.hidden).filter(|piece| !piece[0].hidden) {
+        if !keep_unchanged && !piece.iter().any(Row::is_change) {
+            continue;
+        }
+        let count = |kinds: [u8; 2]| piece.iter().filter(|r| kinds.contains(&r.kind())).count();
+        let (old_count, new_count) = (count([b' ', b'-']), count([b' ', b'+']));
+        let start = |line: usize, count: usize| if count == 0 { line - 1 } else { line };
+        let mut text = format!("@@ -{},{old_count} +{},{new_count} @@{heading}", start(piece[0].old, old_count), start(piece[0].new, new_count));
+        piece.iter().for_each(|r| text.push_str(r.text));
+        pieces.push(text);
+    }
+    pieces
+}
+
+/// A hunk without its import changes: split into the pieces between them, each with a header
+/// for its own lines. Empty when nothing but imports (and unchanged lines) was left.
+/// `old` and `new` flag the import lines of each version of the file.
+fn without_imports(hunk: &[&str], old: &[bool], new: &[bool]) -> Vec<String> {
+    let Some((mut rows, heading)) = hunk_rows(hunk) else { return vec![hunk.concat()] };
 
     let is_import = |marks: &[bool], line: usize| line.checked_sub(1).and_then(|i| marks.get(i)).copied().unwrap_or(false);
     let is_import_row = |row: &Row| match row.kind() {
@@ -174,26 +198,17 @@ fn without_imports(hunk: &[&str], old: &[bool], new: &[bool]) -> Vec<String> {
     for i in (0..rows.len().saturating_sub(1)).rev() {
         rows[i].hidden |= spaces(&rows, i) && rows[i + 1].hidden && rows[i + 1].kind() == rows[i].kind();
     }
-    // `\ No newline at end of file` belongs to the line before it.
+    hide_no_newline_notes(&mut rows);
+    pieces(&rows, heading, false)
+}
+
+/// `\ No newline at end of file` belongs to the line before it.
+pub(crate) fn hide_no_newline_notes(rows: &mut [Row]) {
     for i in 1..rows.len() {
         if rows[i].kind() == b'\\' {
             rows[i].hidden = rows[i - 1].hidden;
         }
     }
-
-    let mut pieces = Vec::new();
-    for piece in rows.chunk_by(|a, b| a.hidden == b.hidden).filter(|piece| !piece[0].hidden) {
-        if !piece.iter().any(Row::is_change) {
-            continue;
-        }
-        let count = |kinds: [u8; 2]| piece.iter().filter(|r| kinds.contains(&r.kind())).count();
-        let (old_count, new_count) = (count([b' ', b'-']), count([b' ', b'+']));
-        let start = |line: usize, count: usize| if count == 0 { line - 1 } else { line };
-        let mut text = format!("@@ -{},{old_count} +{},{new_count} @@{heading}", start(piece[0].old, old_count), start(piece[0].new, new_count));
-        piece.iter().for_each(|r| text.push_str(r.text));
-        pieces.push(text);
-    }
-    pieces
 }
 
 /// Flags, per line of `src`, whether it is part of an import statement. Statements that open a

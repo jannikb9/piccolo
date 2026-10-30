@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "rea
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../lib/api";
 import { unsafeCSS, viewStyle } from "../lib/codeViewStyle";
-import { markCommentedLines } from "../lib/commentedLines";
+import { markLines } from "../lib/commentedLines";
 import { emptyDiff, hashString, inHunks, isCollapsedByDefault, parsePatch } from "../lib/diff";
 import { queryClient, useAddThread, useDiffScope } from "../lib/queries";
 import {
@@ -29,13 +29,15 @@ import {
   paintMatches,
   type SearchMatch,
 } from "../lib/search";
+import { movedLineCounts, symbolLinks, type SymbolLinks } from "../lib/structure";
 import { hasUnread, markRead, unreadMessages } from "../lib/unread";
 import { cn, splitPath } from "../lib/utils";
 import { useDiffLayout, useStore } from "../store";
-import type { ChangedFile, DiffPatch, GeneralThread, LineRange, Side, Thread, Worktree } from "../types";
+import type { ChangedFile, DiffPatch, GeneralThread, LineRange, Move, Side, Thread, Worktree } from "../types";
 import { CodeNavigation } from "./CodeNav";
 import { BranchComments, Composer, DetachedNote, ThreadCard } from "./Comments";
 import { FindBar } from "./FindBar";
+import { MovedAway, MovedHere, SymbolBar } from "./Structure";
 import { CopyButton, DiffBlocks, DiffCount, StatusBadge, Tooltip, ViewedToggle } from "./ui";
 
 /** What an annotation row under a diff line holds. */
@@ -43,7 +45,12 @@ type Note =
   | { kind: "thread"; thread: Thread }
   /** Threads whose lines changed, shown above the file. */
   | { kind: "outdated"; threads: Thread[] }
-  | { kind: "draft"; key: string; range: LineRange };
+  | { kind: "draft"; key: string; range: LineRange }
+  /** Above a changed symbol that uses or is used by other changed ones. */
+  | { kind: "symbol"; links: SymbolLinks }
+  /** In place of moved lines the patch leaves out, and above where they went. */
+  | { kind: "moved-away"; move: Move }
+  | { kind: "moved-here"; move: Move };
 
 export type DiffViewHandle = CodeViewHandle<Note, undefined>;
 
@@ -67,7 +74,15 @@ function annotationSignature(annotations: DiffLineAnnotation<Note>[]): string {
   return annotations
     .map(({ side, lineNumber, metadata: note }) => {
       const detail =
-        note.kind === "thread" ? thread(note.thread) : note.kind === "outdated" ? note.threads.map(thread).join("|") : note.key;
+        note.kind === "thread"
+          ? thread(note.thread)
+          : note.kind === "outdated"
+            ? note.threads.map(thread).join("|")
+            : note.kind === "draft"
+              ? note.key
+              : note.kind === "symbol"
+                ? [...note.links.usedBy, ...note.links.calls, ...note.links.uses].map((s) => `${s.id}@${s.start}`).join(",")
+                : `${note.move.from.path}:${note.move.from.start}>${note.move.to.path}:${note.move.to.start}:${note.move.same.join()}`;
       return `${side}:${lineNumber}:${note.kind}:${detail}`;
     })
     .join(";");
@@ -180,6 +195,16 @@ export function DiffView({
     }
     // Line 0 renders above the file's first hunk.
     for (const [path, list] of outdated) add(path, { side: "additions", lineNumber: 0, metadata: { kind: "outdated", threads: list } });
+    // Notes go under the line above what they're about (the backend keeps it in the diff).
+    for (const move of diff.moves) {
+      add(move.from.path, { side: "deletions", lineNumber: move.from.start - 1, metadata: { kind: "moved-away", move } });
+      add(move.to.path, { side: "additions", lineNumber: move.to.start - 1, metadata: { kind: "moved-here", move } });
+    }
+    for (const links of symbolLinks(diff.symbols).values()) {
+      const { symbol, calls, uses, usedBy } = links;
+      if (calls.length + uses.length + usedBy.length === 0) continue;
+      add(symbol.path, { side: symbol.side, lineNumber: symbol.start - 1, metadata: { kind: "symbol", links } });
+    }
     const drafts = useStore.getState().drafts;
     for (const key of draftKeys) {
       const draft = drafts[key];
@@ -188,7 +213,7 @@ export function DiffView({
       add(draft.path, { side: range.endSide, lineNumber: range.endLine, metadata: { kind: "draft", key, range } });
     }
     return map;
-  }, [inline, draftKeys]);
+  }, [inline, draftKeys, diff.moves, diff.symbols]);
 
   // The lines of open threads and drafts are marked in the gutter.
   const commentedRanges = useMemo(() => {
@@ -325,11 +350,25 @@ export function DiffView({
   useEffect(() => {
     paint.current();
   }, [matches, current, occurrences]);
+  // Moved lines that stayed the same, and those of a deleted file that went elsewhere.
+  const movedRanges = useMemo(() => {
+    const map = new Map<string, LineRange[]>();
+    const add = (path: string, side: Side, [startLine, endLine]: [number, number]) =>
+      map.set(path, [...(map.get(path) ?? []), { startSide: side, startLine, endSide: side, endLine }]);
+    for (const move of diff.moves) {
+      move.same.forEach((range) => add(move.to.path, "additions", range));
+      if (!move.hidden) add(move.from.path, "deletions", [move.from.start, move.from.end]);
+    }
+    return map;
+  }, [diff.moves]);
   const markCommented = useRef<(host: Element) => void>(() => {});
-  markCommented.current = (host) => markCommentedLines(host, commentedRanges, fileDiffs);
+  markCommented.current = (host) => {
+    markLines(host, "data-commented", commentedRanges, fileDiffs);
+    markLines(host, "data-moved", movedRanges, fileDiffs);
+  };
   useEffect(() => {
     for (const host of containerRef.current?.querySelectorAll("diffs-container") ?? []) markCommented.current(host);
-  }, [commentedRanges]);
+  }, [commentedRanges, movedRanges]);
   // A thread picked while its lines were folded away (see `showThread`): first the diff is asked
   // for them, then it's shown once its file has rendered them (scrolling to a line goes by the
   // file's layout, which only then has it).
@@ -521,6 +560,7 @@ export function DiffView({
     [files, setActivePath, schedulePaint],
   );
 
+  const movedCounts = useMemo(() => movedLineCounts(diff.moves), [diff.moves]);
   const renderHeader = useCallback(
     (item: CodeViewItem<Note>) => {
       const file = byPath.get(item.id);
@@ -533,10 +573,11 @@ export function DiffView({
           collapsed={!!item.collapsed}
           expandable={hasBody}
           note={hasBody ? null : emptyDiffNote(file, item.fileDiff)}
+          moved={movedCounts.get(file.path) ?? 0}
         />
       );
     },
-    [byPath, worktree.id],
+    [byPath, worktree.id, movedCounts],
   );
 
   const renderAnnotation = useCallback(
@@ -561,9 +602,15 @@ export function DiffView({
               onClose={closeDraft}
             />
           );
+        case "symbol":
+          return <SymbolBar links={note.links} goTo={revealInDiff} />;
+        case "moved-away":
+          return <MovedAway move={note.move} goTo={revealInDiff} />;
+        case "moved-here":
+          return <MovedHere move={note.move} goTo={revealInDiff} />;
       }
     },
-    [worktree, base, byPath, closeDraft],
+    [worktree, base, byPath, closeDraft, revealInDiff],
   );
 
   const renderViewHeader = useCallback(
@@ -694,12 +741,15 @@ function FileHeader({
   collapsed,
   expandable,
   note,
+  moved,
 }: {
   worktreeId: string;
   file: ChangedFile;
   collapsed: boolean;
   expandable: boolean;
   note: string | null;
+  /** Added lines that were moved here. */
+  moved: number;
 }) {
   const viewed = useStore((s) => !!s.viewed[worktreeId]?.[file.path]);
   const toggleViewed = useStore((s) => s.toggleViewed);
@@ -742,6 +792,7 @@ function FileHeader({
         {!file.binary && (
           <span className="flex items-center gap-2">
             <DiffCount additions={file.additions} deletions={file.deletions} />
+            {moved > 0 && <span className="tabular font-mono text-[11px] text-merged">{moved} moved</span>}
             <DiffBlocks additions={file.additions} deletions={file.deletions} />
           </span>
         )}

@@ -34,18 +34,19 @@ function rowOf(fileDiff: FileDiffMetadata, side: Side, line: number): number {
 }
 
 /**
- * Marks the rendered lines of one diff (a `diffs-container`) that comments are on, with
- * `data-commented` on the code and its line number. The diff is virtualized, so this runs again
- * after each render.
+ * Marks the rendered lines of one diff (a `diffs-container`) in `rangesByPath` with `attribute` on
+ * the code and its line number: `data-commented` for lines comments are on, `data-moved` for
+ * moved lines that stayed the same. The diff is virtualized, so this runs again after each render.
  */
-export function markCommentedLines(
+export function markLines(
   host: Element,
+  attribute: string,
   rangesByPath: Map<string, LineRange[]>,
   fileDiffs: Map<string, FileDiffMetadata>,
 ) {
   const root = host.shadowRoot;
   if (!root) return;
-  const stale = new Set(root.querySelectorAll("[data-commented]"));
+  const stale = new Set(root.querySelectorAll(`[${attribute}]`));
   const path = host.querySelector<HTMLElement>("[data-file-path]")?.dataset.filePath;
   const ranges = path === undefined ? undefined : rangesByPath.get(path);
   const fileDiff = path === undefined ? undefined : fileDiffs.get(path);
@@ -68,10 +69,10 @@ export function markCommentedLines(
         for (const el of [content[i], gutter[i]]) {
           if (!el) continue;
           stale.delete(el);
-          if (!el.hasAttribute("data-commented")) el.setAttribute("data-commented", "");
+          if (!el.hasAttribute(attribute)) el.setAttribute(attribute, "");
         }
       }
     }
   }
-  for (const el of stale) el.removeAttribute("data-commented");
+  for (const el of stale) el.removeAttribute(attribute);
 }

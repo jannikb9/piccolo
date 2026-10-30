@@ -9,12 +9,14 @@ import type {
   ChangedFile,
   Commit,
   DiffPatch,
+  DiffSymbol,
   DiffScope,
   DownloadProgress,
   ExcerptRow,
   FileVersions,
   GeneralThread,
   LineRange,
+  Move,
   PullRequest,
   RemoteBranch,
   Repo,
@@ -248,8 +250,10 @@ const POST = 30;
 const oldContents = [...before(PRE), ...oldBody, ...after(POST)].join("\n") + "\n";
 const newContents = [...before(PRE), ...newBody, ...after(POST)].join("\n") + "\n";
 
-// The changed region of the body, plus three lines of trailing context.
+// The changed region of the body, from the function's first line and the one above it (kept for
+// its symbol, see symbols.rs), plus three lines of trailing context.
 const hunkLines = [
+  ...before(PRE).slice(-2).map((l) => ` ${l}`),
   ...oldBody.slice(0, 3).map((l) => ` ${l}`),
   ...oldBody.slice(3, 5).map((l) => `-${l}`),
   ...newBody.slice(3, 9).map((l) => `+${l}`),
@@ -261,7 +265,7 @@ const hunkLines = [
   ...after(POST).slice(0, 3).map((l) => ` ${l}`),
 ];
 const count = (sign: string) => hunkLines.filter((l) => l[0] === " " || l[0] === sign).length;
-const changedHunk = [`@@ -${PRE + 1},${count("-")} +${PRE + 1},${count("+")} @@ export async function getSession(req: Request) {`, ...hunkLines];
+const changedHunk = [`@@ -${PRE - 1},${count("-")} +${PRE - 1},${count("+")} @@`, ...hunkLines];
 
 const allLines = (contents: string, sign: string) =>
   contents
@@ -290,9 +294,70 @@ function filePatch(f: MockFile): string {
   }
 }
 
+// --- Moved code and changed symbols, for the auth worktree ----------------------------------------
+
+const AFTER = PRE + oldBody.length + 1;
+const afterLines = after(POST);
+/** Old lines 43–46 of session.ts moved to refresh.ts; the patch keeps what's around them. */
+const sessionMovedOut = [
+  `@@ -${AFTER + 11},3 +${AFTER + 15},3 @@`,
+  ...afterLines.slice(11, 14).map((l) => ` ${l}`),
+  `@@ -${AFTER + 18},3 +${AFTER + 18},3 @@`,
+  ...afterLines.slice(18, 21).map((l) => ` ${l}`),
+];
+
+const mockMoves: Move[] = [
+  {
+    from: { path: "src/auth/legacy-cookie.ts", start: 1, end: 11 },
+    to: { path: "src/auth/tokens.ts", start: 1, end: 11 },
+    hidden: false,
+    same: [[1, 11]],
+    oldText: before(PRE).slice(0, 11).join("\n"),
+    newText: before(PRE).slice(0, 11).join("\n"),
+  },
+  {
+    from: { path: "src/auth/session.ts", start: AFTER + 14, end: AFTER + 17 },
+    to: { path: "src/auth/refresh.ts", start: PRE + newBody.length + 2, end: PRE + newBody.length + 5 },
+    hidden: true,
+    same: [[PRE + newBody.length + 3, PRE + newBody.length + 5]],
+    oldText: [afterLines[1].replace("value * 1", "value + 1"), ...afterLines.slice(2, 5)].join("\n"),
+    newText: afterLines.slice(1, 5).join("\n"),
+  },
+];
+
+const symbol = (path: string, name: string, uses: string[], kind: DiffSymbol["kind"] = "function"): DiffSymbol => ({
+  id: `${path}#${name}`,
+  path,
+  name,
+  container: null,
+  kind,
+  side: "additions",
+  start: PRE,
+  end: PRE + newBody.length,
+  uses,
+});
+const mockSymbols: DiffSymbol[] = [
+  symbol("src/auth/session.ts", "getSession", ["src/auth/tokens.ts#readSessionToken", "src/auth/refresh.ts#refreshSession"]),
+  symbol("src/auth/tokens.ts", "readSessionToken", ["src/auth/types.ts#SessionToken"]),
+  symbol("src/auth/refresh.ts", "refreshSession", ["src/api/client.ts#request"]),
+  symbol("src/api/client.ts", "request", ["src/api/interceptors/retry.ts#withRetry"]),
+  symbol("src/api/interceptors/retry.ts", "withRetry", []),
+  symbol("src/ui/components/Nav.tsx", "Nav", ["src/ui/hooks/useSession.ts#useSession"]),
+  symbol("src/ui/components/SessionBanner.tsx", "SessionBanner", []),
+  symbol("src/ui/hooks/useSession.ts", "useSession", ["src/auth/session.ts#getSession"]),
+  symbol("tests/auth/refresh.test.ts", "refreshes before expiry", ["src/auth/refresh.ts#refreshSession"]),
+];
+
 export function mockDiffPatch(worktreePath: string, scope: DiffScope): Promise<DiffPatch> {
-  const patch = inScope(worktreePath, scope).map(filePatch).join("");
-  return delay({ oldRev: "base", newRev: null, patch });
+  const shown = inScope(worktreePath, scope);
+  const auth = worktreePath === "~/projects/spoke-app/auth-session";
+  const paths = new Set(shown.map((f) => f.path));
+  const patch = shown
+    .map((f) => (auth && f.path === "src/auth/session.ts" ? filePatch(f) + sessionMovedOut.join("\n") + "\n" : filePatch(f)))
+    .join("");
+  const moves = auth ? mockMoves.filter((m) => paths.has(m.from.path) && paths.has(m.to.path)) : [];
+  const symbols = auth ? mockSymbols.filter((s) => paths.has(s.path)).map((s) => ({ ...s, uses: s.uses.filter((id) => paths.has(id.split("#")[0])) })) : [];
+  return delay({ oldRev: "base", newRev: null, patch, moves, symbols });
 }
 
 export function mockFileVersions(): Promise<FileVersions> {

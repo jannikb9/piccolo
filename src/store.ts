@@ -40,6 +40,8 @@ type State = {
   seenCommits: Record<string, string>;
   hideWhitespace: boolean;
   hideImports: boolean;
+  /** The file list (and the diff) in the order the changes call each other, not by folder. */
+  sortByCalls: boolean;
   codeTheme: CodeThemeId;
   /** Whether launching offers to install worktrunk when it's missing; "Don't ask again" turns it off. */
   offerWorktrunk: boolean;
@@ -81,6 +83,7 @@ type State = {
   setSeenCommit: (worktreeId: string, sha: string) => void;
   toggleHideWhitespace: () => void;
   toggleHideImports: () => void;
+  setSortByCalls: (on: boolean) => void;
   setCodeTheme: (theme: CodeThemeId) => void;
   setOfferWorktrunk: (offer: boolean) => void;
   toggleViewed: (worktreeId: string, path: string) => void;
@@ -122,6 +125,7 @@ export const useStore = create<State>()(
       seenCommits: {},
       hideWhitespace: false,
       hideImports: false,
+      sortByCalls: false,
       codeTheme: "github",
       offerWorktrunk: true,
       viewed: {},
@@ -151,6 +155,7 @@ export const useStore = create<State>()(
         }),
       toggleHideWhitespace: () => set((s) => ({ hideWhitespace: !s.hideWhitespace })),
       toggleHideImports: () => set((s) => ({ hideImports: !s.hideImports })),
+      setSortByCalls: (sortByCalls) => set({ sortByCalls }),
       setCodeTheme: (codeTheme) => set({ codeTheme }),
       setOfferWorktrunk: (offerWorktrunk) => set({ offerWorktrunk }),
       // Like GitHub: marking a file viewed collapses it, un-marking expands it again.
@@ -249,6 +254,7 @@ export const useStore = create<State>()(
         layout: s.layout,
         hideWhitespace: s.hideWhitespace,
         hideImports: s.hideImports,
+        sortByCalls: s.sortByCalls,
         codeTheme: s.codeTheme,
         offerWorktrunk: s.offerWorktrunk,
         fileTab: s.fileTab,

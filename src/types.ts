@@ -65,6 +65,42 @@ export type DiffPatch = {
   /** `null` means the working tree. */
   newRev: string | null;
   patch: string;
+  /** Code moved from one place to another; the patch leaves out its removed lines. */
+  moves: Move[];
+  /** The functions, classes and types the patch changes. */
+  symbols: DiffSymbol[];
+};
+
+/** Lines of one file: on the old side for removed lines, on the new side for added ones. */
+export type LineBlock = { path: string; start: number; end: number };
+
+export type Move = {
+  from: LineBlock;
+  to: LineBlock;
+  /** The removed lines were left out of the patch (they stay in a deleted file). */
+  hidden: boolean;
+  /** Lines of `to` that are the same as before, as `[first, last]` ranges. */
+  same: [number, number][];
+  oldText: string;
+  newText: string;
+};
+
+export type SymbolKind = "function" | "method" | "class" | "type" | "value" | "module";
+
+/** A changed function, class or type. */
+export type DiffSymbol = {
+  /** `path#Container.name`. */
+  id: string;
+  path: string;
+  name: string;
+  container: string | null;
+  kind: SymbolKind;
+  /** The version its lines are from: the new one, unless the diff deletes it. */
+  side: Side;
+  start: number;
+  end: number;
+  /** Ids of the other changed symbols its code mentions. */
+  uses: string[];
 };
 
 /** Full contents of one file on both sides; `null` where it doesn't exist or isn't text. */

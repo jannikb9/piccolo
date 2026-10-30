@@ -1,8 +1,9 @@
-import { Check, ChevronRight, Files, Folder, FolderOpen, MessageSquare, type LucideIcon } from "lucide-react";
+import { Check, ChevronRight, CornerDownRight, Files, Folder, FolderOpen, MessageSquare, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { COLLAPSED_BY_DEFAULT, type FileSection } from "../lib/sections";
+import type { OrderedFile } from "../lib/structure";
 import { hasUnread, unreadMessages } from "../lib/unread";
-import { cn, totals, type TreeNode } from "../lib/utils";
+import { cn, splitPath, totals, type TreeNode } from "../lib/utils";
 import { useStore, type FileTab } from "../store";
 import type { ChangedFile, GeneralThread, Thread, Worktree } from "../types";
 import { CommentList } from "./CommentList";
@@ -13,6 +14,7 @@ export function FilePanel({
   worktree,
   worktreeId,
   sections,
+  callOrder,
   fileCount,
   viewedCount,
   commentCounts,
@@ -28,6 +30,8 @@ export function FilePanel({
   worktreeId: string;
   /** Non-empty sections (Implementation, Tests, Changesets) in review order. */
   sections: FileSection[];
+  /** The files in the order their changes call each other, when they call each other at all. */
+  callOrder: { ordered: OrderedFile[]; unconnected: ChangedFile[] } | null;
   fileCount: number;
   /** Threads on lines, and on the branch as a whole, for the Comments tab. */
   threads: Thread[];
@@ -48,6 +52,9 @@ export function FilePanel({
   const unread = unreadMessages([...generalThreads, ...threads]).length;
   const unreadPaths = new Set(threads.filter(hasUnread).map((t) => t.path));
   const files: ChangedFile[] = sections.flatMap((s) => s.files);
+  const sortByCalls = useStore((s) => s.sortByCalls);
+  const setSortByCalls = useStore((s) => s.setSortByCalls);
+  const rowProps = { worktreeId, commentCounts, unreadPaths, onSelect };
 
   return (
     <div className="flex h-full flex-col border-r border-border-subtle bg-bg">
@@ -82,17 +89,26 @@ export function FilePanel({
         ) : fileCount === 0 ? (
           worktreeId && <p className="px-2 py-6 text-center text-[12px] text-fg-subtle">No changed files</p>
         ) : (
-          sections.map((section, i) => (
-            <SectionGroup
-              key={section.id}
-              section={section}
-              className={cn(i > 0 && "mt-2")}
-              worktreeId={worktreeId}
-              commentCounts={commentCounts}
-              unreadPaths={unreadPaths}
-              onSelect={onSelect}
-            />
-          ))
+          <>
+            {callOrder && (
+              <div role="radiogroup" aria-label="Order files" className="mb-2 flex items-center gap-0.5 px-1">
+                <OrderButton active={!sortByCalls} onClick={() => setSortByCalls(false)} label="Folders" hint="Files by folder" />
+                <OrderButton
+                  active={sortByCalls}
+                  onClick={() => setSortByCalls(true)}
+                  label="Calls"
+                  hint="Files in the order their changes call each other, callers first"
+                />
+              </div>
+            )}
+            {sortByCalls && callOrder ? (
+              <CallOrderList {...callOrder} {...rowProps} />
+            ) : (
+              sections.map((section, i) => (
+                <SectionGroup key={section.id} section={section} className={cn(i > 0 && "mt-2")} {...rowProps} />
+              ))
+            )}
+          </>
         )}
       </div>
     </div>
@@ -149,6 +165,52 @@ function TabButton({
         />
       )}
     </button>
+  );
+}
+
+function OrderButton({ active, onClick, label, hint }: { active: boolean; onClick: () => void; label: string; hint: string }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      title={hint}
+      onClick={onClick}
+      className={cn(
+        "h-6 rounded-md px-2 text-[12px] transition-colors",
+        active ? "bg-bg-hover font-medium text-fg" : "text-fg-subtle hover:bg-bg-hover hover:text-fg-muted",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** Files below the ones whose changes use them, then the files no other change touches. */
+function CallOrderList({ ordered, unconnected, ...props }: Omit<RowProps, "depth"> & { ordered: OrderedFile[]; unconnected: ChangedFile[] }) {
+  const node = (file: ChangedFile): Extract<TreeNode, { type: "file" }> => ({ type: "file", name: splitPath(file.path).base, path: file.path, file });
+  return (
+    <>
+      <ul>
+        {ordered.map(({ file, depth }) => (
+          <li key={file.path}>
+            <FileRow node={node(file)} depth={depth} called={depth > 0} {...props} />
+          </li>
+        ))}
+      </ul>
+      {unconnected.length > 0 && (
+        <>
+          <p className="mt-3 mb-1 px-2 text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">Not connected</p>
+          <ul>
+            {unconnected.map((file) => (
+              <li key={file.path}>
+                <FileRow node={node(file)} depth={0} {...props} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </>
   );
 }
 
@@ -238,7 +300,12 @@ function FileRow({
   commentCounts,
   unreadPaths,
   onSelect,
-}: RowProps & { node: Extract<TreeNode, { type: "file" }> }) {
+  called = false,
+}: RowProps & {
+  node: Extract<TreeNode, { type: "file" }>;
+  /** In call order, below a file whose changes use it. */
+  called?: boolean;
+}) {
   const comments = commentCounts.get(node.path) ?? 0;
   const unread = unreadPaths.has(node.path);
   const viewed = useStore((s) => !!s.viewed[worktreeId]?.[node.path]);
@@ -256,6 +323,7 @@ function FileRow({
       ref={ref}
       type="button"
       onClick={() => onSelect(node.path)}
+      title={node.path === node.name ? undefined : node.path}
       style={indent(depth)}
       className={cn(
         "group flex h-7 w-full items-center gap-2 rounded-md pr-2 text-left text-[12.5px] transition-colors",
@@ -263,7 +331,7 @@ function FileRow({
       )}
     >
       {/* Aligns file names with folder names, which have a chevron in this slot. */}
-      <span className="w-3 shrink-0" />
+      {called ? <CornerDownRight className="size-3 shrink-0 text-fg-faint" /> : <span className="w-3 shrink-0" />}
       <StatusLetter status={file.status} />
       <span className={cn("truncate", viewed && !active && "text-fg-subtle")}>{node.name}</span>
       {comments > 0 && (

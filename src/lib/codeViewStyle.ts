@@ -95,6 +95,15 @@ export const unsafeCSS = /* css */ `
   [data-column-number][data-commented] {
     box-shadow: inset 3px 0 0 var(--accent);
   }
+  /* Moved lines that are the same as before (see components/Structure.tsx): tinted as moved, not
+     as written. */
+  [data-moved] {
+    background-color: color-mix(in oklab, var(--merged) 9%, var(--bg)) !important;
+  }
+  [data-column-number][data-moved] {
+    background-color: color-mix(in oklab, var(--merged) 18%, var(--bg)) !important;
+    color: var(--fg-faint);
+  }
   /* ⌘F matches, painted with the CSS Custom Highlight API (see lib/search.ts). */
   ::highlight(review-find) {
     background-color: color-mix(in oklab, var(--mod) 38%, transparent);

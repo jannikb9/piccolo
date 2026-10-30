@@ -17,10 +17,15 @@ pub type Keep = HashMap<String, Vec<LineRange>>;
 /// Unchanged lines shown above and below kept ones, as git shows around changes.
 const CONTEXT: u32 = 3;
 
-/// `shown` with the `keep` lines of its files added as context. `raw` is the patch before anything
-/// was left out of it (import changes), which tells which lines are unchanged.
-pub fn keep_lines(wt: &Path, range: &DiffRange, raw: &str, shown: &str, keep: &Keep) -> Result<String> {
-    if keep.is_empty() {
+/// Single lines to show by the file's (new) path, without lines around them: the first lines of
+/// changed functions, so the reviewer sees what a change is in.
+pub type Headers = HashMap<String, BTreeSet<u32>>;
+
+/// `shown` with the `keep` lines and `headers` of its files added as context. `raw` is the patch
+/// before anything was left out of it (import changes, moved lines), which tells which lines are
+/// unchanged.
+pub fn keep_lines(wt: &Path, range: &DiffRange, raw: &str, shown: &str, keep: &Keep, headers: &Headers) -> Result<String> {
+    if keep.is_empty() && headers.is_empty() {
         return Ok(shown.to_string());
     }
     let raw_files = split_files(raw);
@@ -35,7 +40,10 @@ pub fn keep_lines(wt: &Path, range: &DiffRange, raw: &str, shown: &str, keep: &K
             let (Some(_), Some(path)) = file.paths()? else { return None };
             let shown = parse_hunks(file)?;
             let raw = parse_hunks(raw_hunks.get(path)?)?;
-            let lines = wanted_lines(&raw, &shown, keep.get(path)?);
+            let mut lines = keep.get(path).map(|ranges| wanted_lines(&raw, &shown, ranges)).unwrap_or_default();
+            let is_shown = |line: u32| shown.iter().any(|h| (h.new..h.new_end()).contains(&line));
+            let header_lines = headers.get(path).into_iter().flatten().copied();
+            lines.extend(header_lines.filter(|&line| line > 0 && !is_shown(line) && unchanged(&raw, Side::Additions, line).is_some()));
             (!lines.is_empty()).then_some((path, shown, raw, lines))
         })();
         plans.push(plan);

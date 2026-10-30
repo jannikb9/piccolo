@@ -2,6 +2,7 @@
 //! identical to the user's terminal: same config, attributes, hooks-free reads, and worktree semantics.
 
 use crate::context::{self, Keep};
+use crate::{moves, symbols};
 use crate::imports;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -665,6 +666,10 @@ pub struct DiffPatch {
     pub range: DiffRange,
     /// Unified diff of every changed file, including untracked text files.
     pub patch: String,
+    /// Code moved from one place to another; the patch leaves out its removed lines.
+    pub moves: Vec<moves::Move>,
+    /// The functions, classes and types the patch changes.
+    pub symbols: Vec<symbols::Symbol>,
 }
 
 /// `keep` names the lines to show besides the changes, for the range compared (see context.rs).
@@ -686,8 +691,11 @@ pub fn diff_patch(
         }
     }
     let shown = if options.hide_imports { imports::filter_patch(wt, &range, &raw)? } else { raw.clone() };
-    let patch = context::keep_lines(wt, &range, &raw, &shown, &keep(&range))?;
-    Ok(DiffPatch { range, patch })
+    let (shown, moves) = moves::find(&shown);
+    // A diff git can't read the files of still shows, without symbols.
+    let symbols = symbols::changed(wt, &range, &shown).unwrap_or_default();
+    let patch = context::keep_lines(wt, &range, &raw, &shown, &keep(&range), &symbols::header_lines(&symbols))?;
+    Ok(DiffPatch { range, patch, moves, symbols })
 }
 
 /// Arguments for `git diff` of tracked files.

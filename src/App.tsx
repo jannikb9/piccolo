@@ -16,6 +16,7 @@ import { onToggleSidebar } from "./lib/api";
 import { hashString } from "./lib/diff";
 import { useChangedFiles, useDiffPatch, useDiffScope, useLiveGitData, useRepos, useThreads } from "./lib/queries";
 import { groupIntoSections } from "./lib/sections";
+import { filesByCalls } from "./lib/structure";
 import { orderedWorktrees, resolveSelection, useDiffOptions, useStore } from "./store";
 import type { GeneralThread, Thread, Worktree } from "./types";
 
@@ -63,11 +64,17 @@ export default function App() {
     for (const t of threads) if (!t.resolved) counts.set(t.path, (counts.get(t.path) ?? 0) + 1);
     return counts;
   }, [threads]);
-  // Files grouped into Implementation / Tests / Changesets; the diff follows the same order.
-  const { sections, files } = useMemo(() => {
+  // Files grouped into Implementation / Tests / Changesets, or in the order their changes call each
+  // other; the diff follows the same order.
+  const sortByCalls = useStore((s) => s.sortByCalls);
+  const symbols = patchQuery.data?.symbols;
+  const { sections, callOrder, files } = useMemo(() => {
     const sections = groupIntoSections(filesQuery.data ?? []);
-    return { sections, files: sections.flatMap((s) => s.files) };
-  }, [filesQuery.data]);
+    const byFolder = sections.flatMap((s) => s.files);
+    const callOrder = symbols?.some((s) => s.uses.length > 0) ? filesByCalls(byFolder, symbols) : null;
+    const files = sortByCalls && callOrder ? [...callOrder.ordered.map((o) => o.file), ...callOrder.unconnected] : byFolder;
+    return { sections, callOrder, files };
+  }, [filesQuery.data, symbols, sortByCalls]);
   const viewed = useStore((s) => (worktree ? s.viewed[worktree.id] : undefined));
   const viewedCount = files.filter((f) => viewed?.[f.path]).length;
 
@@ -104,6 +111,7 @@ export default function App() {
               worktree={worktree}
               worktreeId={worktree?.id ?? ""}
               sections={sections}
+              callOrder={callOrder}
               fileCount={files.length}
               viewedCount={viewedCount}
               commentCounts={commentCounts}
